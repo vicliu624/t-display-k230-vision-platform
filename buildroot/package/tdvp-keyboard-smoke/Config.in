@@ -1,0 +1,17 @@
+config BR2_PACKAGE_TDVP_KEYBOARD_SMOKE
+	bool "tdvp-keyboard-smoke"
+	depends on BR2_TOOLCHAIN_HEADERS_AT_LEAST_3_0
+	select BR2_PACKAGE_LIBGPIOD
+	help
+	  Install the TDVP T-Display K230 keyboard smoke test.
+
+	  This is a validation-only tool. It talks to the TCA8418 keyboard
+	  controller through Linux i2c-dev and can pulse the LilyGO demo's
+	  reset GPIO through libgpiod, to prove the keyboard hardware can be
+	  detected and key events can be read before a stable BSP input API
+	  exists.
+
+	  It is not part of the public application API.
+
+comment "tdvp-keyboard-smoke needs kernel headers >= 3.0"
+	depends on !BR2_TOOLCHAIN_HEADERS_AT_LEAST_3_0

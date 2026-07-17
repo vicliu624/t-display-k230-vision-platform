@@ -1,0 +1,8 @@
+menu "T-Display K230 Vision Platform"
+
+source "$BR2_EXTERNAL_TDVP_PATH/package/tdvp-display-smoke/Config.in"
+source "$BR2_EXTERNAL_TDVP_PATH/package/tdvp-keyboard-smoke/Config.in"
+source "$BR2_EXTERNAL_TDVP_PATH/package/tdvp-k230-iomux/Config.in"
+source "$BR2_EXTERNAL_TDVP_PATH/package/tdvp-board-init/Config.in"
+
+endmenu

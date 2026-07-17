@@ -1,0 +1,10 @@
+config BR2_PACKAGE_TDVP_BOARD_INIT
+	bool "tdvp-board-init"
+	select BR2_PACKAGE_KMOD
+	select BR2_PACKAGE_TDVP_K230_IOMUX
+	help
+	  Install early TDVP board initialization scripts for the
+	  T-Display K230 Buildroot image.
+
+	  This package is for platform bring-up only. It loads board modules
+	  that cannot rely on a full desktop/distro hotplug stack.

@@ -1,0 +1,5 @@
+[submodule "buildroot/buildroot"]
+	path = buildroot/buildroot
+	url = https://gitlab.com/buildroot.org/buildroot.git
+	shallow = true
+	ignore = dirty

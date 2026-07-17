@@ -1,0 +1,9 @@
+tdvp_boot_artifacts_manifest_version=1
+generated_utc=2026-07-16T00:00:00Z
+sdk_images_dir=/home/user/k230_linux_sdk/output/k230_canmv_v3_defconfig/images
+import_command=buildroot/board/t-display-k230/tools/import-boot-artifacts.sh /home/user/k230_linux_sdk/output/k230_canmv_v3_defconfig/images /home/user/t-display-k230-vision-platform/buildroot/board/t-display-k230/boot-artifacts
+
+[files]
+<sha256>  spl.bin
+<sha256>  u-boot.bin
+<sha256>  fw_jump_add_uboot_head.bin

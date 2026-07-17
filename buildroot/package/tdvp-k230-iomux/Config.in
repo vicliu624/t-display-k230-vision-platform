@@ -1,0 +1,8 @@
+config BR2_PACKAGE_TDVP_K230_IOMUX
+	bool "tdvp-k230-iomux"
+	help
+	  Install a small K230 IOMUX validation helper.
+
+	  This is a bring-up tool, not an application API.  It is used to
+	  mirror the LilyGO demo pinmux sequence until the K230 IOMUX path is
+	  represented cleanly by kernel pinctrl and device tree.

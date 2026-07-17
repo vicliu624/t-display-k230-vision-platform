@@ -1,0 +1,30 @@
+#!/bin/sh
+
+case "$1" in
+	start)
+		echo "Loading TDVP board modules..."
+		if command -v tdvp-k230-iomux >/dev/null 2>&1; then
+			tdvp-k230-iomux keyboard || \
+				echo "tdvp-modules: keyboard IOMUX preset failed"
+		fi
+		for module in goodix_ts 8189fs; do
+			modprobe "$module" 2>/dev/null || \
+				echo "tdvp-modules: ${module} not loaded"
+		done
+		if ip link show eth0 >/dev/null 2>&1; then
+			ip link set eth0 up 2>/dev/null || true
+			udhcpc -i eth0 -n -q -t 5 >/var/log/tdvp-eth0-udhcpc.log 2>&1 &
+		fi
+		;;
+	stop)
+		;;
+	restart|reload)
+		"$0" start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+exit 0
