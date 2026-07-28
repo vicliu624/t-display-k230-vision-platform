@@ -1,0 +1,3 @@
+# mkenvimage treats LF as the environment-entry separator. Keep this source
+# file LF-only on every checkout, including Windows hosts.
+buildroot/board/t-display-k230/uboot-linux.env text eol=lf

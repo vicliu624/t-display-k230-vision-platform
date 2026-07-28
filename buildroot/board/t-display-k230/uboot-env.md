@@ -58,6 +58,25 @@ buildroot/board/t-display-k230/uboot-linux.env
 
 Do not edit generated files under `output/` to change boot behavior.
 
+## Source Encoding and Line Endings
+
+`uboot-linux.env` is a machine-readable input to `mkenvimage`, not a shell
+script. It **must use LF line endings**. `mkenvimage` replaces each LF with a
+NUL separator but retains a preceding CR byte from Windows CRLF input. That
+turns an entry such as `mmc_boot_dev_num=1` into `mmc_boot_dev_num=1\\r`, which
+can invalidate U-Boot environment type checks and make a boot command expand
+to an invalid MMC device.
+
+TDVP protects this contract in two places:
+
+- `.gitattributes` checks out this source with LF line endings;
+- `post-image.sh` rejects a source that still contains a CR byte.
+
+The U-Boot environment used by the selected K230 SDK layout occupies the raw
+SD-card range beginning at `0x1e0000` and has size `0x10000`. A flashing or
+repair procedure must write the generated `uboot-env.bin` to that exact range;
+the boot and rootfs GPT partitions do not replace it.
+
 ## Rules
 
 - Do not expose U-Boot commands to applications.
@@ -75,3 +94,6 @@ The U-Boot environment is accepted when:
 - Linux receives the intended command line;
 - Linux mounts the Buildroot rootfs;
 - the environment source is tracked or its binary provenance is pinned.
+- the generated binary contains NUL-separated entries with no `CR` byte before
+  an entry terminator; and
+- a cold boot reaches the Linux login prompt without interactive U-Boot input.

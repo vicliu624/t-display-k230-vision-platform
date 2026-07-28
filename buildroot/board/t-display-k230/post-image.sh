@@ -9,6 +9,16 @@ SYSIMAGE="${BINARIES_DIR}/sysimage-sdcard.img"
 SDK_DTB="${TDVP_DTB:-tdisplay-k230.dtb}"
 BOOT_DIR="${BINARIES_DIR}/boot"
 
+if LC_ALL=C grep -q "$(printf '\r')" "${BOARD_DIR}/uboot-linux.env"; then
+	cat >&2 <<EOF
+TDVP: ${BOARD_DIR}/uboot-linux.env contains CR (Windows CRLF) bytes.
+TDVP: mkenvimage preserves CR bytes inside environment values, which makes
+TDVP: the persisted U-Boot environment invalid. Convert the file to LF and
+TDVP: rebuild; see board/t-display-k230/uboot-env.md.
+EOF
+	exit 1
+fi
+
 missing=0
 
 require_file() {

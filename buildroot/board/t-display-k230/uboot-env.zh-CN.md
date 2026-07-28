@@ -57,6 +57,22 @@ buildroot/board/t-display-k230/uboot-linux.env
 
 不要通过修改 `output/` 下的生成文件改变 boot behavior。
 
+## 源文件编码与换行
+
+`uboot-linux.env` 是 `mkenvimage` 的机器可读输入，而不是 shell script。它**必须使用
+LF 换行**。如果输入是 Windows CRLF，`mkenvimage` 会把 LF 替换成 NUL 分隔符，但会保留
+前面的 CR 字节。这样 `mmc_boot_dev_num=1` 会变为 `mmc_boot_dev_num=1\\r`，从而使
+U-Boot environment 的类型校验失效，并可能让启动命令展开为无效的 MMC device。
+
+TDVP 在两层保护这个约束：
+
+- `.gitattributes` 保证该源文件 checkout 时使用 LF；
+- `post-image.sh` 在发现源文件仍含 CR 字节时拒绝生成镜像。
+
+当前 K230 SDK layout 使用的 U-Boot environment 位于 SD 卡 raw offset `0x1e0000`，大小
+为 `0x10000`。烧录或修复时必须将生成的 `uboot-env.bin` 写入这个精确范围；仅替换 GPT
+中的 boot 与 rootfs partition 不会更新它。
+
 ## 规则
 
 - 不向 applications 暴露 U-Boot commands。
@@ -73,3 +89,5 @@ U-Boot environment 满足以下条件才算接受：
 - Linux 收到预期 command line；
 - Linux 挂载 Buildroot rootfs；
 - environment source 已跟踪，或 binary provenance 已固定。
+- 生成的 binary 使用 NUL 分隔 environment entries，且 entry terminator 前不含 `CR`；
+- cold boot 无需 interactive U-Boot input 即可到达 Linux login prompt。
