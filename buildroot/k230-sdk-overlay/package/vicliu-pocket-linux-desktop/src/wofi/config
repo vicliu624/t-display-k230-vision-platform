@@ -1,0 +1,12 @@
+allow_images=true
+columns=3
+content_halign=fill
+filter_rate=100
+height=420
+insensitive=true
+matching=fuzzy
+orientation=horizontal
+prompt=Applications
+show=drun
+term=foot
+width=860

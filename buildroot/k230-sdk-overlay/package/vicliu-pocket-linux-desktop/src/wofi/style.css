@@ -1,0 +1,46 @@
+window {
+  background-color: rgba(24, 28, 32, 0.96);
+  border: 3px solid #ef6b35;
+  color: #f5efe3;
+  font-family: "DejaVu Sans";
+  font-size: 22px;
+}
+
+#input {
+  margin: 20px;
+  min-height: 56px;
+  padding: 10px 18px;
+  border: 2px solid #f5efe3;
+  border-radius: 0;
+  background: #f5efe3;
+  color: #1d2023;
+}
+
+#outer-box {
+  margin: 10px;
+}
+
+#scroll {
+  margin: 0 10px 10px;
+}
+
+#entry {
+  min-height: 74px;
+  margin: 6px;
+  padding: 10px 16px;
+  border: 1px solid #6d7379;
+}
+
+#entry:selected {
+  background-color: #ef6b35;
+  border-color: #f5efe3;
+  color: #1d2023;
+}
+
+#img {
+  margin-right: 16px;
+}
+
+#text {
+  margin: 0 8px;
+}

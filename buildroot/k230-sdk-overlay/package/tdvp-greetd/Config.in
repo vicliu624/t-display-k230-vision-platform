@@ -1,0 +1,9 @@
+config BR2_PACKAGE_TDVP_GREETD
+	bool "greetd login manager"
+	depends on BR2_INIT_SYSTEMD
+	depends on BR2_PACKAGE_LINUX_PAM
+	help
+	  Install the greetd PAM login manager used by the graphical session.
+
+comment "greetd login manager needs systemd and Linux-PAM"
+	depends on !BR2_INIT_SYSTEMD || !BR2_PACKAGE_LINUX_PAM

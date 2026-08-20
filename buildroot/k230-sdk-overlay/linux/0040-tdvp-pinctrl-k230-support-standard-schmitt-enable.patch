@@ -1,0 +1,20 @@
+diff --git a/drivers/pinctrl/canaan/pinctrl-k230-iomux.c b/drivers/pinctrl/canaan/pinctrl-k230-iomux.c
+index f0cf38d..f4b9026 100644
+--- a/drivers/pinctrl/canaan/pinctrl-k230-iomux.c
++++ b/drivers/pinctrl/canaan/pinctrl-k230-iomux.c
+@@ -233,6 +233,7 @@
+ 		/* Output value is not directly accessible, return current IE/OE state */
+ 		return -ENOTSUPP;
+ 	case PIN_CONFIG_INPUT_SCHMITT:
++	case PIN_CONFIG_INPUT_SCHMITT_ENABLE:
+ 		*config = (val & K230_ST_BITS) ? 1 : 0;
+ 		return 0;
+ 	default:
+@@ -285,6 +286,7 @@
+ 				val |= K230_OE_BITS;
+ 			break;
+ 		case PIN_CONFIG_INPUT_SCHMITT:
++		case PIN_CONFIG_INPUT_SCHMITT_ENABLE:
+ 			val &= ~K230_ST_BITS;
+ 			if (arg)
+ 				val |= K230_ST_BITS;

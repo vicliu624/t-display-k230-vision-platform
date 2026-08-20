@@ -1,0 +1,33 @@
+From 61d9501d0f03feec9dd70c8f10280312f69be26a Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@vicliu-pocket-linux.local>
+Date: Fri, 14 Aug 2026 19:24:00 +0800
+Subject: [PATCH] wscript: use a callable option type with Python 3.13
+
+Python 3.13 no longer accepts optparse's legacy string alias in the
+argparse compatibility path used by Waf.  mpv 0.35.1 uses the alias for
+its installation-directory options, making configuration fail before the
+target package is built.
+
+Use the equivalent Python callable so Waf works with both older Python
+versions and Python 3.13.
+
+Signed-off-by: TDVP Build <build@vicliu-pocket-linux.local>
+---
+ wscript | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/wscript b/wscript
+index 61f47a6d5c..c24e3d8c6e 100644
+--- a/wscript
++++ b/wscript
+@@ -938,7 +938,7 @@ def options(ctx):
+     group = opt.get_option_group("Installation directories")
+     for ident, default, desc in _INSTALL_DIRS_LIST:
+         group.add_option('--{0}'.format(ident),
+-            type    = 'string',
++            type    = str,
+             dest    = ident,
+             default = default,
+             help    = 'directory for installing {0} [{1}]' \
+-- 
+2.43.0

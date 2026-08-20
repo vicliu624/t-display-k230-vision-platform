@@ -1,0 +1,25 @@
+config BR2_PACKAGE_VICLIU_POCKET_LINUX_DESKTOP
+	bool "Vicliu Pocket Linux desktop integration"
+	depends on BR2_INIT_SYSTEMD
+	select BR2_PACKAGE_ALSA_UTILS
+	select BR2_PACKAGE_FOOT
+	select BR2_PACKAGE_IW
+	select BR2_PACKAGE_MC
+	select BR2_PACKAGE_MPV
+	select BR2_PACKAGE_SUDO
+	select BR2_PACKAGE_V4L2GRAB
+	select BR2_PACKAGE_WOFI
+	select BR2_PACKAGE_WVKBD
+	select BR2_PACKAGE_WLR_RANDR
+	select BR2_PACKAGE_YAVTA
+	help
+	  Installs the Wayland-native Pocket Linux launchers, XDG desktop entries
+	  and privileged helper used by the T-Display K230 desktop profile.
+
+	  Each visible action is backed by a Linux device, service, or utility:
+	  Wi-Fi uses wpa_supplicant and systemd-networkd, display actions use the
+	  board hardware utility and wlr-randr, and media/camera actions inspect
+	  actual ALSA and V4L2 devices.
+
+comment "Vicliu Pocket Linux desktop integration needs systemd"
+	depends on !BR2_INIT_SYSTEMD

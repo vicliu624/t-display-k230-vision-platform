@@ -1,0 +1,21 @@
+#!/bin/sh
+
+# Labwc has opened the DRM backend before this standard XDG autostart hook is
+# evaluated. Keep the board-validated output transform in the session layer.
+attempt=0
+while [ "$attempt" -lt 40 ]; do
+	if /usr/bin/wlr-randr --output "$TDVP_K230_OUTPUT" \
+		--transform "$TDVP_K230_OUTPUT_TRANSFORM"; then
+		break
+	fi
+	attempt=$((attempt + 1))
+	sleep 0.05
+done
+
+# Keep the desktop quiet behind windows while carrying the same warm paper
+# language as the greeter. swaybg owns only the background; labwc continues
+# to own the compositor and sfwbar continues to own the panel.
+/usr/bin/swaybg -o "$TDVP_K230_OUTPUT" \
+	-i /usr/share/backgrounds/tdvp-pda-paper.svg -m fill \
+	>"${XDG_RUNTIME_DIR}/tdvp-swaybg.log" 2>&1 &
+/usr/local/bin/tdvp-sfwbar-session &

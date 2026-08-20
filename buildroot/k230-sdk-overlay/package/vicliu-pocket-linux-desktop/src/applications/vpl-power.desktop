@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Power
+Comment=Restart or power off the device
+Exec=vpl-power-menu
+Terminal=false
+Categories=System;
+Icon=system-shutdown

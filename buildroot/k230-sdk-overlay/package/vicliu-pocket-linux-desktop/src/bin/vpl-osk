@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+if pgrep -u "$(id -u)" -x wvkbd-mobintl >/dev/null 2>&1; then
+	pkill -u "$(id -u)" -x wvkbd-mobintl
+	exit 0
+fi
+
+exec /usr/bin/wvkbd-mobintl

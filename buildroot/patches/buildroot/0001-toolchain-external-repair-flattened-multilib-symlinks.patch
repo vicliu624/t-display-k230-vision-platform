@@ -1,0 +1,76 @@
+From 9c93a9f8c2362d7d00a0a68bffb3e8d4e39e6f1f Mon Sep 17 00:00:00 2001
+From: T-Display K230 Vision Platform <noreply@tdvp.local>
+Date: Wed, 5 Aug 2026 23:55:00 +0800
+Subject: [PATCH] toolchain: repair flattened external multilib symlinks
+
+The Xuantie 6.6.0 external toolchain stores glibc linker names below
+nested multilib directories such as usr/lib64xthead/lp64d.  Buildroot
+creates a compatibility symlink for that path before copying the sysroot.
+rsync subsequently writes the library entries into usr/lib, but several
+relative linker-name symlinks are reduced to ../../.  The resulting link
+resolves to the sysroot directory, so every consumer of -ldl, -lm and
+similar glibc linker names fails at link time.
+
+Repair only the collapsed links after the sysroot copy.  The versioned
+library link is already present in the same flattened directory, which is
+the correct link target.  Fail the staging step if any linker name still
+resolves to a directory.
+
+This patch is intentionally scoped to the external-toolchain staging path.
+It leaves the compiler, ABI, kernel, and target runtime libraries unchanged.
+
+Signed-off-by: T-Display K230 Vision Platform <noreply@tdvp.local>
+---
+ toolchain/toolchain-external/pkg-toolchain-external.mk | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/toolchain/toolchain-external/pkg-toolchain-external.mk b/toolchain/toolchain-external/pkg-toolchain-external.mk
+index 0f6d0df340..c7b1f05c43 100644
+--- a/toolchain/toolchain-external/pkg-toolchain-external.mk
++++ b/toolchain/toolchain-external/pkg-toolchain-external.mk
+@@ -471,6 +471,34 @@ define TOOLCHAIN_EXTERNAL_INSTALL_SYSROOT_LIBS
+ 	$(call copy_toolchain_sysroot,$${SYSROOT_DIR},$${ARCH_SYSROOT_DIR},$${ARCH_SUBDIR},$${ARCH_LIB_DIR},$${SUPPORT_LIB_DIR})
+ endef
+ 
++# Some multilib external toolchains store linker-name symlinks (for example
++# libdl.so) three levels below usr/.  When the architecture directory has
++# already been redirected to lib, rsync flattens the entry and the generic
++# symlink simplifier can reduce its target to ../../.  A linker must never
++# receive a directory in place of a linker script or shared object.
++define TOOLCHAIN_EXTERNAL_REPAIR_FLATTENED_MULTILIB_SYMLINKS
++	$(Q)set -e; \
++	for link in $$(find $(STAGING_DIR)/usr/lib -maxdepth 1 -type l -name '*.so' -print); do \
++		target=$$(readlink "$${link}"); \
++		if [ "$${target}" != '../../' ]; then \
++			continue; \
++		fi; \
++		name=$$(basename "$${link}"); \
++		candidate=$$(find -L "$$(dirname "$${link}")" -maxdepth 1 -type f -name "$${name}.*" -printf '%f\n' | sort | head -n 1); \
++		if [ -z "$${candidate}" ]; then \
++			echo "external toolchain: cannot repair collapsed symlink $${link}" >&2; \
++			exit 1; \
++		fi; \
++		ln -snf "$${candidate}" "$${link}"; \
++	done; \
++	for link in $$(find $(STAGING_DIR)/usr/lib -maxdepth 1 -type l -name '*.so' -print); do \
++		if [ ! -f "$${link}" ]; then \
++			echo "external toolchain: linker symlink does not resolve to a regular file: $${link}" >&2; \
++			exit 1; \
++		fi; \
++	done
++endef
++
+ # Create a symlink from (usr/)$(ARCH_LIB_DIR) to lib.
+ # Note: the skeleton package additionally creates lib32->lib or lib64->lib
+ # (as appropriate)
+@@ -615,6 +638,7 @@ $(2)_BUILD_CMDS = $$(TOOLCHAIN_WRAPPER_BUILD)
+ define $(2)_INSTALL_STAGING_CMDS
+ 	$$(TOOLCHAIN_WRAPPER_INSTALL)
+ 	$$(TOOLCHAIN_EXTERNAL_CREATE_STAGING_LIB_SYMLINK)
+ 	$$(TOOLCHAIN_EXTERNAL_INSTALL_SYSROOT_LIBS)
++	$$(TOOLCHAIN_EXTERNAL_REPAIR_FLATTENED_MULTILIB_SYMLINKS)
+ 	$$(TOOLCHAIN_EXTERNAL_GLIBC_NO_LIBCRYPT)
+ 	$$(TOOLCHAIN_EXTERNAL_INSTALL_WRAPPER)
+ 	$$(TOOLCHAIN_EXTERNAL_INSTALL_GDBINIT)
+-- 
+2.43.0

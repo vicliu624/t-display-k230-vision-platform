@@ -1,0 +1,24 @@
+config BR2_PACKAGE_TDVP_LABWC_DESKTOP
+	bool "TDVP Labwc desktop session"
+	depends on BR2_INIT_SYSTEMD
+	select BR2_PACKAGE_DBUS
+	select BR2_PACKAGE_FOOT
+	select BR2_PACKAGE_GTK_LAYER_SHELL
+	select BR2_PACKAGE_LABWC
+	select BR2_PACKAGE_LIBRSVG
+	select BR2_PACKAGE_LIBGTK3
+	select BR2_PACKAGE_LIBGTK3_WAYLAND
+	select BR2_PACKAGE_SEATD
+	select BR2_PACKAGE_SFWBAR
+	select BR2_PACKAGE_SWAYBG
+	select BR2_PACKAGE_WLR_RANDR
+	help
+	  Install the T-Display K230's standard Labwc desktop session.
+
+	  Labwc provides the Wayland compositor, swaybg provides the background,
+	  sfwbar provides the standard launcher and taskbar, and foot is the
+	  default terminal. The package contains the XDG and systemd configuration
+	  for authenticated image desktop sessions.
+
+comment "TDVP Labwc desktop session needs systemd"
+	depends on !BR2_INIT_SYSTEMD

@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+labwc_pid=""
+
+cleanup() {
+	if [ -n "${labwc_pid}" ] && kill -0 "${labwc_pid}" 2>/dev/null; then
+		kill "${labwc_pid}" 2>/dev/null || true
+		wait "${labwc_pid}" 2>/dev/null || true
+	fi
+}
+
+trap cleanup EXIT HUP INT TERM
+
+/usr/bin/labwc &
+labwc_pid="$!"
+
+# The board's physical DSI orientation is an output property.  Keeping the
+# same transform as the authenticated Labwc session ensures a login screen
+# and desktop use one coordinate system.
+attempt=0
+while [ "${attempt}" -lt 80 ]; do
+	if /usr/bin/wlr-randr --output "${TDVP_K230_OUTPUT}" \
+		--transform "${TDVP_K230_OUTPUT_TRANSFORM}"; then
+		break
+	fi
+	attempt=$((attempt + 1))
+	sleep 0.05
+done
+
+if [ "${attempt}" -eq 80 ]; then
+	echo "tdvp-greeter: could not configure ${TDVP_K230_OUTPUT}" >&2
+	exit 1
+fi
+
+/usr/bin/gtkgreet \
+	--layer-shell \
+	--command /usr/local/bin/tdvp-labwc-session \
+	--style /etc/greetd/gtkgreet.css

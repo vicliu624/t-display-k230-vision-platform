@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+if [ ! -c /dev/video0 ]; then
+	exec /usr/bin/foot --title Camera -e sh -c \
+		'echo "No V4L2 camera is available at /dev/video0."; read -r _'
+fi
+
+exec /usr/bin/mpv --profile=low-latency --untimed \
+	--demuxer-lavf-o=video_size=640x480,input_format=yuyv422 \
+	av://v4l2:/dev/video0

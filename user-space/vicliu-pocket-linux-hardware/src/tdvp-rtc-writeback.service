@@ -1,0 +1,10 @@
+[Unit]
+Description=Write synchronized system time to the K230 hardware clock
+After=systemd-timesyncd.service
+ConditionPathExists=/dev/rtc0
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/bin/test -e /run/systemd/timesync/synchronized
+ExecStart=/usr/sbin/hwclock --systohc --utc
+SuccessExitStatus=1

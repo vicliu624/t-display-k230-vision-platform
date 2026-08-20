@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<labwc_config xmlns="https://labwc.github.io/schema/rc-xml">
+  <core>
+    <decoration>none</decoration>
+  </core>
+  <mouse>
+    <context name="Root">
+      <mousebind button="Left" action="Press">
+        <action name="None" />
+      </mousebind>
+      <mousebind button="Middle" action="Press">
+        <action name="None" />
+      </mousebind>
+      <mousebind button="Right" action="Press">
+        <action name="None" />
+      </mousebind>
+    </context>
+  </mouse>
+  <touch>
+    <deviceName>Goodix GT9895 Touchscreen</deviceName>
+    <mapToOutput>DSI-1</mapToOutput>
+    <mouseEmulation>yes</mouseEmulation>
+  </touch>
+</labwc_config>

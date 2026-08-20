@@ -1,3 +1,21 @@
-# mkenvimage treats LF as the environment-entry separator. Keep this source
-# file LF-only on every checkout, including Windows hosts.
-buildroot/board/t-display-k230/uboot-linux.env text eol=lf
+# Build inputs execute in the Linux SDK worktree. Keep their bytes independent
+# of the host Git checkout so PowerShell and WSL cannot introduce CRLF.
+.gitattributes text eol=lf
+*.sh text eol=lf
+*.mk text eol=lf
+*.patch text eol=lf
+*.config text eol=lf
+*.conf text eol=lf
+*.ini text eol=lf
+*.toml text eol=lf
+*.xml text eol=lf
+*.css text eol=lf
+*.desktop text eol=lf
+Config.in text eol=lf
+Makefile text eol=lf
+
+/buildroot/tools/* text eol=lf
+/buildroot/k230-sdk-overlay/configs/* text eol=lf
+/user-space/**/src/autostart text eol=lf
+/user-space/**/src/environment text eol=lf
+/user-space/**/src/tdvp-* text eol=lf

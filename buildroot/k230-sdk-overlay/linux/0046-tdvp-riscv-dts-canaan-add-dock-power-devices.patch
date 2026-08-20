@@ -1,0 +1,22 @@
+diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+--- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
++++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+@@ -96,6 +96,18 @@
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;
+ 
++		dock_gpio: gpio-expander@20 {
++			compatible = "nxp,pca9555";
++			reg = <0x20>;
++			gpio-controller;
++			#gpio-cells = <2>;
++		};
++
++		dock_fuel_gauge: fuel-gauge@55 {
++			compatible = "ti,bq27220";
++			reg = <0x55>;
++		};
++
+ 		keyboard: keypad@34 {
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&tdvp_keyboard_reset_pin>;

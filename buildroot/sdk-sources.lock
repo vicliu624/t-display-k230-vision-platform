@@ -1,0 +1,51 @@
+# T-Display K230 product session source lock.
+# This file records persistent inputs consumed by the active SDK staging flow.
+
+[k230_linux_sdk]
+source = https://github.com/kendryte/k230_linux_sdk.git
+commit = 5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7
+local_path = vendor/k230_linux_sdk
+
+[sdk_buildroot]
+version = 2025.02.1
+profile = k230_canmv_t_display_rm69a10_labwc_desktop_defconfig
+overlay = buildroot/k230-sdk-overlay
+
+[linux_kernel]
+source = https://github.com/ruyisdk/linux-xuantie-kernel.git
+commit = 7d4e1f444f461dbe3833bd99a4640e7b6c2cd529
+version = 6.6.36
+defconfig = k230
+dts = canaan/k230-canmv-rm69a10 canaan/k230-canmv-v3
+
+[lewis_rm69a10]
+source = https://github.com/lewisxhe/k230-t-display-linux-patches.git
+commit = cef00a992975ea4ed687bf44f04f633dad5087e6
+integration = canonical-LF verified queue entries 0026 through 0035
+
+[labwc]
+source = https://github.com/labwc/labwc.git
+commit = 9af441ecd36bbee66d4df46baa7b482872d989f2
+version = 0.8.4
+wlroots_abi = 0.18
+
+[greetd]
+source = https://git.sr.ht/~kennylevinsen/greetd
+commit = 08efe60feceea8c81f9571c666880ff1e1c2e3ff
+version = 0.10.3
+
+[gtkgreet]
+source = https://git.sr.ht/~kennylevinsen/gtkgreet
+commit = 7202ba6ec2334d64e1449e5f8310a63bd818d448
+version = 0.8
+
+[boot_firmware]
+opensbi_version = 1.4
+uboot_version = 2022.10
+uboot_board = k230_canmv_v3
+
+[image]
+artifact = sysimage-sdcard.img
+partition_table = gpt
+rootfs = ext4
+manifest = tdvp-image-manifest

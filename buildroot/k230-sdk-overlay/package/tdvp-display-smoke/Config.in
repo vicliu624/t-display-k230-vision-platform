@@ -1,0 +1,13 @@
+config BR2_PACKAGE_TDVP_DISPLAY_SMOKE
+	bool "tdvp-display-smoke"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_LIBDRM
+	help
+	  Install the TDVP board bring-up display validation tool.
+
+	  This validation-only target tool opens DRM/KMS directly and performs
+	  deterministic static patterns or bounded double-buffer atomic updates.
+	  This is a manual KMS diagnostic utility.
+
+comment "tdvp-display-smoke needs a toolchain w/ threads"
+	depends on !BR2_TOOLCHAIN_HAS_THREADS

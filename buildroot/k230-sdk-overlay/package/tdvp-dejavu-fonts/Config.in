@@ -1,0 +1,6 @@
+config BR2_PACKAGE_TDVP_DEJAVU_FONTS
+	bool "TDVP DejaVu TrueType fonts"
+	select BR2_PACKAGE_FONTCONFIG
+	help
+	  Install the DejaVu Sans family used by the Labwc desktop session,
+	  the SFWBar panel, Foot, and other Pango-based Wayland clients.

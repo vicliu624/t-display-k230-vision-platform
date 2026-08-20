@@ -1,5 +1,4 @@
-[submodule "buildroot/buildroot"]
-	path = buildroot/buildroot
-	url = https://gitlab.com/buildroot.org/buildroot.git
-	shallow = true
-	ignore = dirty
+[submodule "vendor/k230_linux_sdk"]
+	path = vendor/k230_linux_sdk
+	url = https://github.com/kendryte/k230_linux_sdk.git
+	branch = dev

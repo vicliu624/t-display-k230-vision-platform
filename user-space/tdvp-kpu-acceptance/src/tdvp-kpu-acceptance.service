@@ -1,0 +1,14 @@
+[Unit]
+Description=TDVP K230 AI2D and GNNE acceptance
+Requires=vicliu-pocket-linux-hardware.service
+Wants=systemd-udev-settle.service
+After=systemd-udev-settle.service vicliu-pocket-linux-hardware.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tdvp-kpu-smoke
+RemainAfterExit=yes
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

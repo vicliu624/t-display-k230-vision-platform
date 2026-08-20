@@ -1,0 +1,16 @@
+CONFIG_INPUT_MATRIXKMAP=y
+CONFIG_KEYBOARD_TCA8418=y
+CONFIG_GPIO_PCA953X=y
+CONFIG_I2C_GPIO=y
+
+# The physical RM69A10 is portrait-native, while the T-Display enclosure is
+# used in landscape. Keep the Linux console fixed at 90 degrees
+# counterclockwise, independently of the detachable keyboard state.
+#
+# The vendor U-Boot environment supplies the root-device arguments.  EXTEND
+# preserves those arguments while making both the serial and LCD consoles
+# explicit in the kernel image itself. The LCD console is available as soon as
+# DRM fbdev registers fb0; the serial console remains the recovery path.
+CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y
+CONFIG_CMDLINE="console=ttyS0,115200 console=tty0 earlycon=sbi fbcon=rotate:3 systemd.show_status=true"
+CONFIG_CMDLINE_EXTEND=y

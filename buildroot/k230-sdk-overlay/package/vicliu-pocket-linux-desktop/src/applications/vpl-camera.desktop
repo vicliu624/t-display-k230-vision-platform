@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Camera
+Comment=Preview the V4L2 camera
+Exec=vpl-camera
+Terminal=false
+Categories=AudioVideo;Utility;
+Icon=camera-video

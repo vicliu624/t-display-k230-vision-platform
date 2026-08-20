@@ -1,0 +1,10 @@
+config BR2_PACKAGE_TDVP_WAYLAND_TOOLS
+	bool "tdvp Wayland acceptance tools"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_WAYLAND
+	select BR2_PACKAGE_WAYLAND_PROTOCOLS
+	help
+	  Install compact tools used to verify the actual composed Wayland output.
+
+comment "tdvp Wayland acceptance tools need a toolchain with threads"
+	depends on !BR2_TOOLCHAIN_HAS_THREADS

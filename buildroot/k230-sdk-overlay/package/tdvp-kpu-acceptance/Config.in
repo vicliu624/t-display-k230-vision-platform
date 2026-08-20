@@ -1,0 +1,11 @@
+config BR2_PACKAGE_TDVP_KPU_ACCEPTANCE
+	bool "TDVP K230 KPU acceptance"
+	depends on BR2_INIT_SYSTEMD
+	select BR2_PACKAGE_AI2D_KPU
+	help
+	  Run the pinned K230 AI2D and GNNE kmodel acceptance workload at boot.
+	  The service only records a pass after the model output matches the
+	  supplied reference result.
+
+comment "TDVP K230 KPU acceptance needs systemd"
+	depends on !BR2_INIT_SYSTEMD

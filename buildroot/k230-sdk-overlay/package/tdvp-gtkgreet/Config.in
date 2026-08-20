@@ -1,0 +1,12 @@
+config BR2_PACKAGE_TDVP_GTKGREET
+	bool "gtkgreet graphical PAM client"
+	depends on BR2_PACKAGE_LIBGTK3
+	depends on BR2_PACKAGE_LINUX_PAM
+	depends on BR2_PACKAGE_DBUS
+	depends on BR2_PACKAGE_WAYLAND
+	depends on BR2_PACKAGE_GTK_LAYER_SHELL
+	help
+	  Install the GTK Wayland client for greetd.
+
+comment "gtkgreet needs GTK3, gtk-layer-shell, Linux-PAM, D-Bus and Wayland"
+	depends on !BR2_PACKAGE_LIBGTK3 || !BR2_PACKAGE_GTK_LAYER_SHELL || !BR2_PACKAGE_LINUX_PAM || !BR2_PACKAGE_DBUS || !BR2_PACKAGE_WAYLAND

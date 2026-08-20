@@ -1,0 +1,5 @@
+# Locally verified from the release archive fetched from the project's GitHub
+# tag.  Keep source and license hashes alongside the package recipe so a
+# release build cannot silently accept a changed upstream tarball.
+sha256  4cd4e32490fba7913a9053645ce2a8d453c596bb3dd780631b8656d746327de6  wvkbd-v0.18.tar.gz
+sha256  d76b274150e7d67fccb87383bd1f2043f3e47020b616351dc027d9c7cd909a37  COPYING

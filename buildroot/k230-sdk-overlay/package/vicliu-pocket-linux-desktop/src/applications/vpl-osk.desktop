@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=On-Screen Keyboard
+Comment=Toggle the touch keyboard
+Exec=vpl-osk
+Terminal=false
+Categories=Utility;Accessibility;
+Icon=input-keyboard

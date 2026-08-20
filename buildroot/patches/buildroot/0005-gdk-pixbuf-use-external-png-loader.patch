@@ -1,0 +1,32 @@
+From 08cc6a71df4a1d9ef7336f7cd837f9a5fb61a13a Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@tdvp.local>
+Date: Fri, 14 Aug 2026 11:42:00 +0800
+Subject: [PATCH] package/gdk-pixbuf: use the PNG loader module on target
+
+The K230 target currently identifies PNG files correctly but the builtin PNG
+loader dispatches to the SVG parser at decode time.  Keep PNG on GdkPixbuf's
+normal dynamic loader path instead: the target installs libpixbufloader-png.so
+and the host query tool writes the matching loader-cache entry.
+
+Build the host package with the same setting because Buildroot uses its query
+tool to generate the target loader cache.
+---
+ package/gdk-pixbuf/gdk-pixbuf.mk | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/package/gdk-pixbuf/gdk-pixbuf.mk b/package/gdk-pixbuf/gdk-pixbuf.mk
+index 38e9a9d415..0f4ba2b91d 100644
+--- a/package/gdk-pixbuf/gdk-pixbuf.mk
++++ b/package/gdk-pixbuf/gdk-pixbuf.mk
+@@ -29,6 +29,9 @@ HOST_GDK_PIXBUF_CONF_OPTS = \
+ 	-Drelocatable=true \
+ 	-Dman=false
+ 
++GDK_PIXBUF_CONF_OPTS += -Dbuiltin_loaders=none
++HOST_GDK_PIXBUF_CONF_OPTS += -Dbuiltin_loaders=none
++
+ ifeq ($(BR2_STATIC_LIBS),y)
+ GDK_PIXBUF_CONF_OPTS += -Dbuiltin_loaders=all
+ endif
+-- 
+2.43.0

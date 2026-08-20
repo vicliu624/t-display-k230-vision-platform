@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+choice="$(printf '%s\\n' \
+	'Display brightness 100%' \
+	'Display brightness 75%' \
+	'Display brightness 50%' \
+	'Display brightness 25%' \
+	'Keyboard brightness 100%' \
+	'Keyboard brightness 50%' \
+	'Keyboard backlight off' \
+	'Restore verified display orientation' |
+	/usr/bin/wofi --dmenu --prompt Display || true)"
+
+case "$choice" in
+	'Display brightness 100%') sudo /usr/local/libexec/vpl-desktopctl brightness display 100 ;;
+	'Display brightness 75%') sudo /usr/local/libexec/vpl-desktopctl brightness display 75 ;;
+	'Display brightness 50%') sudo /usr/local/libexec/vpl-desktopctl brightness display 50 ;;
+	'Display brightness 25%') sudo /usr/local/libexec/vpl-desktopctl brightness display 25 ;;
+	'Keyboard brightness 100%') sudo /usr/local/libexec/vpl-desktopctl brightness keyboard 100 ;;
+	'Keyboard brightness 50%') sudo /usr/local/libexec/vpl-desktopctl brightness keyboard 50 ;;
+	'Keyboard backlight off') sudo /usr/local/libexec/vpl-desktopctl brightness keyboard 0 ;;
+	'Restore verified display orientation')
+		/usr/bin/wlr-randr --output "${TDVP_K230_OUTPUT:-DSI-1}" \
+			--transform "${TDVP_K230_OUTPUT_TRANSFORM:-90}"
+		;;
+	*) exit 0 ;;
+esac

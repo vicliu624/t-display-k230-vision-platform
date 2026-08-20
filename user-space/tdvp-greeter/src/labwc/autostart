@@ -1,0 +1,3 @@
+#!/bin/sh
+# The graphical login surface intentionally has no desktop autostart.
+exit 0

@@ -1,0 +1,49 @@
+diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+--- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
++++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+@@ -108,6 +108,11 @@
+ 			reg = <0x55>;
+ 		};
+ 
++		dock_environment: sensor@38 {
++			compatible = "aosong,aht20";
++			reg = <0x38>;
++		};
++
+ 		keyboard: keypad@34 {
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&tdvp_keyboard_reset_pin>;
+diff --git a/drivers/hwmon/aht10.c b/drivers/hwmon/aht10.c
+--- a/drivers/hwmon/aht10.c
++++ b/drivers/hwmon/aht10.c
+@@ -56,6 +56,13 @@ static const struct i2c_device_id aht10_id[] = {
+ };
+ MODULE_DEVICE_TABLE(i2c, aht10_id);
+ 
++static const struct of_device_id aht10_of_match[] = {
++	{ .compatible = "aosong,aht10", .data = (void *)aht10 },
++	{ .compatible = "aosong,aht20", .data = (void *)aht20 },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, aht10_of_match);
++
+ /**
+  *   struct aht10_data - All the data required to operate an AHT10/AHT20 chip
+  *   @client: the i2c client associated with the AHT10/AHT20
+@@ -330,8 +338,7 @@ static const struct hwmon_chip_info aht10_chip_info = {
+ 
+ static int aht10_probe(struct i2c_client *client)
+ {
+-	const struct i2c_device_id *id = i2c_match_id(aht10_id, client);
+-	enum aht10_variant variant = id->driver_data;
++	enum aht10_variant variant = (uintptr_t)i2c_get_match_data(client);
+ 	struct device *device = &client->dev;
+ 	struct device *hwmon_dev;
+ 	struct aht10_data *data;
+@@ -378,5 +385,6 @@ static struct i2c_driver aht10_driver = {
+ 	.driver = {
+ 		.name = "aht10",
++		.of_match_table = aht10_of_match,
+ 	},
+ 	.probe      = aht10_probe,
+ 	.id_table   = aht10_id,

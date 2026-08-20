@@ -1,0 +1,20 @@
+diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+index 4b22922..e37c0d2 100644
+--- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
++++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+@@ -21,4 +21,15 @@
+ };
++
++/ {
++	sound {
++		status = "okay";
++		compatible = "canaan,k230-audio-inno";
++		canaan,model = "K230_I2S_INNO";
++		canaan,k230-i2s-controller = <&i2s>;
++		canaan,k230-audio-codec = <&inno_codec>;
++	};
++};
++
+ &uart0 { status = "okay"; };
+ &uart3 { status = "okay"; };
+ &mmc_sd1 {

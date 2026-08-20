@@ -1,0 +1,16 @@
+[Unit]
+Description=TDVP graphical login manager
+Wants=seatd.service dbus.service tdvp-keyboard-layout.service
+After=systemd-user-sessions.service systemd-udev-trigger.service seatd.service dbus.service tdvp-keyboard-layout.service vicliu-pocket-linux-hardware.service
+Before=getty@tty1.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/greetd
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
+Alias=display-manager.service

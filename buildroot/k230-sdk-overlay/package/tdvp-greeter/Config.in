@@ -1,0 +1,16 @@
+config BR2_PACKAGE_TDVP_GREETER
+	bool "TDVP graphical login session"
+	depends on BR2_INIT_SYSTEMD
+	depends on BR2_PACKAGE_LINUX_PAM
+	depends on BR2_PACKAGE_DBUS
+	depends on BR2_PACKAGE_LABWC
+	depends on BR2_PACKAGE_SEATD
+	depends on BR2_PACKAGE_TDVP_GREETD
+	depends on BR2_PACKAGE_TDVP_GTKGREET
+	depends on BR2_PACKAGE_WLR_RANDR
+	help
+	  Install the board-aware greetd session and the greeter compositor
+	  configuration for the T-Display K230.
+
+comment "TDVP graphical login session needs systemd, Linux-PAM, Labwc, seatd, wlr-randr, greetd and gtkgreet"
+	depends on !BR2_INIT_SYSTEMD || !BR2_PACKAGE_LINUX_PAM || !BR2_PACKAGE_DBUS || !BR2_PACKAGE_LABWC || !BR2_PACKAGE_SEATD || !BR2_PACKAGE_WLR_RANDR || !BR2_PACKAGE_TDVP_GREETD || !BR2_PACKAGE_TDVP_GTKGREET

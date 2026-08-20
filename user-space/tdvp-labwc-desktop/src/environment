@@ -1,0 +1,20 @@
+# DRM/KMS values are the board-validated output contract for the RM69A10 panel.
+WLR_BACKENDS=drm,libinput
+WLR_DRM_DEVICES=/dev/dri/card0
+# K230's vendor DRM driver is not backed by a Mesa DRI driver in this image.
+# Use wlroots' native pixman renderer so the compositor never falls back
+# through the unavailable canaan-drm EGL path.
+WLR_RENDERER=pixman
+WLR_DRM_NO_MODIFIERS=1
+WLR_RENDERER_ALLOW_SOFTWARE=1
+LIBSEAT_BACKEND=seatd
+XDG_SEAT=seat0
+XKB_DEFAULT_RULES=evdev
+XKB_DEFAULT_MODEL=pc105
+XKB_DEFAULT_LAYOUT=us
+XKB_DEFAULT_VARIANT=
+XKB_DEFAULT_OPTIONS=
+TDVP_K230_OUTPUT=DSI-1
+TDVP_K230_OUTPUT_TRANSFORM=90
+TDVP_LOGICAL_WIDTH=1232
+TDVP_LOGICAL_HEIGHT=568

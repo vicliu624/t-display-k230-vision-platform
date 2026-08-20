@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Display
+Comment=Set display and keyboard brightness
+Exec=vpl-display-menu
+Terminal=false
+Categories=Settings;HardwareSettings;
+Icon=video-display

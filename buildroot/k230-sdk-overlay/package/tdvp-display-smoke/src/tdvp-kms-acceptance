@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+state_dir=/run/tdvp/acceptance
+mkdir -p "$state_dir"
+
+if /usr/bin/tdvp-display-smoke --device /dev/dri/card0 --format XR24 \
+	--pattern grid --cell 48 --seconds 1 >"$state_dir/kms.log" 2>&1; then
+	echo pass >"$state_dir/kms.status"
+	cat "$state_dir/kms.log"
+	logger -t tdvp-kms-acceptance "KMS atomic XR24 acceptance passed" || true
+else
+	echo fail >"$state_dir/kms.status"
+	cat "$state_dir/kms.log" >&2
+	logger -t tdvp-kms-acceptance "KMS atomic XR24 acceptance failed" || true
+fi

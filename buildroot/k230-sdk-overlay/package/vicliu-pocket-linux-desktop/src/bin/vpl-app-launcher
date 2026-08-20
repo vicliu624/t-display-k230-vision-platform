@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+if /usr/bin/pidof wofi >/dev/null 2>&1; then
+	/bin/kill $(/usr/bin/pidof wofi)
+	exit 0
+fi
+
+[ -x /usr/bin/wofi ] || exit 1
+
+exec /usr/bin/wofi --show drun --allow-images --insensitive \
+	--prompt Applications

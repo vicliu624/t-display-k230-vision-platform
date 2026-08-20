@@ -1,0 +1,13 @@
+config BR2_PACKAGE_TDVP_WAYLAND_ACCEPTANCE
+	bool "tdvp-wayland-acceptance"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_LIBXKBCOMMON
+	select BR2_PACKAGE_WAYLAND
+	help
+	  Install a bounded Wayland client probe. It validates the compositor
+	  socket exposed by the TDVP graphical session, the advertised core
+	  interfaces, the Wayland keyboard keymap delivery and the evdev/us XKB
+	  configuration without opening DRM directly.
+
+comment "tdvp-wayland-acceptance needs a toolchain w/ threads"
+	depends on !BR2_TOOLCHAIN_HAS_THREADS

@@ -1,0 +1,11 @@
+[Unit]
+Description=TDVP T-Display K230 console keyboard map
+Before=getty.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/loadkeys /etc/tdvp/keymaps/t-display-k230.map
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

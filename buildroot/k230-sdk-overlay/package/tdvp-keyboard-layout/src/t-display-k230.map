@@ -1,0 +1,52 @@
+# T-Display K230 detachable keyboard virtual-console overlay.
+#
+# LilyGO's RT-Smart keyboard_ext.c selects these yellow glyphs while the
+# physical Shift key is held. It intentionally does not use the normal PC
+# uppercase Shift plane: Caps Lock provides the alphabetic uppercase mode.
+# Only Shift entries are replaced, so the kernel's existing non-Shift console
+# map and all TCA8418/evdev keyboard events remain untouched.
+#
+# The two physical FN keys are reported as KEY_FN. The reference source sets a
+# state flag for them but declares no FN layer, so no unverified mapping is
+# invented here.
+
+# Printed yellow number-row layer: Shift+1 through Shift+0.
+shift keycode 2 = U+0021
+shift keycode 3 = U+0040
+shift keycode 4 = U+0023
+shift keycode 5 = U+0024
+shift keycode 6 = U+0025
+shift keycode 7 = U+005E
+shift keycode 8 = U+0026
+shift keycode 9 = U+002A
+shift keycode 10 = U+0028
+shift keycode 11 = U+0029
+
+# Printed yellow alphabetic area. These are intentionally not the usual
+# uppercase characters; they reproduce the manufacturer mapping exactly.
+shift keycode 16 = U+0027
+shift keycode 17 = U+005F
+shift keycode 18 = U+002D
+shift keycode 19 = U+002B
+shift keycode 20 = U+003D
+shift keycode 21 = U+005C
+shift keycode 22 = U+007C
+shift keycode 23 = U+003B
+shift keycode 24 = U+003A
+shift keycode 25 = U+0022
+shift keycode 30 = U+007E
+shift keycode 31 = U+005B
+shift keycode 32 = U+005D
+shift keycode 33 = U+007B
+shift keycode 34 = U+007D
+shift keycode 35 = U+0027
+shift keycode 36 = U+0060
+shift keycode 37 = U+002F
+shift keycode 38 = U+003F
+shift keycode 44 = U+007A
+shift keycode 45 = U+0078
+shift keycode 46 = U+0063
+shift keycode 47 = U+0076
+shift keycode 48 = U+002E
+shift keycode 49 = U+003C
+shift keycode 50 = U+003E

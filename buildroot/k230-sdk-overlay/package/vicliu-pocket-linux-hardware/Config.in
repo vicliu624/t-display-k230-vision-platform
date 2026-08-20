@@ -1,0 +1,16 @@
+config BR2_PACKAGE_VICLIU_POCKET_LINUX_HARDWARE
+	bool "T-Display K230 hardware services"
+	depends on BR2_INIT_SYSTEMD
+	depends on BR2_USE_MMU
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on BR2_INSTALL_LIBSTDCPP
+	depends on !BR2_STATIC_LIBS
+	select BR2_PACKAGE_TDVP_KPU_ACCEPTANCE
+	help
+	  Install the Linux hardware state publisher and the hardware audit tool
+	  for the LILYGO T-Display K230 V1.3. State is collected from kernel
+	  device classes and system services. The package never claims a physical
+	  capability until its Linux transport has materialized.
+
+comment "T-Display K230 hardware services need systemd, an MMU, threads, C++ and shared libraries"
+	depends on !BR2_INIT_SYSTEMD || !BR2_USE_MMU || !BR2_TOOLCHAIN_HAS_THREADS || !BR2_INSTALL_LIBSTDCPP || BR2_STATIC_LIBS

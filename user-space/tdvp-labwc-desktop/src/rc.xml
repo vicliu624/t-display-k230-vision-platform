@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<labwc_config xmlns="https://labwc.github.io/schema/rc-xml">
+  <core>
+    <decoration>server</decoration>
+  </core>
+  <keyboard>
+    <default />
+    <keybind key="Super_L" onRelease="yes">
+      <action name="Execute" command="/usr/local/bin/vpl-app-launcher" />
+    </keybind>
+    <keybind key="W-Return">
+      <action name="Execute" command="foot" />
+    </keybind>
+    <keybind key="W-q">
+      <action name="Close" />
+    </keybind>
+    <keybind key="W-m">
+      <action name="ToggleMaximize" />
+    </keybind>
+    <keybind key="W-f">
+      <action name="ToggleFullscreen" />
+    </keybind>
+  </keyboard>
+  <mouse>
+    <default />
+    <context name="Maximize">
+      <mousebind button="Left" action="Press">
+        <action name="ToggleMaximize" />
+      </mousebind>
+    </context>
+    <context name="Close">
+      <mousebind button="Left" action="Press">
+        <action name="Close" />
+      </mousebind>
+    </context>
+    <context name="Title">
+      <mousebind button="Left" action="DoubleClick">
+        <action name="ToggleMaximize" />
+      </mousebind>
+    </context>
+  </mouse>
+  <touch>
+    <deviceName>Goodix GT9895 Touchscreen</deviceName>
+    <mouseEmulation>yes</mouseEmulation>
+  </touch>
+</labwc_config>

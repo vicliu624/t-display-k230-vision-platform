@@ -1,0 +1,15 @@
+[Unit]
+Description=T-Display K230 hardware state publisher
+After=systemd-udev-trigger.service local-fs.target
+Before=greetd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/vicliu-pocket-linux-hardware/vpl-hardwared
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

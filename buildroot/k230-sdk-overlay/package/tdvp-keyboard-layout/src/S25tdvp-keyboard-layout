@@ -1,0 +1,20 @@
+#!/bin/sh
+
+KEYMAP=/etc/tdvp/keymaps/t-display-k230.map
+
+case "$1" in
+	start)
+		if [ -x /usr/bin/loadkeys ] && [ -c /dev/tty0 ] && [ -r "$KEYMAP" ]; then
+			/usr/bin/loadkeys -q -C /dev/tty0 "$KEYMAP" || \
+				echo "tdvp-keyboard-layout: unable to load $KEYMAP" >&2
+		fi
+		;;
+	stop|restart|reload)
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|reload}"
+		exit 1
+		;;
+esac
+
+exit 0

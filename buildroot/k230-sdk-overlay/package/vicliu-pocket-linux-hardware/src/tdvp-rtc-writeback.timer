@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically refresh the K230 hardware clock from synchronized time
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=6h
+Persistent=true
+Unit=tdvp-rtc-writeback.service
+
+[Install]
+WantedBy=timers.target

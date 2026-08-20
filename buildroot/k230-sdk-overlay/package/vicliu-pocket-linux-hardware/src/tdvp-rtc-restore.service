@@ -1,0 +1,22 @@
+[Unit]
+Description=Restore system time from the K230 hardware clock
+DefaultDependencies=no
+# RTC is optional on T-Display K230 variants.  Do not pull a missing device
+# unit into the boot transaction: systemd otherwise waits for its timeout
+# before the graphical session can start.  The condition below skips this
+# service immediately when no RTC has registered /dev/rtc0.
+After=local-fs.target
+Before=sysinit.target time-set.target systemd-timesyncd.service shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/dev/rtc0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/hwclock --hctosys --utc
+# A board may expose rtc0 before its backup domain contains a valid timestamp.
+# hwclock returns 1 in that case; boot continues with systemd's build-time/NTP
+# clock and the periodic writer seeds RTC after synchronization.
+SuccessExitStatus=1
+
+[Install]
+WantedBy=sysinit.target

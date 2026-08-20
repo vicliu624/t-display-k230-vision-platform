@@ -1,0 +1,89 @@
+name: TDVP Build and Release
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tdvp-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: Build K230 SD image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: write
+    env:
+      TDVP_WORKTREE: ${{ runner.temp }}/tdvp-sdk
+      TDVP_CACHE_ROOT: ${{ github.workspace }}/.ci-cache
+      TDVP_K230_RELEASE_NAME: vicliu-pocket-linux-k230-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+    steps:
+      - name: Check out platform sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Restore SDK source and toolchain cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-cache/dl
+            .ci-cache/toolchain
+          key: tdvp-k230-sdk-${{ runner.os }}-${{ hashFiles('buildroot/sdk-sources.lock') }}
+          restore-keys: |
+            tdvp-k230-sdk-${{ runner.os }}-
+
+      - name: Install reproducible build host
+        run: |
+          chmod +x buildroot/tools/*.sh
+          bash buildroot/tools/ci-prepare-host.sh
+
+      - name: Stage pinned SDK worktree
+        run: |
+          rm -rf "$TDVP_WORKTREE"
+          bash buildroot/tools/prepare-k230-sdk-worktree.sh "$TDVP_WORKTREE"
+          mkdir -p "$TDVP_CACHE_ROOT/dl"
+          rm -rf "$TDVP_WORKTREE/dl"
+          ln -s "$TDVP_CACHE_ROOT/dl" "$TDVP_WORKTREE/dl"
+
+      - name: Replay and inspect the kernel patch queue
+        run: |
+          bash buildroot/tools/build-k230-sdk-rm69a10.sh "$TDVP_WORKTREE" linux-patch
+          bash buildroot/tools/assert-k230-sdk-rm69a10-baseline.sh --patch-only "$TDVP_WORKTREE"
+
+      - name: Build the bootable SD image
+        run: bash buildroot/tools/build-k230-sdk-rm69a10.sh "$TDVP_WORKTREE"
+
+      - name: Verify image and collect the release bundle
+        run: |
+          bash buildroot/tools/assert-k230-sdk-rm69a10-baseline.sh "$TDVP_WORKTREE"
+          bash buildroot/tools/assert-public-release.sh "$TDVP_WORKTREE"
+          bash buildroot/tools/collect-release-bundle.sh \
+            "$TDVP_WORKTREE" \
+            "$TDVP_K230_RELEASE_NAME"
+
+      - name: Upload candidate image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.TDVP_K230_RELEASE_NAME }}
+          path: release/${{ env.TDVP_K230_RELEASE_NAME }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release/${{ env.TDVP_K230_RELEASE_NAME }}/*

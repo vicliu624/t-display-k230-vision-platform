@@ -1,0 +1,15 @@
+config BR2_PACKAGE_WOFI
+	bool "wofi"
+	depends on BR2_PACKAGE_LIBGTK3_WAYLAND
+	select BR2_PACKAGE_LIBXKBCOMMON
+	select BR2_PACKAGE_WAYLAND
+	select BR2_PACKAGE_WAYLAND_PROTOCOLS
+	help
+	  Wofi is a Wayland-native application launcher and dmenu replacement.
+	  The Pocket Linux desktop uses it for the application and quick-action
+	  menus, including the physical LILYGO key binding.
+
+	  https://hg.sr.ht/~scoopta/wofi
+
+comment "wofi needs the GTK3 Wayland backend"
+	depends on !BR2_PACKAGE_LIBGTK3_WAYLAND

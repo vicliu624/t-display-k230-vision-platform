@@ -1,0 +1,8 @@
+[Unit]
+Description=TDVP K230 KMS XR24 acceptance
+After=dev-dri-card0.device seatd.service
+Wants=dev-dri-card0.device seatd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/tdvp/tdvp-kms-acceptance

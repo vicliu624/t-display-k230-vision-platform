@@ -1,0 +1,186 @@
+diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+--- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
++++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+@@ -33,6 +33,18 @@
+ &uart0 { status = "okay"; };
+ &uart2 { status = "okay"; };
+ &uart3 { status = "okay"; };
++&spi0 {
++	status = "okay";
++	pinctrl-names = "default";
++	pinctrl-0 = <&tdvp_lr2021_spi_pins>;
++
++	lr2021: spidev@0 {
++		compatible = "rohm,dh2228fv";
++		reg = <0>;
++		spi-max-frequency = <5000000>;
++	};
++};
++
+ / {
+ 	tdvp_radio_mux: radio-mux {
+ 		compatible = "vicliu,tdvp-radio-mux";
+@@ -186,8 +199,17 @@
+ 	};
+ };
+ &iomux {
++	tdvp_lr2021_spi_pins: tdvp-lr2021-spi-pins {
++		pins = K230_IO14, K230_IO15, K230_IO16, K230_IO17;
++		function = "alt1";
++		bias-disable;
++		drive-strength = <7>;
++		input-enable;
++		input-schmitt-enable;
++	};
++
+ 	tdvp_lora_pins: tdvp-lora-pins {
+ 		pins = K230_IO5, K230_IO6, K230_IO19, K230_IO20, K230_IO44;
+ 		function = "alt0";
+ 		bias-disable;
+ 		input-enable;
+diff --git a/drivers/misc/tdvp-radio-mux.c b/drivers/misc/tdvp-radio-mux.c
+--- a/drivers/misc/tdvp-radio-mux.c
++++ b/drivers/misc/tdvp-radio-mux.c
+@@ -29,8 +29,39 @@ struct tdvp_radio_mux {
+ 	struct gpio_desc *lora_reset;
+ 	struct gpio_desc *nrf9151_enable;
+ 	enum tdvp_radio_profile profile;
++	bool lora_powered;
+ };
+ 
++static void tdvp_radio_mux_power_lora_off(struct tdvp_radio_mux *mux)
++{
++	/* lora-reset is active-low, so logical one keeps the part in reset. */
++	gpiod_set_value_cansleep(mux->lora_reset, 1);
++	gpiod_set_value_cansleep(mux->lora_enable, 0);
++	mux->lora_powered = false;
++}
++
++static int tdvp_radio_mux_power_lora_on(struct tdvp_radio_mux *mux)
++{
++	if (mux->profile != TDVP_RADIO_PROFILE_LORA)
++		return -EBUSY;
++	if (mux->lora_powered)
++		return 0;
++
++	gpiod_set_value_cansleep(mux->lora_enable, 1);
++	usleep_range(10000, 11000);
++
++	/* Mirror the vendor LR2021 reset sequence: high, low, high. */
++	gpiod_set_value_cansleep(mux->lora_reset, 0);
++	usleep_range(10, 20);
++	gpiod_set_value_cansleep(mux->lora_reset, 1);
++	usleep_range(10, 20);
++	gpiod_set_value_cansleep(mux->lora_reset, 0);
++	usleep_range(1000, 2000);
++	mux->lora_powered = true;
++
++	return 0;
++}
++
+ static int tdvp_radio_mux_select_lora(struct tdvp_radio_mux *mux)
+ {
+ 	int ret;
+@@ -55,6 +84,7 @@ static int tdvp_radio_mux_select_lora(struct tdvp_radio_mux *mux)
+ 	if (ret)
+ 		return dev_err_probe(mux->dev, ret, "cannot assert LoRa reset\n");
+ 	mux->profile = TDVP_RADIO_PROFILE_LORA;
++	mux->lora_powered = false;
+ 
+ 	return 0;
+ }
+@@ -63,8 +93,7 @@ static int tdvp_radio_mux_select_nrf9151(struct tdvp_radio_mux *mux)
+ 	int ret;
+ 
+ 	if (mux->profile == TDVP_RADIO_PROFILE_LORA) {
+-		gpiod_set_value_cansleep(mux->lora_enable, 0);
+-		gpiod_set_value_cansleep(mux->lora_reset, 1);
++		tdvp_radio_mux_power_lora_off(mux);
+ 	}
+ 
+ 	ret = pinctrl_select_state(mux->pinctrl, mux->nrf9151_pins);
+@@ -107,6 +134,40 @@ static ssize_t profile_store(struct device *dev, struct device_attribute *attr,
+ }
+ static DEVICE_ATTR_RW(profile);
+ 
++static ssize_t lora_state_show(struct device *dev, struct device_attribute *attr,
++				       char *buf)
++{
++	struct tdvp_radio_mux *mux = dev_get_drvdata(dev);
++	bool powered;
++
++	mutex_lock(&mux->lock);
++	powered = mux->lora_powered;
++	mutex_unlock(&mux->lock);
++
++	return sysfs_emit(buf, "%s\n", powered ? "on" : "off");
++}
++
++static ssize_t lora_state_store(struct device *dev, struct device_attribute *attr,
++					const char *buf, size_t count)
++{
++	struct tdvp_radio_mux *mux = dev_get_drvdata(dev);
++	int ret;
++
++	mutex_lock(&mux->lock);
++	if (sysfs_streq(buf, "on"))
++		ret = tdvp_radio_mux_power_lora_on(mux);
++	else if (sysfs_streq(buf, "off")) {
++		tdvp_radio_mux_power_lora_off(mux);
++		ret = 0;
++	} else {
++		ret = -EINVAL;
++	}
++	mutex_unlock(&mux->lock);
++
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_RW(lora_state);
++
+ static int tdvp_radio_mux_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -160,6 +223,12 @@ static int tdvp_radio_mux_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "cannot create profile attribute\n");
+ 
++	ret = device_create_file(dev, &dev_attr_lora_state);
++	if (ret) {
++		device_remove_file(dev, &dev_attr_profile);
++		return dev_err_probe(dev, ret, "cannot create LoRa state attribute\n");
++	}
++
+ 	dev_info(dev, "active profile: lora\n");
+ 	return 0;
+ }
+@@ -182,6 +253,7 @@
++	device_remove_file(&pdev->dev, &dev_attr_lora_state);
+ 	device_remove_file(&pdev->dev, &dev_attr_profile);
+ 	mutex_lock(&mux->lock);
+-	if (mux->profile == TDVP_RADIO_PROFILE_NRF9151)
+-		gpiod_set_value_cansleep(mux->nrf9151_enable, 0);
++	tdvp_radio_mux_power_lora_off(mux);
++	gpiod_set_value_cansleep(mux->nrf9151_enable, 0);
+ 	mutex_unlock(&mux->lock);
+ }
+diff --git a/Documentation/ABI/testing/sysfs-platform-tdvp-radio-mux b/Documentation/ABI/testing/sysfs-platform-tdvp-radio-mux
+--- a/Documentation/ABI/testing/sysfs-platform-tdvp-radio-mux
++++ b/Documentation/ABI/testing/sysfs-platform-tdvp-radio-mux
+@@ -16,5 +16,17 @@ Description:
+                 Writing "nrf9151" routes IO5 and IO6 to UART2, holds the LoRa
+                 radio off and in reset, and enables the optional nRF9151 modem.
+ 
+                 A caller must stop the active radio service before changing this
+                 attribute. The selector serializes profile changes in the driver.
++
++What:           /sys/devices/platform/*radio-mux/lora_state
++Date:           2026-08-11
++KernelVersion:  6.6
++Contact:        T-Display K230 platform maintainers
++Description:
++                Controls the LR2021 while the selected profile is "lora".
++
++                Writing "on" enables the radio rail and applies the verified
++                LR2021 reset sequence. Writing "off" asserts reset and turns
++                the rail off. Writing "on" while the nRF9151 profile is active
++                fails with EBUSY.

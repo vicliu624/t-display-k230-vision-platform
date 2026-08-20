@@ -1,15 +1,9 @@
 # Local reference checkouts and extracted firmware/images.
 .tmp/
 
-# Buildroot output directories.
+# Generated build artifacts.
 output/
-buildroot/output/
-
-# Buildroot generated state when accidentally built in-tree.
-buildroot/buildroot/output/
-buildroot/buildroot/.config
-buildroot/buildroot/.config.old
-buildroot/buildroot/dl/
+release/
 
 # Host/editor noise.
 .DS_Store

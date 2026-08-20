@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+set -a
+. /etc/tdvp/labwc/environment
+set +a
+
+# Preserve the normal XDG lookup model: user configuration takes precedence,
+# while the image-owned Labwc configuration remains in /etc/xdg.
+if [ -z "${HOME:-}" ] || [ ! -d "${HOME}" ]; then
+	echo "tdvp-labwc: HOME is unavailable" >&2
+	exit 1
+fi
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
+export XDG_CONFIG_DIRS=/etc/xdg
+export XDG_DATA_DIRS=/usr/local/share:/usr/share
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=labwc
+export XDG_SESSION_DESKTOP=labwc
+export DESKTOP_SESSION=labwc
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+	XDG_RUNTIME_DIR="${HOME}/.cache/wayland-runtime"
+fi
+mkdir -p "${XDG_RUNTIME_DIR}"
+chmod 0700 "${XDG_RUNTIME_DIR}"
+export XDG_RUNTIME_DIR
+
+exec /usr/bin/dbus-run-session -- /usr/bin/labwc

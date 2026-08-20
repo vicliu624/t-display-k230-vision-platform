@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/foot --title Files -e /usr/bin/mc

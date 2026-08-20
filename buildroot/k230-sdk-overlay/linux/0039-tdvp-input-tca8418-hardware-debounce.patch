@@ -1,0 +1,46 @@
+diff --git a/Documentation/devicetree/bindings/input/tca8418_keypad.txt b/Documentation/devicetree/bindings/input/tca8418_keypad.txt
+--- a/Documentation/devicetree/bindings/input/tca8418_keypad.txt
++++ b/Documentation/devicetree/bindings/input/tca8418_keypad.txt
+@@ -18,3 +18,7 @@
+ - poll-interval-ms: positive interval in milliseconds for polling the event
+   FIFO when the board does not wire a usable TCA8418 interrupt line. This is
+   mutually exclusive with interrupts.
++- ti,enable-keypad-debounce: enable the controller's documented hardware
++  debounce for all matrix pins. The T-Display K230 RT-Smart reference writes
++  zero to DEBOUNCE_DIS1 through DEBOUNCE_DIS3 before enabling keypad events.
++  The property is optional so existing boards retain the driver's behaviour.
+diff --git a/drivers/input/keyboard/tca8418_keypad.c b/drivers/input/keyboard/tca8418_keypad.c
+--- a/drivers/input/keyboard/tca8418_keypad.c
++++ b/drivers/input/keyboard/tca8418_keypad.c
+@@ -249,7 +249,7 @@
+ static int tca8418_configure(struct tca8418_keypad *keypad_data,
+ 			     u32 rows, u32 cols)
+ {
+-	int reg, error = 0;
++	int reg, debounce_reg, error = 0;
+ 
+ 	/* Assemble a mask for row and column registers */
+ 	reg  =  ~(~0 << rows);
+@@ -260,10 +260,18 @@
+ 	error |= tca8418_write_byte(keypad_data, REG_KP_GPIO2, reg >> 8);
+ 	error |= tca8418_write_byte(keypad_data, REG_KP_GPIO3, reg >> 16);
+ 
+-	/* Enable column debouncing */
+-	error |= tca8418_write_byte(keypad_data, REG_DEBOUNCE_DIS1, reg);
+-	error |= tca8418_write_byte(keypad_data, REG_DEBOUNCE_DIS2, reg >> 8);
+-	error |= tca8418_write_byte(keypad_data, REG_DEBOUNCE_DIS3, reg >> 16);
++	/*
++	 * Preserve the legacy default unless a board requests the controller's
++	 * hardware debounce. DEBOUNCE_DIS bits use zero to enable debounce.
++	 */
++	debounce_reg = device_property_read_bool(&keypad_data->client->dev,
++					  "ti,enable-keypad-debounce") ? 0 : reg;
++	error |= tca8418_write_byte(keypad_data, REG_DEBOUNCE_DIS1,
++					   debounce_reg);
++	error |= tca8418_write_byte(keypad_data, REG_DEBOUNCE_DIS2,
++					   debounce_reg >> 8);
++	error |= tca8418_write_byte(keypad_data, REG_DEBOUNCE_DIS3,
++					   debounce_reg >> 16);
+ 
+ 	if (error)
+ 		return error;

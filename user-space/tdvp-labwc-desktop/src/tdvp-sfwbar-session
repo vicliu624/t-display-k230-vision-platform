@@ -1,0 +1,11 @@
+#!/bin/sh
+set -u
+
+# sfwbar is a Wayland client. A compositor restart invalidates the client
+# connection, so keep one panel process attached to the current session.
+log_file="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}/tdvp-sfwbar.log"
+
+while :; do
+	/usr/bin/sfwbar -f /etc/sfwbar/sfwbar.config >>"${log_file}" 2>&1
+	sleep 1
+done

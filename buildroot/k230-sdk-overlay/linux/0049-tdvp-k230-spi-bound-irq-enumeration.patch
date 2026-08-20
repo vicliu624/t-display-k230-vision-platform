@@ -1,0 +1,48 @@
+From 9f3b7b7377fd75e6c08d5da944cb9cd1b9e26b72 Mon Sep 17 00:00:00 2001
+From: T-Display K230 Platform <platform@tdvp.local>
+Date: Tue, 11 Aug 2026 16:20:00 +0800
+Subject: [PATCH] spi: dw-mmio: bound K230 independent IRQ enumeration
+
+The K230 SPI0 device-tree node exposes nine interrupt specifiers: the primary
+SPI IRQ plus eight independent IRQs.  The Canaan initializer iterated over the
+fixed sixteen-entry storage array and asked the platform core for a tenth IRQ.
+The missing optional IRQ is handled as end-of-list, but the lookup emits an
+unhelpful -ENXIO diagnostic during every boot.
+
+Count the interrupt resources before fetching the optional independent IRQs.
+The resulting controller state and the valid IRQ assignments are unchanged.
+
+Signed-off-by: T-Display K230 Platform <platform@tdvp.local>
+---
+ drivers/spi/spi-dw-mmio.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/spi/spi-dw-mmio.c b/drivers/spi/spi-dw-mmio.c
+index 4c40145e02e3..c2d7e0d85d34 100644
+--- a/drivers/spi/spi-dw-mmio.c
++++ b/drivers/spi/spi-dw-mmio.c
+@@ -273,13 +273,19 @@ static int dw_spi_canaan_k230_init(struct platform_device *pdev,
+ 				   struct dw_spi_mmio *dwsmmio)
+ {
+-	int i, irq;
++	int i, irq, irq_count;
+ 
+ 	memset(dwsmmio->dws.irqs, 0, sizeof(dwsmmio->dws.irqs));
+ 	dwsmmio->dws.ip = DW_HSSI_ID;
+ 	dwsmmio->dws.caps = DW_SPI_CAP_INDEP_IRQ;
+-	for (i = 1; i < ARRAY_SIZE(dwsmmio->dws.irqs); i++) {
++
++	irq_count = platform_irq_count(pdev);
++	if (irq_count < 0)
++		return irq_count;
++
++	for (i = 1; i < min_t(int, ARRAY_SIZE(dwsmmio->dws.irqs),
++				 irq_count); i++) {
+ 		irq = platform_get_irq(pdev, i);
+ 		if (irq < 0)
+-			return 0;
++			return irq;
+ 		dwsmmio->dws.irqs[i - 1] = irq;
+ 	}
+-- 
+2.43.0

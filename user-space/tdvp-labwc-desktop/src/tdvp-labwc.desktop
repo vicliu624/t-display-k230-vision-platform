@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=TDVP Labwc Desktop
+Comment=Wayland desktop session for T-Display K230
+Exec=/usr/local/bin/tdvp-labwc-session
+Type=Application
+DesktopNames=labwc

@@ -1,0 +1,15 @@
+config BR2_PACKAGE_WVKBD
+	bool "wvkbd"
+	depends on BR2_PACKAGE_WAYLAND
+	select BR2_PACKAGE_FONTCONFIG
+	select BR2_PACKAGE_LIBXKBCOMMON
+	select BR2_PACKAGE_PANGO
+	select BR2_PACKAGE_PIXMAN
+	help
+	  A Wayland virtual keyboard. The mobile international layout is installed
+	  for touch-only use of T-Display K230.
+
+	  https://github.com/jjsullivan5196/wvkbd
+
+comment "wvkbd needs Wayland"
+	depends on !BR2_PACKAGE_WAYLAND

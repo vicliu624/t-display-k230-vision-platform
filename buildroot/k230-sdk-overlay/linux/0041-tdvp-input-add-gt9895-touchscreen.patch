@@ -1,0 +1,294 @@
+From 0000000000000000000000000000000000000041 Mon Sep 17 00:00:00 2001
+From: T-Display K230 Vision Platform <platform@vicliu.local>
+Date: Sun, 9 Aug 2026 16:20:00 +0800
+Subject: [PATCH] input: touchscreen: add T-Display K230 GT9895 support
+
+The T-Display K230 uses a Goodix GT9895 touch controller at I2C address
+0x5d.  Its event FIFO is addressed with a four-byte register address and
+therefore cannot use the existing generic Goodix driver interface.
+
+The driver owns the board reset GPIO, consumes the falling-edge IRQ from
+TP_INT, and publishes proper Linux input Type-B multitouch events.  Touch
+coordinates retain the controller's native 1060x2400 range; display-space
+orientation remains a compositor/input-mapping concern.
+
+---
+ drivers/input/touchscreen/Kconfig          |  12 ++
+ drivers/input/touchscreen/Makefile         |   1 +
+ drivers/input/touchscreen/tdvp_gt9895.c    | 233 ++++++++++++++++++++
+ 3 files changed, 246 insertions(+)
+ create mode 100644 drivers/input/touchscreen/tdvp_gt9895.c
+
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 5796a0566..f8f8b5c82 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -416,6 +416,18 @@ config TOUCHSCREEN_GOODIX
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called goodix.
+ 
++config TOUCHSCREEN_TDVP_GT9895
++	tristate "T-Display K230 Goodix GT9895 touchscreen"
++	depends on I2C && GPIOLIB
++	select TOUCHSCREEN_PROPERTIES
++	help
++	  Enable the Goodix GT9895 capacitive touchscreen fitted to the
++	  LILYGO T-Display K230.  The controller uses a four-byte event FIFO
++	  address and reports multitouch contacts through an interrupt line.
++
++	  To compile this driver as a module, choose M here: the module will
++	  be called tdvp_gt9895.
++
+ config TOUCHSCREEN_HIDEEP
+ 	tristate "HiDeep Touch IC"
+ 	depends on I2C
+diff --git a/drivers/input/touchscreen/Makefile b/drivers/input/touchscreen/Makefile
+index 8f77be19a..1cf45788d 100644
+--- a/drivers/input/touchscreen/Makefile
++++ b/drivers/input/touchscreen/Makefile
+@@ -48,5 +48,6 @@ obj-$(CONFIG_TOUCHSCREEN_EXC3000)	+= exc3000.o
+ obj-$(CONFIG_TOUCHSCREEN_FUJITSU)	+= fujitsu_ts.o
+ obj-$(CONFIG_TOUCHSCREEN_GOODIX)	+= goodix_ts.o
++obj-$(CONFIG_TOUCHSCREEN_TDVP_GT9895)	+= tdvp_gt9895.o
+ obj-$(CONFIG_TOUCHSCREEN_HIDEEP)	+= hideep.o
+ obj-$(CONFIG_TOUCHSCREEN_HYNITRON_CSTXXX)	+= hynitron_cstxxx.o
+ obj-$(CONFIG_TOUCHSCREEN_ILI210X)	+= ili210x.o
+diff --git a/drivers/input/touchscreen/tdvp_gt9895.c b/drivers/input/touchscreen/tdvp_gt9895.c
+new file mode 100644
+index 000000000..1fa484f10
+--- /dev/null
++++ b/drivers/input/touchscreen/tdvp_gt9895.c
+@@ -0,0 +1,233 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Goodix GT9895 touchscreen support for the LILYGO T-Display K230.
++ *
++ * The GT9895 event register uses a 32-bit I2C address.  Contacts start
++ * at byte 8; each contact consumes eight bytes and encodes the stable
++ * hardware track id in the upper nibble of its first byte.
++ */
++
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/input/mt.h>
++#include <linux/input/touchscreen.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/of.h>
++
++#define TDVP_GT9895_NAME		"tdvp-gt9895"
++#define TDVP_GT9895_EVENT_REGISTER	0x00010308
++#define TDVP_GT9895_EVENT_LENGTH	88
++#define TDVP_GT9895_CONTACT_OFFSET	8
++#define TDVP_GT9895_CONTACT_LENGTH	8
++#define TDVP_GT9895_MAX_CONTACTS	10
++#define TDVP_GT9895_EVENT_UP		1
++#define TDVP_GT9895_X_MAX		1059
++#define TDVP_GT9895_Y_MAX		2399
++
++struct tdvp_gt9895 {
++	struct i2c_client *client;
++	struct input_dev *input;
++	struct gpio_desc *reset_gpio;
++	struct touchscreen_properties properties;
++};
++
++static int tdvp_gt9895_read(struct tdvp_gt9895 *touch, u32 address,
++			    u8 *buffer, size_t length)
++{
++	u8 register_address[] = {
++		(u8)(address >> 24),
++		(u8)(address >> 16),
++		(u8)(address >> 8),
++		(u8)address,
++	};
++	struct i2c_msg messages[] = {
++		{
++			.addr = touch->client->addr,
++			.len = sizeof(register_address),
++			.buf = register_address,
++		},
++		{
++			.addr = touch->client->addr,
++			.flags = I2C_M_RD,
++			.len = length,
++			.buf = buffer,
++		},
++	};
++	int attempt;
++	int error = -EIO;
++
++	for (attempt = 0; attempt < 3; ++attempt) {
++		error = i2c_transfer(touch->client->adapter, messages,
++				     ARRAY_SIZE(messages));
++		if (error == ARRAY_SIZE(messages))
++			return 0;
++		if (error >= 0)
++			error = -EIO;
++		usleep_range(2000, 3000);
++	}
++
++	return error;
++}
++
++static void tdvp_gt9895_reset(struct tdvp_gt9895 *touch)
++{
++	if (!touch->reset_gpio)
++		return;
++
++	/* Matches the panel bring-up sequence: high, low, then high. */
++	gpiod_set_value_cansleep(touch->reset_gpio, 1);
++	msleep(20);
++	gpiod_set_value_cansleep(touch->reset_gpio, 0);
++	msleep(20);
++	gpiod_set_value_cansleep(touch->reset_gpio, 1);
++	msleep(100);
++}
++
++static u16 tdvp_gt9895_le16(const u8 *value)
++{
++	return (u16)value[0] | ((u16)value[1] << 8);
++}
++
++static irqreturn_t tdvp_gt9895_irq_thread(int irq, void *data)
++{
++	struct tdvp_gt9895 *touch = data;
++	u8 frame[TDVP_GT9895_EVENT_LENGTH];
++	bool seen[TDVP_GT9895_MAX_CONTACTS] = { false };
++	bool any_contact = false;
++	u8 contacts;
++	int slot;
++	int error;
++
++	error = tdvp_gt9895_read(touch, TDVP_GT9895_EVENT_REGISTER, frame,
++				  sizeof(frame));
++	if (error) {
++		dev_warn_ratelimited(&touch->client->dev,
++				     "event read failed: %d\n", error);
++		return IRQ_HANDLED;
++	}
++
++	contacts = frame[2] & 0x0f;
++	if (contacts > TDVP_GT9895_MAX_CONTACTS) {
++		dev_warn_ratelimited(&touch->client->dev,
++				     "invalid contact count %u\n", contacts);
++		return IRQ_HANDLED;
++	}
++
++	for (slot = 0; slot < contacts; ++slot) {
++		const u8 *point = frame + TDVP_GT9895_CONTACT_OFFSET +
++				  slot * TDVP_GT9895_CONTACT_LENGTH;
++		u8 id = point[0] >> 4;
++		u8 event = point[0] & 0x0f;
++		bool active;
++
++		if (id >= TDVP_GT9895_MAX_CONTACTS) {
++			dev_warn_ratelimited(&touch->client->dev,
++					     "invalid contact id %u\n", id);
++			continue;
++		}
++
++		active = event != TDVP_GT9895_EVENT_UP;
++		seen[id] = active;
++		input_mt_slot(touch->input, id);
++		input_mt_report_slot_state(touch->input, MT_TOOL_FINGER, active);
++		if (!active)
++			continue;
++
++		touchscreen_report_pos(touch->input, &touch->properties,
++				       tdvp_gt9895_le16(point + 2),
++				       tdvp_gt9895_le16(point + 4), true);
++		input_report_abs(touch->input, ABS_MT_PRESSURE, point[6]);
++		any_contact = true;
++	}
++
++	for (slot = 0; slot < TDVP_GT9895_MAX_CONTACTS; ++slot) {
++		if (seen[slot])
++			continue;
++		input_mt_slot(touch->input, slot);
++		input_mt_report_slot_state(touch->input, MT_TOOL_FINGER, false);
++	}
++
++	input_report_key(touch->input, BTN_TOUCH, any_contact);
++	input_mt_sync_frame(touch->input);
++	input_sync(touch->input);
++	return IRQ_HANDLED;
++}
++
++static int tdvp_gt9895_probe(struct i2c_client *client)
++{
++	struct device *device = &client->dev;
++	struct tdvp_gt9895 *touch;
++	struct input_dev *input;
++	int error;
++
++	if (!client->irq)
++		return dev_err_probe(device, -EINVAL, "missing TP_INT IRQ\n");
++
++	touch = devm_kzalloc(device, sizeof(*touch), GFP_KERNEL);
++	if (!touch)
++		return -ENOMEM;
++
++	input = devm_input_allocate_device(device);
++	if (!input)
++		return -ENOMEM;
++
++	touch->client = client;
++	touch->input = input;
++	touch->reset_gpio = devm_gpiod_get_optional(device, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(touch->reset_gpio))
++		return dev_err_probe(device, PTR_ERR(touch->reset_gpio),
++				     "unable to claim TP_RST\n");
++
++	i2c_set_clientdata(client, touch);
++	tdvp_gt9895_reset(touch);
++
++	input->name = "Goodix GT9895 Touchscreen";
++	input->id.bustype = BUS_I2C;
++	input->dev.parent = device;
++	__set_bit(INPUT_PROP_DIRECT, input->propbit);
++	input_set_capability(input, EV_KEY, BTN_TOUCH);
++	input_set_abs_params(input, ABS_MT_POSITION_X, 0, TDVP_GT9895_X_MAX, 0, 0);
++	input_set_abs_params(input, ABS_MT_POSITION_Y, 0, TDVP_GT9895_Y_MAX, 0, 0);
++	input_set_abs_params(input, ABS_MT_PRESSURE, 0, U8_MAX, 0, 0);
++	touchscreen_parse_properties(input, true, &touch->properties);
++
++	error = input_mt_init_slots(input, TDVP_GT9895_MAX_CONTACTS, INPUT_MT_DIRECT);
++	if (error)
++		return error;
++
++	error = devm_request_threaded_irq(device, client->irq, NULL,
++					  tdvp_gt9895_irq_thread,
++					  IRQF_ONESHOT | IRQF_TRIGGER_FALLING,
++					  dev_name(device), touch);
++	if (error)
++		return dev_err_probe(device, error, "unable to request TP_INT IRQ\n");
++
++	error = input_register_device(input);
++	if (error)
++		return dev_err_probe(device, error, "unable to register input device\n");
++
++	dev_info(device, "GT9895 touch input ready on IRQ %d\n", client->irq);
++	return 0;
++}
++
++static const struct of_device_id tdvp_gt9895_of_match[] = {
++	{ .compatible = "goodix,gt9895" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, tdvp_gt9895_of_match);
++
++static struct i2c_driver tdvp_gt9895_driver = {
++	.driver = {
++		.name = TDVP_GT9895_NAME,
++		.of_match_table = tdvp_gt9895_of_match,
++	},
++	.probe = tdvp_gt9895_probe,
++};
++module_i2c_driver(tdvp_gt9895_driver);
++
++MODULE_AUTHOR("T-Display K230 Vision Platform");
++MODULE_DESCRIPTION("Goodix GT9895 touchscreen driver for T-Display K230");
++MODULE_LICENSE("GPL");

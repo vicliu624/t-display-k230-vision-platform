@@ -1,0 +1,16 @@
+config BR2_PACKAGE_SFWBAR
+	bool "sfwbar"
+	depends on BR2_PACKAGE_LIBGTK3_WAYLAND
+	depends on BR2_PACKAGE_GTK_LAYER_SHELL
+	select BR2_PACKAGE_DBUS
+	select BR2_PACKAGE_JSON_C
+	select BR2_PACKAGE_WAYLAND
+	select BR2_PACKAGE_WAYLAND_PROTOCOLS
+	help
+	  Flexible Wayland panel with an application launcher, taskbar and
+	  status widgets. It consumes the standard XDG desktop-entry database.
+
+	  https://github.com/LBCrion/sfwbar
+
+comment "sfwbar needs the GTK3 Wayland backend"
+	depends on !BR2_PACKAGE_LIBGTK3_WAYLAND

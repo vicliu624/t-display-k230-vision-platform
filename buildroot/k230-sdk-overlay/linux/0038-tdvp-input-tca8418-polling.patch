@@ -1,0 +1,137 @@
+diff --git a/Documentation/devicetree/bindings/input/tca8418_keypad.txt b/Documentation/devicetree/bindings/input/tca8418_keypad.txt
+--- a/Documentation/devicetree/bindings/input/tca8418_keypad.txt
++++ b/Documentation/devicetree/bindings/input/tca8418_keypad.txt
+@@ -3,12 +3,18 @@
+ 
+ keypad,num-rows and keypad,num-columns are required.
+ 
++One of interrupts or poll-interval-ms is required.
++
+ Required properties:
+ - compatible: "ti,tca8418"
+ - reg: the I2C address
+-- interrupts: IRQ line number, should trigger on falling edge
+ - linux,keymap: Keys definitions, see keypad-matrix.
+ 
+ Optional properties:
+ - reset-gpios: active-low reset output. The driver asserts reset for 10 ms,
+   deasserts it, and waits another 10 ms before the first I2C transaction.
++- interrupts: IRQ line number, should trigger on falling edge. This is the
++  default event source when poll-interval-ms is absent.
++- poll-interval-ms: positive interval in milliseconds for polling the event
++  FIFO when the board does not wire a usable TCA8418 interrupt line. This is
++  mutually exclusive with interrupts.
+diff --git a/drivers/input/keyboard/tca8418_keypad.c b/drivers/input/keyboard/tca8418_keypad.c
+--- a/drivers/input/keyboard/tca8418_keypad.c
++++ b/drivers/input/keyboard/tca8418_keypad.c
+@@ -36,6 +36,7 @@
+ #include <linux/property.h>
+ #include <linux/slab.h>
+ #include <linux/types.h>
++#include <linux/workqueue.h>
+ 
+ /* TCA8418 hardware limits */
+ #define TCA8418_MAX_ROWS	8
+@@ -115,6 +116,8 @@
+ 	struct input_dev *input;
+ 
+ 	unsigned int row_shift;
++	unsigned int poll_interval_ms;
++	struct delayed_work poll_work;
+ };
+ 
+ /*
+@@ -229,6 +232,17 @@
+ 	return IRQ_HANDLED;
+ }
+ 
++static void tca8418_poll_work(struct work_struct *work)
++{
++	struct tca8418_keypad *keypad_data =
++		container_of(to_delayed_work(work), struct tca8418_keypad,
++			     poll_work);
++
++	tca8418_irq_handler(0, keypad_data);
++	schedule_delayed_work(&keypad_data->poll_work,
++			      msecs_to_jiffies(keypad_data->poll_interval_ms));
++}
++
+ /*
+  * Configure the TCA8418 for keypad operation
+  */
+@@ -325,6 +339,7 @@
+ 
+ 	keypad_data->client = client;
+ 	keypad_data->row_shift = row_shift;
++	i2c_set_clientdata(client, keypad_data);
+ 
+ 	error = tca8418_reset(dev);
+ 	if (error)
+@@ -359,14 +374,27 @@
+ 
+ 	input_set_capability(input, EV_MSC, MSC_SCAN);
+ 
+-	error = devm_request_threaded_irq(dev, client->irq,
+-					  NULL, tca8418_irq_handler,
+-					  IRQF_SHARED | IRQF_ONESHOT,
+-					  client->name, keypad_data);
+-	if (error) {
+-		dev_err(dev, "Unable to claim irq %d; error %d\n",
+-			client->irq, error);
+-		return error;
++	if (device_property_present(dev, "poll-interval-ms")) {
++		error = device_property_read_u32(dev, "poll-interval-ms",
++						 &keypad_data->poll_interval_ms);
++		if (error)
++			return error;
++		if (!keypad_data->poll_interval_ms ||
++		    keypad_data->poll_interval_ms > 1000) {
++			dev_err(dev, "invalid poll interval %u ms\n",
++				keypad_data->poll_interval_ms);
++			return -EINVAL;
++		}
++	} else {
++		error = devm_request_threaded_irq(dev, client->irq,
++						  NULL, tca8418_irq_handler,
++						  IRQF_SHARED | IRQF_ONESHOT,
++						  client->name, keypad_data);
++		if (error) {
++			dev_err(dev, "Unable to claim irq %d; error %d\n",
++				client->irq, error);
++			return error;
++		}
+ 	}
+ 
+ 	/* Initialize the chip */
+@@ -381,9 +409,23 @@
+ 		return error;
+ 	}
+ 
++	if (keypad_data->poll_interval_ms) {
++		INIT_DELAYED_WORK(&keypad_data->poll_work, tca8418_poll_work);
++		schedule_delayed_work(&keypad_data->poll_work,
++				      msecs_to_jiffies(keypad_data->poll_interval_ms));
++	}
++
+ 	return 0;
+ }
+ 
++static void tca8418_keypad_remove(struct i2c_client *client)
++{
++	struct tca8418_keypad *keypad_data = i2c_get_clientdata(client);
++
++	if (keypad_data->poll_interval_ms)
++		cancel_delayed_work_sync(&keypad_data->poll_work);
++}
++
+ static const struct i2c_device_id tca8418_id[] = {
+ 	{ "tca8418", 8418, },
+ 	{ }
+@@ -403,6 +445,7 @@
+ 	},
+ 	.probe		= tca8418_keypad_probe,
+ 	.id_table	= tca8418_id,
++	.remove		= tca8418_keypad_remove,
+ };
+ 
+ static int __init tca8418_keypad_init(void)

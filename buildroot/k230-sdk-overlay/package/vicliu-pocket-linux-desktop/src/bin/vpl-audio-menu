@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+choice="$(printf '%s\\n' 'Volume 100%' 'Volume 75%' 'Volume 50%' 'Volume 25%' 'Mute' |
+	/usr/bin/wofi --dmenu --prompt Audio || true)"
+case "$choice" in
+	'Volume 100%') sudo /usr/local/libexec/vpl-desktopctl volume 100 ;;
+	'Volume 75%') sudo /usr/local/libexec/vpl-desktopctl volume 75 ;;
+	'Volume 50%') sudo /usr/local/libexec/vpl-desktopctl volume 50 ;;
+	'Volume 25%') sudo /usr/local/libexec/vpl-desktopctl volume 25 ;;
+	Mute) sudo /usr/local/libexec/vpl-desktopctl volume 0 ;;
+	*) exit 0 ;;
+esac

@@ -1,0 +1,50 @@
+diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+index e37c0d2..a522247 100644
+--- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
++++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0 OR MIT
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/input/input.h>
++#include <dt-bindings/pwm/pwm.h>
+ #include "k230.dtsi"
+ #include "display-rm69a10-568x1232.dtsi"
+ / {
+@@ -32,6 +33,22 @@
+ 
+ &uart0 { status = "okay"; };
+ &uart3 { status = "okay"; };
++/ {
++	keyboard_backlight: keyboard-backlight {
++		compatible = "pwm-backlight";
++		pwms = <&pwm3_5 1 50000 PWM_POLARITY_INVERTED>;
++		brightness-levels = <0 8 16 24 40 64 96 128 160 208 255>;
++		default-brightness-level = <9>;
++		status = "okay";
++	};
++};
++
++&pwm3_5 {
++	#pwm-cells = <3>;
++	status = "okay";
++	pinctrl-names = "default";
++	pinctrl-0 = <&tdvp_keyboard_backlight_pin>;
++};
+ &mmc_sd1 {
+ 	status = "okay";
+ 	no-1-8-v;
+@@ -143,6 +160,14 @@
+ 	};
+ };
+ &iomux {
++	tdvp_keyboard_backlight_pin: tdvp-keyboard-backlight-pin {
++		pins = <52>;
++		function = "alt2";
++		bias-disable;
++		output-enable;
++		drive-strength = <7>;
++	};
++
+ 	tdvp_keyboard_gpio_i2c_pins: tdvp-keyboard-gpio-i2c-pins {
+ 		pins = K230_IO46, K230_IO47;
+ 		function = "alt0";

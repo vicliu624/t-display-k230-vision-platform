@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+# greetd has already opened a PAM session for the dedicated greeter account.
+# Keep that session intact and run the compositor inside its runtime directory.
+set -a
+. /etc/tdvp/labwc/environment
+set +a
+
+export HOME="${HOME:-/var/lib/greetd}"
+export XDG_CONFIG_HOME=/etc/tdvp/greetd
+export XDG_CONFIG_DIRS=/etc/xdg
+export XDG_DATA_DIRS=/usr/local/share:/usr/share
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=labwc
+export XDG_SESSION_DESKTOP=labwc
+export DESKTOP_SESSION=labwc
+
+# This system uses seatd for device access.  greetd does not require a
+# systemd-logind session, so create a private runtime directory owned by the
+# greeter account when no session manager has supplied one.
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+	XDG_RUNTIME_DIR="${HOME}/.cache/wayland-runtime"
+fi
+mkdir -p "${XDG_RUNTIME_DIR}"
+chmod 0700 "${XDG_RUNTIME_DIR}"
+export XDG_RUNTIME_DIR
+
+exec /usr/bin/dbus-run-session -- /usr/local/bin/tdvp-greeter-labwc

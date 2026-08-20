@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+choice="$(printf '%s\\n' 'Restart system' 'Power off system' |
+	/usr/bin/wofi --dmenu --prompt Power || true)"
+case "$choice" in
+	'Restart system') exec sudo /usr/local/libexec/vpl-desktopctl reboot ;;
+	'Power off system') exec sudo /usr/local/libexec/vpl-desktopctl poweroff ;;
+	*) exit 0 ;;
+esac

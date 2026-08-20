@@ -1,0 +1,65 @@
+From: TDVP <tdvp@local>
+Subject: [PATCH] gtkgreet: center the fixed product session
+
+The product always invokes gtkgreet with --command. Keep the normal greetd
+PAM exchange intact, but do not present an editable command selector when the
+session executable is already fixed by the image. Center the form at its
+natural width so a touch-scale product theme can present a focused login card
+on a wide embedded panel.
+
+diff --git a/gtkgreet/actions.c b/gtkgreet/actions.c
+index 5f44f41..d43fcba 100644
+--- a/gtkgreet/actions.c
++++ b/gtkgreet/actions.c
+@@ -49,7 +49,13 @@ void action_answer_question(GtkWidget *widget, gpointer data) {
+                 free(gtkgreet->selected_command);
+                 gtkgreet->selected_command = NULL;
+             }
+-            gtkgreet->selected_command = strdup(gtk_combo_box_text_get_active_text((GtkComboBoxText*)ctx->command_selector));
++            if (ctx->command_selector != NULL) {
++                gtkgreet->selected_command = gtk_combo_box_text_get_active_text((GtkComboBoxText*)ctx->command_selector);
++            } else if (gtkgreet->command != NULL) {
++                gtkgreet->selected_command = strdup(gtkgreet->command);
++            } else {
++                return;
++            }
+ 
+             struct request req = {
+                 .request_type = request_type_create_session,
+diff --git a/gtkgreet/window.c b/gtkgreet/window.c
+index 5e2bd52..c21b659 100644
+--- a/gtkgreet/window.c
++++ b/gtkgreet/window.c
+@@ -47,6 +47,14 @@ static void window_setup_layershell(struct Window *ctx) {
+         gtk_layer_set_anchor(GTK_WINDOW(ctx->window), GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+         gtk_layer_set_anchor(GTK_WINDOW(ctx->window), GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+         gtk_layer_set_anchor(GTK_WINDOW(ctx->window), GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
++
++        /*
++         * The product has one full-screen greeter surface and no pointer is
++         * required to choose it. Request keyboard delivery immediately;
++         * otherwise gtk-layer-shell waits for an enter-notify event that a
++         * physical keyboard-only login never produces.
++         */
++        gtk_layer_set_keyboard_interactivity(GTK_WINDOW(ctx->window), TRUE);
+     }
+ 
+ #endif
+@@ -106,7 +108,7 @@ void window_setup_question(struct Window *ctx, enum QuestionType type, char* qu
+ 
+     gtk_container_add(GTK_CONTAINER(ctx->input_box), question_box);
+ 
+-    if (type == QuestionTypeInitial) {
++    if (type == QuestionTypeInitial && gtkgreet->command == NULL) {
+         ctx->command_selector = gtk_combo_box_text_new_with_entry();
+         gtk_widget_set_name(ctx->command_selector, "command-selector");
+         gtk_widget_set_size_request(ctx->command_selector, 384, -1);
+@@ -202,6 +202,8 @@ static void window_setup(struct Window *ctx) {
+     if (ctx->window_box == NULL) {
+         ctx->window_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+         gtk_widget_set_name(ctx->window_box, "window");
++        gtk_widget_set_halign(ctx->window_box, GTK_ALIGN_CENTER);
++        gtk_widget_set_valign(ctx->window_box, GTK_ALIGN_CENTER);
+         gtk_container_add(GTK_CONTAINER(ctx->revealer), ctx->window_box);
+ 
+         ctx->clock_label = gtk_label_new("");

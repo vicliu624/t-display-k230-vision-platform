@@ -1,0 +1,65 @@
+From 88d0d4ddb4e149c516b6b0f62c3f9d0e7820b6c7 Mon Sep 17 00:00:00 2001
+From: T-Display K230 Vision Platform <noreply@tdvp.local>
+Date: Thu, 6 Aug 2026 01:30:00 +0800
+Subject: [PATCH] qemu: support hosts whose libc lacks newer mmap flags
+
+Buildroot uses host-qemu in Linux-user mode to generate GObject
+introspection data for the graphical product profile. QEMU 9.2 directly
+uses MAP_FIXED_NOREPLACE and MAP_SHARED_VALIDATE, but the host libc headers
+in Ubuntu 18.04 do not declare those newer Linux UAPI flags. QEMU already
+has fallback paths for kernels without the capabilities; define the
+documented Linux values when the host headers predate them.
+
+The change is installed as a Buildroot qemu source patch. It affects only
+the host helper built during the SDK build and never changes the K230
+kernel, target userspace ABI, or image contents.
+
+Signed-off-by: T-Display K230 Vision Platform <noreply@tdvp.local>
+---
+ package/qemu/0004-host-qemu-mmap-flag-compat.patch | 34 ++++++++++++++++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+ create mode 100644 package/qemu/0004-host-qemu-mmap-flag-compat.patch
+
+diff --git a/package/qemu/0004-host-qemu-mmap-flag-compat.patch b/package/qemu/0004-host-qemu-mmap-flag-compat.patch
+new file mode 100644
+index 0000000000..0e76f85f95
+--- /dev/null
++++ b/package/qemu/0004-host-qemu-mmap-flag-compat.patch
+@@ -0,0 +1,34 @@
++From 0a30a5dc2d50d1e4a279fa2da4c5cf59cf3946dd Mon Sep 17 00:00:00 2001
++From: T-Display K230 Vision Platform <noreply@tdvp.local>
++Date: Thu, 6 Aug 2026 01:20:00 +0800
++Subject: [PATCH] linux-user: accept older host libc mmap headers
++
++MAP_SHARED_VALIDATE and MAP_FIXED_NOREPLACE are Linux UAPI flags introduced
++after the host libc shipped by Ubuntu 18.04. The Linux-user mapping code
++already detects kernels that do not honor the relevant capability and
++emulates the required behavior. Older libc header sets merely fail to
++declare the values, so provide the documented UAPI values locally.
++
++Signed-off-by: T-Display K230 Vision Platform <noreply@tdvp.local>
++---
++ include/qemu/osdep.h | 9 +++++++++
++ 1 file changed, 9 insertions(+)
++
++diff --git a/include/qemu/osdep.h b/include/qemu/osdep.h
++index 49a20ec33d..0ae51b96f5 100644
++--- a/include/qemu/osdep.h
+++++ b/include/qemu/osdep.h
++@@ -116,4 +116,13 @@
++ #include <string.h>
++ #include <strings.h>
+++#if defined(__linux__)
+++#include <sys/mman.h>
+++#ifndef MAP_SHARED_VALIDATE
+++#define MAP_SHARED_VALIDATE 0x03
+++#endif
+++#ifndef MAP_FIXED_NOREPLACE
+++#define MAP_FIXED_NOREPLACE 0x100000
+++#endif
+++#endif
++ #include <inttypes.h>
++ #include <limits.h>
++ /* Put unistd.h before time.h as that triggers localtime_r/gmtime_r
+-- 
+2.43.0

@@ -1,0 +1,122 @@
+diff --git a/Documentation/devicetree/bindings/power/supply/bq27xxx.yaml b/Documentation/devicetree/bindings/power/supply/bq27xxx.yaml
+index 45beefc..54f91e8 100644
+--- a/Documentation/devicetree/bindings/power/supply/bq27xxx.yaml
++++ b/Documentation/devicetree/bindings/power/supply/bq27xxx.yaml
+@@ -24,6 +24,7 @@ properties:
+     enum:
+       - ti,bq27200
+       - ti,bq27210
++      - ti,bq27220
+       - ti,bq27500 # deprecated, use revision specific property below
+       - ti,bq27510 # deprecated, use revision specific property below
+       - ti,bq27520 # deprecated, use revision specific property below
+diff --git a/drivers/power/supply/bq27xxx_battery.c b/drivers/power/supply/bq27xxx_battery.c
+index 315e090..565fa81 100644
+--- a/drivers/power/supply/bq27xxx_battery.c
++++ b/drivers/power/supply/bq27xxx_battery.c
+@@ -181,6 +181,30 @@ static u8
+ 		[BQ27XXX_DM_DATA] = INVALID_REG_ADDR,
+ 		[BQ27XXX_DM_CKSUM] = INVALID_REG_ADDR,
+ 	},
++	bq27220_regs[BQ27XXX_REG_MAX] = {
++		[BQ27XXX_REG_CTRL] = 0x00,
++		[BQ27XXX_REG_TEMP] = 0x06,
++		[BQ27XXX_REG_INT_TEMP] = 0x28,
++		[BQ27XXX_REG_VOLT] = 0x08,
++		[BQ27XXX_REG_AI] = 0x0c,
++		[BQ27XXX_REG_FLAGS] = 0x0a,
++		[BQ27XXX_REG_TTE] = 0x16,
++		[BQ27XXX_REG_TTF] = 0x18,
++		[BQ27XXX_REG_TTES] = 0x1c,
++		[BQ27XXX_REG_TTECP] = INVALID_REG_ADDR,
++		[BQ27XXX_REG_NAC] = 0x10,
++		[BQ27XXX_REG_FCC] = 0x12,
++		[BQ27XXX_REG_CYCT] = 0x2a,
++		[BQ27XXX_REG_AE] = INVALID_REG_ADDR,
++		[BQ27XXX_REG_SOC] = 0x2c,
++		[BQ27XXX_REG_DCAP] = 0x3c,
++		[BQ27XXX_REG_AP] = 0x24,
++		[BQ27XXX_DM_CTRL] = INVALID_REG_ADDR,
++		[BQ27XXX_DM_CLASS] = INVALID_REG_ADDR,
++		[BQ27XXX_DM_BLOCK] = INVALID_REG_ADDR,
++		[BQ27XXX_DM_DATA] = INVALID_REG_ADDR,
++		[BQ27XXX_DM_CKSUM] = INVALID_REG_ADDR,
++	},
+ 	bq2750x_regs[BQ27XXX_REG_MAX] = {
+ 		[BQ27XXX_REG_CTRL] = 0x00,
+ 		[BQ27XXX_REG_TEMP] = 0x06,
+@@ -565,6 +589,26 @@ static enum power_supply_property bq27500_props[] = {
+ 	POWER_SUPPLY_PROP_HEALTH,
+ 	POWER_SUPPLY_PROP_MANUFACTURER,
+ };
++
++static enum power_supply_property bq27220_props[] = {
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++	POWER_SUPPLY_PROP_CURRENT_NOW,
++	POWER_SUPPLY_PROP_CAPACITY,
++	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
++	POWER_SUPPLY_PROP_TEMP,
++	POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW,
++	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
++	POWER_SUPPLY_PROP_TECHNOLOGY,
++	POWER_SUPPLY_PROP_CHARGE_FULL,
++	POWER_SUPPLY_PROP_CHARGE_NOW,
++	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
++	POWER_SUPPLY_PROP_CYCLE_COUNT,
++	POWER_SUPPLY_PROP_POWER_AVG,
++	POWER_SUPPLY_PROP_HEALTH,
++	POWER_SUPPLY_PROP_MANUFACTURER,
++};
+ #define bq27510g1_props bq27500_props
+ #define bq27510g2_props bq27500_props
+ 
+@@ -851,6 +895,7 @@ enum bq27xxx_dm_reg_id {
+ 
+ #define bq27000_dm_regs NULL
+ #define bq27010_dm_regs NULL
++#define bq27220_dm_regs NULL
+ #define bq2750x_dm_regs NULL
+ #define bq2751x_dm_regs NULL
+ #define bq2752x_dm_regs NULL
+@@ -919,6 +964,7 @@ static struct {
+ } bq27xxx_chip_data[] = {
+ 	[BQ27000]   = BQ27XXX_DATA(bq27000,   0         , BQ27XXX_O_ZERO | BQ27XXX_O_SOC_SI | BQ27XXX_O_HAS_CI),
+ 	[BQ27010]   = BQ27XXX_DATA(bq27010,   0         , BQ27XXX_O_ZERO | BQ27XXX_O_SOC_SI | BQ27XXX_O_HAS_CI),
++	[BQ27220]   = BQ27XXX_DATA(bq27220,   0         , BQ27XXX_O_OTDC),
+ 	[BQ2750X]   = BQ27XXX_DATA(bq2750x,   0         , BQ27XXX_O_OTDC),
+ 	[BQ2751X]   = BQ27XXX_DATA(bq2751x,   0         , BQ27XXX_O_OTDC),
+ 	[BQ2752X]   = BQ27XXX_DATA(bq2752x,   0         , BQ27XXX_O_OTDC),
+diff --git a/drivers/power/supply/bq27xxx_battery_i2c.c b/drivers/power/supply/bq27xxx_battery_i2c.c
+index eb4f428..d4e9fa8 100644
+--- a/drivers/power/supply/bq27xxx_battery_i2c.c
++++ b/drivers/power/supply/bq27xxx_battery_i2c.c
+@@ -220,6 +220,7 @@ static int bq27xxx_battery_i2c_remove(struct i2c_client *client)
+ static const struct i2c_device_id bq27xxx_i2c_id_table[] = {
+ 	{ "bq27200", BQ27000 },
+ 	{ "bq27210", BQ27010 },
++	{ "bq27220", BQ27220 },
+ 	{ "bq27500", BQ2750X },
+ 	{ "bq27510", BQ2751X },
+ 	{ "bq27520", BQ2752X },
+@@ -256,6 +257,7 @@ MODULE_DEVICE_TABLE(i2c, bq27xxx_i2c_id_table);
+ static const struct of_device_id bq27xxx_battery_i2c_of_match_table[] = {
+ 	{ .compatible = "ti,bq27200" },
+ 	{ .compatible = "ti,bq27210" },
++	{ .compatible = "ti,bq27220" },
+ 	{ .compatible = "ti,bq27500" },
+ 	{ .compatible = "ti,bq27510" },
+ 	{ .compatible = "ti,bq27520" },
+diff --git a/include/linux/power/bq27xxx_battery.h b/include/linux/power/bq27xxx_battery.h
+index 111a40d..0fe0308 100644
+--- a/include/linux/power/bq27xxx_battery.h
++++ b/include/linux/power/bq27xxx_battery.h
+@@ -5,6 +5,7 @@
+ enum bq27xxx_chip {
+ 	BQ27000 = 1, /* bq27000, bq27200 */
+ 	BQ27010, /* bq27010, bq27210 */
++	BQ27220,
+ 	BQ2750X, /* bq27500 deprecated alias */
+ 	BQ2751X, /* bq27510, bq27520 deprecated alias */
+ 	BQ2752X,

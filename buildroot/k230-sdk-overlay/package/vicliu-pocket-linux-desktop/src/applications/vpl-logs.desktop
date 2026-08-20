@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Export Logs
+Comment=Save a support archive to Downloads
+Exec=vpl-logs
+Terminal=false
+Categories=System;Utility;
+Icon=text-x-generic

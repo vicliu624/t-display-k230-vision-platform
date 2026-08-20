@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Audio
+Comment=Set the ALSA output volume
+Exec=vpl-audio-menu
+Terminal=false
+Categories=Settings;AudioVideo;
+Icon=audio-volume-high

@@ -1,0 +1,51 @@
+From 2f88f9c7ac4b433eb17ef2fdca8c823548aa1d7c Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@tdvp.local>
+Date: Fri, 14 Aug 2026 10:44:00 +0800
+Subject: [PATCH] package/librsvg: add cross-build-safe loader path patch
+
+When librsvg's pixbuf loader is enabled, its configure script reads path
+variables through Buildroot's pkg-config wrapper. The wrapper prefixes them
+with the staging sysroot, then the install step prepends DESTDIR again. Add a
+package source patch that keeps those locations relative to target libdir.
+---
+ ...use-target-pixbuf-loader-paths-when-cross-compiling.patch | 31 ++++++++++
+ 1 file changed, 31 insertions(+)
+ create mode 100644 package/librsvg/0002-use-target-pixbuf-loader-paths-when-cross-compiling.patch
+
+diff --git a/package/librsvg/0002-use-target-pixbuf-loader-paths-when-cross-compiling.patch b/package/librsvg/0002-use-target-pixbuf-loader-paths-when-cross-compiling.patch
+new file mode 100644
+index 0000000000..72d15c044a
+--- /dev/null
++++ b/package/librsvg/0002-use-target-pixbuf-loader-paths-when-cross-compiling.patch
+@@ -0,0 +1,31 @@
++From 1ee0dbf449d4c7bd2a0c410f93a6927a128d369e Mon Sep 17 00:00:00 2001
++From: TDVP Build <build@tdvp.local>
++Date: Fri, 14 Aug 2026 10:44:00 +0800
++Subject: [PATCH] configure: keep gdk-pixbuf loader paths relative to libdir
++
++Buildroot's pkg-config wrapper prefixes package variable values with the
++staging sysroot. librsvg installs its loader below DESTDIR, so using those
++absolute values produces a double-prefixed path during cross builds.
++
++Use the configured target libdir and the queried binary version instead.
++---
++ configure.ac | 5 +++--
++ 1 file changed, 3 insertions(+), 2 deletions(-)
++
++diff --git a/configure.ac b/configure.ac
++index 0242e95c..3c490cdf 100644
++--- a/configure.ac
+++++ b/configure.ac
++@@ -231,9 +231,9 @@ if test "$enable_pixbuf_loader" = "yes"; then
++
++   # First try the standalone gdk-pixbuf
++   gdk_pixbuf_binary_version="`$PKG_CONFIG --variable=gdk_pixbuf_binary_version gdk-pixbuf-2.0`"
++-  gdk_pixbuf_binarydir="`$PKG_CONFIG --variable=gdk_pixbuf_binarydir gdk-pixbuf-2.0`"
++-  gdk_pixbuf_moduledir=`$PKG_CONFIG --variable gdk_pixbuf_moduledir gdk-pixbuf-2.0`
++-  gdk_pixbuf_cache_file=`$PKG_CONFIG --variable gdk_pixbuf_cache_file gdk-pixbuf-2.0`
+++  gdk_pixbuf_binarydir="${libdir}/gdk-pixbuf-2.0/${gdk_pixbuf_binary_version}"
+++  gdk_pixbuf_moduledir="${gdk_pixbuf_binarydir}/loaders"
+++  gdk_pixbuf_cache_file="${gdk_pixbuf_binarydir}/loaders.cache"
++ fi
++
++ AC_SUBST([gdk_pixbuf_binary_version])

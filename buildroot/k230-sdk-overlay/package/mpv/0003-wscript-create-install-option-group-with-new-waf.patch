@@ -1,0 +1,21 @@
+diff --git a/wscript b/wscript
+--- a/wscript
++++ b/wscript
+@@ -939,0 +940,2 @@
++    if group is None:
++        group = opt.add_option_group("Installation directories")
+@@ -948,0 +951,2 @@
++    if group is None:
++        group = opt.add_option_group("build and install options")
+@@ -961,0 +966,2 @@
++    if group is None:
++        group = opt.add_option_group("optional features")
+@@ -963,1 +970,1 @@
+-        type    = 'string',
++        type    = str,
+@@ -967,1 +974,1 @@
+-        type    = 'string',
++        type    = str,
+@@ -988,1 +995,1 @@
+-    ctx.check_waf_version(mini='1.8.4')
++    # Buildroot ships a newer compatible Waf; do not reject it by version.

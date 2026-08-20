@@ -1,0 +1,15 @@
+[Unit]
+Description=Load the K230 RTC module when an external module is supplied
+DefaultDependencies=no
+After=systemd-modules-load.service local-fs.target
+Before=tdvp-rtc-restore.service sysinit.target shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=!/dev/rtc0
+ConditionPathExists=/lib/modules/%v/extra/rtc-k230.ko
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/insmod /lib/modules/%v/extra/rtc-k230.ko
+
+[Install]
+WantedBy=sysinit.target

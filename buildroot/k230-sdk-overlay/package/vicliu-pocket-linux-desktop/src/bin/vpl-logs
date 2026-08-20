@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+archive="$(sudo /usr/local/libexec/vpl-desktopctl export-logs "$(id -un)")"
+exec /usr/bin/foot --title 'Support logs' -e sh -c \
+	"printf '%s\\n' 'Saved support logs to: $archive'; read -r _"
