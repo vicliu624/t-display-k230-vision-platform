@@ -1,0 +1,29 @@
+From b58580dc3bafb0c2cc5ba2a1e6367115f1c6ca83 Mon Sep 17 00:00:00 2001
+From: TDVP Build <tdvp@local>
+Date: Sat, 29 Aug 2026 21:45:00 +0000
+Subject: [PATCH] meson: retain release version outside a Mercurial checkout
+
+GitHub release tarballs do not include the source Mercurial metadata.  The
+upstream project version is already the release tag, so failing `hg identify`
+must not make a tarball build fail.  Use the revision only when it can be
+queried successfully; otherwise retain meson.project_version().
+
+This avoids adding a build-time VCS checkout or any target runtime dependency.
+
+Signed-off-by: TDVP Build <tdvp@local>
+---
+ meson.build | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/meson.build b/meson.build
+index 5d343bf..2f8aa9f 100644
+--- a/meson.build
++++ b/meson.build
+@@ -16,3 +16,6 @@
+ if hg.found()
+-	version = run_command(hg, 'identify', check : true).stdout().strip()
++	hg_version = run_command(hg, 'identify', check : false)
++	if hg_version.returncode() == 0
++		version = hg_version.stdout().strip()
++	endif
+ endif
