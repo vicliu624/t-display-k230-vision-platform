@@ -40,6 +40,10 @@ require_file() {
 	[ -f "$1" ] || fail "missing file: $1"
 }
 
+require_executable() {
+	[ -f "$1" ] && [ -x "$1" ] || fail "missing executable bit: $1"
+}
+
 require_line() {
 	grep -Fqx -- "$2" "$1" || fail "missing line in $1: $2"
 }
@@ -140,6 +144,9 @@ require_file "${MANIFEST}"
 require_line "${MANIFEST}" "profile=${PROFILE}"
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/configs/${PROFILE}"
 require_line "${PROJECT_DIR}/buildroot/k230-sdk-overlay/configs/${PROFILE}" 'BR2_JLEVEL=4'
+for hook in post-build.sh post-fakeroot.sh post-image.sh; do
+	require_executable "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/${hook}"
+done
 
 for package in "${packages[@]}"; do
 	require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/${package}/Config.in"
@@ -346,6 +353,9 @@ require_content "${GREETER_SOURCE}/gtkgreet.css" 'background-size: 14px 14px;'
 require_content "${GTK_GREET_PATCH}" 'gtk_layer_set_keyboard_interactivity(GTK_WINDOW(ctx->window), TRUE);'
 
 if [ "${PATCH_ONLY}" = "1" ]; then
+	for hook in post-build.sh post-fakeroot.sh post-image.sh; do
+		require_executable "${STAGED_OVERLAY}/board/tdvp/${hook}"
+	done
 	for package in "${packages[@]}"; do
 		require_file "${STAGED_OVERLAY}/package/${package}/Config.in"
 		require_file "${STAGED_OVERLAY}/package/${package}/${package}.mk"
