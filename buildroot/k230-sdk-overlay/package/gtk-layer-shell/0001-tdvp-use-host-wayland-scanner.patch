@@ -28,8 +28,8 @@ index 7fe5dfc..e2e32e3 100644
 -    prog_wayland_scanner = find_program('wayland-scanner')
 -endif
 +prog_wayland_scanner = find_program('wayland-scanner')
- 
+
  protocols = [
      'wlr-layer-shell-unstable-v1.xml'
--- 
+--
 2.43.0
