@@ -3,8 +3,6 @@ name: TDVP Build and Release
 on:
   pull_request:
   push:
-    branches:
-      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -24,7 +22,6 @@ jobs:
     permissions:
       contents: write
     env:
-      TDVP_WORKTREE: ${{ runner.temp }}/tdvp-sdk
       TDVP_CACHE_ROOT: ${{ github.workspace }}/.ci-cache
       TDVP_K230_RELEASE_NAME: tdvp-k230-labwc-desktop-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
     steps:
@@ -33,6 +30,9 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+
+      - name: Establish runner-local SDK worktree path
+        run: echo "TDVP_WORKTREE=${RUNNER_TEMP}/tdvp-sdk" >> "$GITHUB_ENV"
 
       - name: Restore SDK source and toolchain cache
         uses: actions/cache@v4
