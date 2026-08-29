@@ -1,0 +1,35 @@
+From 6a6140535ca7eaa267384b555e9039ffb5bc4394 Mon Sep 17 00:00:00 2001
+From: TDVP Build <tdvp@local>
+Date: Sat, 29 Aug 2026 19:40:00 +0000
+Subject: [PATCH] protocol: use the Buildroot host wayland-scanner
+
+gtk-layer-shell first consults the target wayland-scanner pkg-config
+variable.  In a cross build that variable is /usr/bin/wayland-scanner,
+which refers to a program in the target rootfs rather than a tool that is
+available while building.  Buildroot provides the matching scanner through
+host-wayland and places HOST_DIR/bin on PATH.
+
+Always resolve the generator from PATH, so Meson selects the Buildroot host
+tool and never embeds or executes a target-rootfs path during configuration.
+
+Signed-off-by: TDVP Build <tdvp@local>
+---
+ protocol/meson.build | 6 +-----
+ 1 file changed, 1 insertion(+), 5 deletions(-)
+
+diff --git a/protocol/meson.build b/protocol/meson.build
+index 7fe5dfc..e2e32e3 100644
+--- a/protocol/meson.build
++++ b/protocol/meson.build
+@@ -1,8 +1,4 @@
+-if wayland_scanner.found()
+-    prog_wayland_scanner = find_program(wayland_scanner.get_pkgconfig_variable('wayland_scanner'))
+-else
+-    prog_wayland_scanner = find_program('wayland-scanner')
+-endif
++prog_wayland_scanner = find_program('wayland-scanner')
+ 
+ protocols = [
+     'wlr-layer-shell-unstable-v1.xml'
+-- 
+2.43.0
