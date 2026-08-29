@@ -26,7 +26,7 @@ jobs:
     env:
       TDVP_WORKTREE: ${{ runner.temp }}/tdvp-sdk
       TDVP_CACHE_ROOT: ${{ github.workspace }}/.ci-cache
-      TDVP_K230_RELEASE_NAME: vicliu-pocket-linux-k230-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+      TDVP_K230_RELEASE_NAME: tdvp-k230-labwc-desktop-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
     steps:
       - name: Check out platform sources
         uses: actions/checkout@v4
