@@ -92,7 +92,16 @@ awk -v expected="${ABI_VERSION}" '
 	BEGIN { package = 0; valid = 0; invalid = 0 }
 	/^Package: / { package = 1 }
 	/^Architecture: riscv64$/ { arch = 1 }
-	$0 == "Depends: tdvp-platform-abi (= " expected ")" { abi = 1 }
+	/^Depends: / {
+		dependencies = $0
+		sub(/^Depends: /, "", dependencies)
+		dependency_count = split(dependencies, dependency, /, /)
+		for (dependency_index = 1; dependency_index <= dependency_count; dependency_index++) {
+			if (dependency[dependency_index] == "tdvp-platform-abi (= " expected ")") {
+				abi = 1
+			}
+		}
+	}
 	/^$/ {
 		if (package) {
 			if (!arch || !abi) invalid = 1
