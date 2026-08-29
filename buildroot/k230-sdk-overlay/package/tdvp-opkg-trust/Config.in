@@ -1,0 +1,16 @@
+config BR2_PACKAGE_TDVP_OPKG_TRUST
+	bool "TDVP signed opkg feed trust bootstrap"
+	depends on BR2_INIT_SYSTEMD
+	select BR2_PACKAGE_OPKG
+	select BR2_PACKAGE_OPKG_GPG_SIGN
+	select BR2_PACKAGE_GNUPG2
+	help
+	  Install the immutable TDVP repository public key and an operator-invoked
+	  opkg wrapper. The wrapper initialises opkg's dedicated GnuPG home directly
+	  before a package operation. The ABI-fixed HTTPS feed therefore retains
+	  mandatory Packages.gz.asc verification without making graphical login
+	  depend on GnuPG initialisation. No private signing material is installed
+	  on the device.
+
+comment "TDVP signed opkg feed trust bootstrap needs systemd"
+	depends on !BR2_INIT_SYSTEMD

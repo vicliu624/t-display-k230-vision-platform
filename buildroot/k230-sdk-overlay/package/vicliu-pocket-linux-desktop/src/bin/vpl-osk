@@ -1,8 +1,11 @@
 #!/bin/sh
 set -eu
 
-if pgrep -u "$(id -u)" -x wvkbd-mobintl >/dev/null 2>&1; then
-	pkill -u "$(id -u)" -x wvkbd-mobintl
+keyboard_pids=$(ps -eo pid,user,args | awk -v user="$(id -un)" '$2 == user && $3 == "/usr/bin/wvkbd-mobintl" { print $1 }')
+if [ -n "$keyboard_pids" ]; then
+	# Use exact executable matching so this remains a genuine toggle and never
+	# stacks another keyboard surface on the existing one.
+	kill $keyboard_pids
 	exit 0
 fi
 

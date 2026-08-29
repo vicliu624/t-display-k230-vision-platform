@@ -1,0 +1,69 @@
+From: TDVP <tdvp@example.invalid>
+Date: Wed, 26 Aug 2026 16:45:00 +0800
+Subject: [PATCH] tdvp: build only the wf-panel-pi netman module
+
+Keep Raspberry Pi's NetworkManager implementation and its libnma dialogs;
+only omit the unused LXPanel ABI target from this Wayland product image.
+
+Signed-off-by: TDVP <tdvp@example.invalid>
+---
+ src/meson.build | 27 +++------------------------
+ 1 file changed, 3 insertions(+), 24 deletions(-)
+
+diff --git a/src/meson.build b/src/meson.build
+index 765f4e1..e01dbb7 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -1,12 +1,10 @@
+-gtk = dependency('gtk+-3.0')
+ gtkmm = dependency('gtkmm-3.0', version: '>=3.24')
+-lxpanel = dependency('lxpanel-pi')
+ wfpanel = dependency('wf-panel-pi')
+ netman = dependency('libnm')
+ nma = dependency('libnma')
+ secret = dependency('libsecret-1')
+ 
+-lsources = files(
++sources = files(
+   'netman.c',
+   'ap-menu-item.c',
+   'applet.c',
+@@ -36,35 +34,20 @@ incdirs = include_directories('utils', 'wireless-security', 'nm-utils')
+ 
+ gnome = import('gnome')
+ 
+-lsources += gnome.compile_resources(
++sources += gnome.compile_resources(
+   'applet-resources',
+   'applet.gresource.xml',
+   dependencies: resource_data
+ )
+ 
+-ldeps = [ gtk, lxpanel, netman, nma, secret ]
++sources += files('netman.cpp')
+ 
+-largs = [ '-DPACKAGE_DATA_DIR="' + lresource_dir + '"', '-DGETTEXT_PACKAGE="lpplug_' + meson.project_name() + '"', '-DENABLE_GTK3', '-DVERSION=0.1', '-D___CONFIG_H__', '-DBINDIR="/usr/bin"', '-DG_DISABLE_ASSERT', '-DG_DISABLE_CHECKS', '-DG_DISABLE_CAST_CHECKS' ]
+-
+-shared_module(meson.project_name(), lsources,
+-        dependencies: ldeps,
+-        install: true,
+-        install_dir: get_option('libdir') / 'lxpanel-pi',
+-        c_args : largs,
+-        include_directories : incdirs,
+-        name_prefix: ''
+-)
+-
+-wsources = files(
+-  'netman.cpp'
+-)
+-
+ wdeps = [ gtkmm, wfpanel, netman, nma, secret ]
+ 
+ wargs = [ '-DPACKAGE_DATA_DIR="' + wresource_dir + '"', '-DGETTEXT_PACKAGE="wfplug_' + meson.project_name() +'"', '-DENABLE_GTK3', '-DVERSION=0.1', '-D___CONFIG_H__', '-DBINDIR="/usr/bin"' ]
+ 
+-shared_module('lib' + meson.project_name(), [ lsources, wsources ],
++shared_module('lib' + meson.project_name(), sources,
+         dependencies: wdeps,
+         install: true,
+         install_dir: get_option('libdir') / 'wf-panel-pi',
+         c_args : wargs,

@@ -1,0 +1,13 @@
+config BR2_PACKAGE_WFPLUG_NETMAN
+	bool "wf-panel-pi NetworkManager plugin"
+	depends on BR2_PACKAGE_WF_PANEL_PI
+	depends on BR2_PACKAGE_NETWORK_MANAGER
+	depends on BR2_PACKAGE_LIBNMA
+	depends on BR2_PACKAGE_LIBSECRET
+	help
+	  Raspberry Pi's netman plugin for the wf-panel-pi Wayland ABI. It uses
+	  the standard NetworkManager D-Bus API and libnma connection UI.
+
+comment "wfplug-netman needs wf-panel-pi, NetworkManager, libnma and libsecret"
+	depends on !BR2_PACKAGE_WF_PANEL_PI || !BR2_PACKAGE_NETWORK_MANAGER || \
+		!BR2_PACKAGE_LIBNMA || !BR2_PACKAGE_LIBSECRET

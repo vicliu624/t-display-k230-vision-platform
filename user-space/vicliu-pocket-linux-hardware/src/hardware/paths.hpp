@@ -15,5 +15,6 @@ std::optional<long> read_long(const std::string &path);
 std::vector<std::string> children(const std::string &path);
 bool service_active(const std::string &unit);
 int run(const std::vector<std::string> &arguments);
+int run_quietly(const std::vector<std::string> &arguments);
 
 }  // namespace vpl::hardware::paths

@@ -1,0 +1,92 @@
+From 73c6b4e3a52239e8f3a2d15140d775dd1a9eaa11 Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@tdvp.local>
+Date: Wed, 26 Aug 2026 17:10:00 +0800
+Subject: [PATCH] libgtk3: Wayland: honor wl_output quarter-turn geometry
+
+GTK3 3.24's Wayland backend retains the raw wl_output mode dimensions when
+the compositor has no xdg-output logical-size global. It records the output
+transform for physical dimensions, but fails to apply that transform to the
+logical GdkMonitor rectangle.
+
+On the K230 RM69A10, the DRM mode is portrait-native (568x1232) and Labwc
+advertises a 90-degree transform to present a 1232x568 logical desktop.
+Returning the raw dimensions makes GTK desktop surfaces and popups request a
+568x1232 allocation on that logical output, which the compositor clips.
+
+Keep the existing xdg-output path unchanged. In the wl_output fallback,
+retain the transform and swap the mode axes for quarter-turn transforms before
+publishing the monitor geometry. This is generic Wayland protocol handling,
+not a board-specific PCManFM workaround.
+
+---
+ package/libgtk3/0001-wayland-honor-wl-output-transform.patch | 61 ++++++++++++++++++++++
+ 1 file changed, 61 insertions(+)
+ create mode 100644 package/libgtk3/0001-wayland-honor-wl-output-transform.patch
+
+diff --git a/package/libgtk3/0001-wayland-honor-wl-output-transform.patch b/package/libgtk3/0001-wayland-honor-wl-output-transform.patch
+new file mode 100644
+index 0000000000..9e7c68b27e
+--- /dev/null
++++ b/package/libgtk3/0001-wayland-honor-wl-output-transform.patch
+@@ -0,0 +1,61 @@
++From 5e4e5b0e526d28f27872816d302b1e6b3e0befd9 Mon Sep 17 00:00:00 2001
++From: TDVP Build <build@tdvp.local>
++Date: Wed, 26 Aug 2026 17:10:00 +0800
++Subject: [PATCH] gdk/wayland: use logical dimensions for transformed outputs
++
++A wl_output mode is expressed in the output's native pixel orientation. When
++no xdg-output logical-size is supplied, GDK must account for a quarter-turn
++wl_output transform before exposing its GdkMonitor geometry.
++
++---
++ gdk/wayland/gdkmonitor-wayland.h |  1 +
++ gdk/wayland/gdkscreen-wayland.c  | 16 ++++++++++++++--
++ 2 files changed, 16 insertions(+), 2 deletions(-)
++
++diff --git a/gdk/wayland/gdkmonitor-wayland.h b/gdk/wayland/gdkmonitor-wayland.h
++index b4a831e..26f5166 100644
++--- a/gdk/wayland/gdkmonitor-wayland.h
+++++ b/gdk/wayland/gdkmonitor-wayland.h
++@@ -33,6 +33,7 @@ struct _GdkWaylandMonitor {
++   struct zxdg_output_v1 *xdg_output;
++   /* Raw wl_output data */
++   GdkRectangle output_geometry;
+++  gint output_transform;
++   /* Raw xdg_output data */
++   GdkRectangle xdg_output_geometry;
++   char *name;
++diff --git a/gdk/wayland/gdkscreen-wayland.c b/gdk/wayland/gdkscreen-wayland.c
++index 7017534..86f8fb5 100644
++--- a/gdk/wayland/gdkscreen-wayland.c
+++++ b/gdk/wayland/gdkscreen-wayland.c
++@@ -1715,6 +1715,7 @@ output_handle_geometry (void             *data,
++ 
++   monitor->output_geometry.x = x;
++   monitor->output_geometry.y = y;
+++  monitor->output_transform = transform;
++ 
++   switch (transform)
++     {
++@@ -1787,8 +1788,20 @@ output_handle_mode (void             *data,
++   if ((flags & WL_OUTPUT_MODE_CURRENT) == 0)
++     return;
++ 
++-  monitor->output_geometry.width = width;
++-  monitor->output_geometry.height = height;
+++  switch (monitor->output_transform)
+++    {
+++    case WL_OUTPUT_TRANSFORM_90:
+++    case WL_OUTPUT_TRANSFORM_270:
+++    case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+++    case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+++      monitor->output_geometry.width = height;
+++      monitor->output_geometry.height = width;
+++      break;
+++    default:
+++      monitor->output_geometry.width = width;
+++      monitor->output_geometry.height = height;
+++      break;
+++    }
++   gdk_monitor_set_refresh_rate (GDK_MONITOR (monitor), refresh);
++ 
++   if (should_update_monitor (monitor) || !monitor_has_xdg_output (monitor))

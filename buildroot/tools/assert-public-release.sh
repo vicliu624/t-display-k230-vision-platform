@@ -13,6 +13,7 @@ PROFILE="k230_canmv_t_display_rm69a10_labwc_desktop_defconfig"
 IMAGES="${WORKTREE}/output/${PROFILE}/images"
 
 bash "${SCRIPT_DIR}/assert-k230-sdk-rm69a10-baseline.sh" "${WORKTREE}"
+bash "${SCRIPT_DIR}/assert-tdvp-opkg-feed-release.sh"
 for file in sysimage-sdcard.img sysimage-sdcard.img.gz tdvp-image-manifest; do
 	[ -s "${IMAGES}/${file}" ] || {
 		printf 'TDVP public release gate: missing %s\n' "${IMAGES}/${file}" >&2
@@ -20,8 +21,8 @@ for file in sysimage-sdcard.img sysimage-sdcard.img.gz tdvp-image-manifest; do
 	}
 done
 grep -Fqx 'desktop=labwc' "${IMAGES}/tdvp-image-manifest"
-grep -Fqx 'panel=sfwbar' "${IMAGES}/tdvp-image-manifest"
-grep -Fqx 'background=swaybg' "${IMAGES}/tdvp-image-manifest"
+grep -Fqx 'panel=wf-panel-pi' "${IMAGES}/tdvp-image-manifest"
+grep -Fqx 'background=pcmanfm' "${IMAGES}/tdvp-image-manifest"
 grep -Fqx 'terminal=foot' "${IMAGES}/tdvp-image-manifest"
 grep -Fqx 'display_manager=greetd' "${IMAGES}/tdvp-image-manifest"
 grep -Fqx 'greeter=gtkgreet' "${IMAGES}/tdvp-image-manifest"

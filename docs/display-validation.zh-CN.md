@@ -8,9 +8,10 @@
 镜像断言会检查下列已安装内容：
 
 - 通过 `tdvp-labwc-desktop.service` 建立的 `/dev/dri/card0` 会话契约。
-- `seatd`、`labwc`、`swaybg`、`sfwbar`、`foot` 和 `wlr-randr`。
+- `seatd`、`labwc`、`swaybg`、`wf-panel-pi`、其上游 `wfplug-*` 模块、`pcmanfm`、
+  `foot` 和 `wlr-randr`。
 - 包含 K230 输出参数的 `/etc/tdvp/labwc/environment`。
-- 启动 Swaybg 与 SFWBar 的 `/etc/xdg/labwc/autostart`。
+- 启动 Swaybg、PCManFM 桌面处理与 wf-panel-pi 的 `/etc/xdg/labwc/autostart`。
 - GT9895 的 libinput 校准规则。
 
 构建完成后在主机执行：
@@ -29,4 +30,5 @@ cat /sys/class/drm/card0-DSI-1/status
 tdvp-display-smoke --device /dev/dri/card0 --seconds 5
 ```
 
-Labwc 把桌面送到面板上。SFWBar 提供应​​用菜单与任务栏，Foot 提供终端恢复路径。
+Labwc 把桌面送到面板上。Raspberry Pi 维护的 wf-panel-pi 与其上游插件提供应用
+菜单、状态模块和窗口列表，Foot 提供终端恢复路径。

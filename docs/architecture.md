@@ -1,54 +1,74 @@
 # Architecture
 
-## Runtime Layers
+## Runtime layers
 
 ```text
 T-Display K230 V1.3 hardware
   |
-K230 Linux kernel, device tree, firmware runtime
+K230 Linux kernel, board DTB and vendor firmware runtime
   |
-DRM/KMS, DSI, input, I2C, SDIO, USB, ALSA, camera/ISP, KPU runtime
+DRM/KMS, DSI, libinput, I2C, SDIO, USB, ALSA, camera/ISP and KPU runtime
   |
-systemd, udev, systemd-networkd, OpenSSH, seatd, D-Bus
+systemd, udev, NetworkManager, OpenSSH, seatd and D-Bus
   |
-Labwc Wayland compositor
-  |-- Swaybg desktop background
-  |-- SFWBar application menu, taskbar, clock
-  `-- standard Wayland applications such as Foot
+greetd / gtkgreet authenticates a selected Linux account
+  |
+Labwc Wayland compositor in that account's session
+  |-- PCManFM desktop: wallpaper, icons and blank-desktop context menu
+  |-- Raspberry Pi wf-panel-pi: menu, network, volume, battery and clock
+  `-- Foot, Cog/WPE WebKit, PCManFM and nm-connection-editor
 ```
 
-## Session
+The system is intentionally a small standard Wayland desktop for a constrained
+keyboard handheld. It uses no GNOME Shell, custom launcher, custom Wi-Fi UI or
+custom audio player.
 
-`tdvp-labwc-desktop.service` runs as the `tdvp` desktop user. It creates a
-private runtime directory, receives access to `seat`, `video`, `input`, and
-`render`, loads the K230 environment contract, and starts Labwc through a
-D-Bus session.
+## Authenticated session contract
 
-The session contract is stored in `/etc/tdvp/labwc/environment`:
+`greetd` starts the `tdvp-labwc` Wayland session for the account selected at
+the greeter. The launch wrapper derives `HOME`, `USER`, `XDG_CONFIG_HOME`,
+`XDG_CACHE_HOME`, `XDG_DATA_HOME` and `XDG_RUNTIME_DIR` from that account; it
+does not hard-code a particular user or `/home/tdvp`.
 
-| Setting | Value | Purpose |
-| --- | --- | --- |
-| `WLR_DRM_DEVICES` | `/dev/dri/card0` | K230 DRM device. |
-| `WLR_RENDERER` | `pixman` | Validated software renderer for the K230 path. |
-| `LIBSEAT_BACKEND` | `seatd` | DRM/input device access. |
-| `TDVP_K230_OUTPUT` | `DSI-1` | Internal DSI connector. |
-| `TDVP_K230_OUTPUT_TRANSFORM` | `90` | Physical panel transform. |
-| logical size | `1232x568` | Wayland desktop coordinate space. |
+The session environment in `/etc/tdvp/labwc/environment` selects the K230 DRM
+device, pixman renderer, seatd backend and the 1232x568 logical desktop. Labwc
+then starts PCManFM, per-user PulseAudio, the upstream panel and the LilyGO key
+bridge. The bridge maps the board Menu key to `wfpanelctl smenu menu`; Fn is an
+XKB Mod5 layer, not a user-space key remapper.
 
-Labwc processes the XDG autostart file after it owns the DRM backend. The
-autostart file applies the output transform and launches Swaybg and SFWBar.
+The touch rules keep normal taps and drags as left-pointer input. A stationary
+long press on an empty PCManFM desktop is delivered as a right click so its
+normal context menu opens. GTK clients receive the standard committed-text
+compatibility fix required by this touch stack.
 
-## Application Model
+## Network, browser and sound
 
-Applications use normal Wayland protocols and the XDG desktop-entry format.
-SFWBar scans XDG data directories for `.desktop` files and starts each
-application through its declared `Exec` command. The taskbar tracks windows
-reported by the compositor. Foot is the image-provided terminal entry.
+NetworkManager exclusively owns Ethernet and Wi-Fi. It starts the bundled
+`wpa_supplicant` only through D-Bus when needed; neither a standalone
+`wpa_supplicant@wlan0` service nor `systemd-networkd` is enabled. `wfplug-netman`
+and upstream `nm-connection-editor` use NetworkManager's public D-Bus API.
 
-## Board Integration
+Cog is the native Wayland browser. It launches as a non-maximized window below
+the panel; the Labwc Cog rule forces server decorations, which leaves minimize,
+maximize and close controls usable on touch hardware. HTTPS is supplied by
+`glib-networking` and its GIO OpenSSL module.
 
-The `vicliu-pocket-linux-hardware` service publishes board hardware state and
-performs the integration steps used by the profile. The vendor ISP startup
-script remains enabled for the camera runtime. Keyboard layout, touch
-calibration, display acceptance, and KPU acceptance are installed as focused
-system utilities and services.
+The panel has exactly one output-volume plugin. That upstream Raspberry Pi
+plugin uses `libcanberra` and the Freedesktop `audio-volume-change` event, so
+volume adjustment has standard sound feedback without a private TDVP daemon or
+asset format.
+
+## Storage and field updates
+
+The image carries GPT boot partition 1 and ext4 root partition 2 only. On a
+larger card the one-shot root expansion service relocates the GPT backup header,
+extends partition 2 while preserving its exact PARTUUID, reboots, then expands
+ext4. It deliberately leaves a card with a later user partition untouched.
+
+U-Boot mounts root by PARTUUID rather than `/dev/mmcblkN`, avoiding controller
+enumeration differences between boards. The image never creates `/data`.
+
+`opkg` is configured with the release's ABI-fixed application feed. A boot
+service imports and fingerprint-checks only the embedded public release key;
+signature checking remains mandatory. This gives a constrained device a safe
+field-update path without embedding a signing key.

@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+# wfplug-volumepulse is an upstream Raspberry Pi panel component.  It needs a
+# normal user-session PulseAudio socket and its matching cookie; the Buildroot
+# system daemon uses the separate `pulse` account and rejects the desktop
+# user's client authentication.
+if [ -z "${HOME:-}" ] || [ ! -d "${HOME}" ]; then
+	echo "tdvp-pulseaudio: HOME is unavailable" >&2
+	exit 1
+fi
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${HOME}/.cache/wayland-runtime}"
+export PULSE_SERVER="unix:${XDG_RUNTIME_DIR}/pulse/native"
+
+if ! /usr/bin/pactl info >/dev/null 2>&1; then
+	/usr/bin/pulseaudio --daemonize=yes --exit-idle-time=-1 --log-target=journal
+fi
+
+# Do not launch wf-panel-pi until its volume backend can authenticate.  The
+# bounded wait makes first boot deterministic while keeping a broken sound
+# server visible in the journal instead of silently rendering a dead widget.
+attempt=0
+while [ "$attempt" -lt 30 ]; do
+	if /usr/bin/pactl info >/dev/null 2>&1; then
+		exit 0
+	fi
+	attempt=$((attempt + 1))
+	sleep 0.1
+done
+
+echo 'tdvp-pulseaudio: user-session server did not become ready' >&2
+exit 1

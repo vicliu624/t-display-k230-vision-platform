@@ -42,6 +42,21 @@ prepare_deterministic_sdk_packaging() {
 		cp "${SDK_BOARD_DIR}/${vendor_file}" "${TDVP_POST_IMAGE_TMP}/${vendor_file}"
 	done
 
+	# The SDK's ``gz_file_add_ver`` only creates a vendor-named symlink.  It
+	# assumes a release_version file which is intentionally absent from the
+	# product overlay and its helper has disabled ``set -e`` by this point,
+	# turning that missing optional metadata into misleading build noise.  TDVP
+	# emits its explicit, reproducible sysimage-sdcard.img.gz below, so remove
+	# only this optional alias call in the disposable vendor-script copy.
+	sed -E -i \
+		's/^[[:space:]]*gz_file_add_ver[[:space:]]+[$][{]image_name[}]\.gz;?[[:space:]]*$/\t: # TDVP owns the release artifact name and compression./' \
+		"${TDVP_POST_IMAGE_TMP}/post-image.sh"
+	if grep -Eq '^[[:space:]]*gz_file_add_ver[[:space:]]+\$\{image_name\}\.gz;?[[:space:]]*$' \
+		"${TDVP_POST_IMAGE_TMP}/post-image.sh"; then
+		printf '%s\n' 'TDVP packaging error: could not neutralize the SDK release-alias hook' >&2
+		exit 1
+	fi
+
 	awk \
 		-v disk_uuid="${TDVP_GPT_DISK_UUID}" \
 		-v boot_uuid="${TDVP_GPT_BOOT_UUID}" \
@@ -77,7 +92,14 @@ prepare_deterministic_sdk_packaging() {
 		fi
 	done
 
-	real_mkfs_ext4="$(command -v mkfs.ext4)"
+	# Use the Buildroot host e2fsprogs first.  It is built together with
+	# genimage and has a matching RUNPATH, whereas the distribution mkfs can be
+	# paired accidentally with a different libext2fs once host tools are on PATH.
+	if [ -x "${HOST_DIR}/sbin/mkfs.ext4" ]; then
+		real_mkfs_ext4="${HOST_DIR}/sbin/mkfs.ext4"
+	else
+		real_mkfs_ext4="$(command -v mkfs.ext4)"
+	fi
 	if [ -z "${real_mkfs_ext4}" ] || [ ! -x "${real_mkfs_ext4}" ]; then
 		printf '%s\n' 'TDVP packaging error: host mkfs.ext4 is unavailable' >&2
 		exit 1
@@ -98,6 +120,20 @@ EOF
 trap cleanup_post_image_tmp EXIT
 
 : "${BINARIES_DIR:?Buildroot did not provide BINARIES_DIR}"
+: "${HOST_DIR:?Buildroot did not provide HOST_DIR}"
+
+# The vendor post-image helper invokes ``genimage`` by its bare name.  Its
+# internal ``set +e`` means that a missing host tool would otherwise be
+# swallowed, leaving a stale SD image beside freshly generated U-Boot files.
+# Put the Buildroot host tools first and fail before packaging if the required
+# image builder is unavailable.
+if [ ! -x "${HOST_DIR}/bin/genimage" ]; then
+	printf 'TDVP packaging error: Buildroot host genimage is unavailable: %s\n' \
+		"${HOST_DIR}/bin/genimage" >&2
+	exit 1
+fi
+export PATH="${HOST_DIR}/bin:${PATH}"
+
 for boot_payload in Image k230-canmv-rm69a10.dtb; do
 	if [ ! -s "${BINARIES_DIR}/${boot_payload}" ]; then
 		printf 'TDVP packaging error: required boot payload is missing before SDK packaging: %s\n' \
@@ -144,8 +180,8 @@ bash "${IMAGE_GUARD}" "${BINARIES_DIR}"
 	printf 'gem_dma_contract=drm_gem_dma_helpers\n'
 	printf 'buildroot_reproducible=y\n'
 	printf 'desktop=labwc\n'
-	printf 'panel=sfwbar\n'
-	printf 'background=swaybg\n'
+	printf 'panel=wf-panel-pi\n'
+	printf 'background=pcmanfm\n'
 	printf 'terminal=foot\n'
 	printf 'display_manager=greetd\n'
 	printf 'greeter=gtkgreet\n'

@@ -141,9 +141,38 @@ int run(const std::vector<std::string> &arguments)
     return WIFEXITED(status) ? WEXITSTATUS(status) : 127;
 }
 
+int run_quietly(const std::vector<std::string> &arguments)
+{
+    if (arguments.empty())
+        return 127;
+    pid_t child = fork();
+    if (child < 0)
+        return 127;
+    if (child == 0) {
+        const int null_device = open("/dev/null", O_WRONLY | O_CLOEXEC);
+        if (null_device >= 0) {
+            dup2(null_device, STDOUT_FILENO);
+            dup2(null_device, STDERR_FILENO);
+            if (null_device > STDERR_FILENO)
+                close(null_device);
+        }
+        std::vector<char *> argv;
+        argv.reserve(arguments.size() + 1);
+        for (const std::string &argument : arguments)
+            argv.push_back(const_cast<char *>(argument.c_str()));
+        argv.push_back(nullptr);
+        execv(argv[0], argv.data());
+        _exit(127);
+    }
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 127;
+}
+
 bool service_active(const std::string &unit)
 {
-    return run({"/usr/bin/systemctl", "systemctl", "is-active", "--quiet", unit}) == 0;
+    return run_quietly({"/usr/bin/systemctl", "systemctl", "is-active", "--quiet", unit}) == 0;
 }
 
 }  // namespace vpl::hardware::paths

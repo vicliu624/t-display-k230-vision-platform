@@ -5,20 +5,31 @@ config BR2_PACKAGE_TDVP_LABWC_DESKTOP
 	select BR2_PACKAGE_FOOT
 	select BR2_PACKAGE_GTK_LAYER_SHELL
 	select BR2_PACKAGE_LABWC
+	select BR2_PACKAGE_PCMANFM
 	select BR2_PACKAGE_LIBRSVG
+	select BR2_PACKAGE_LIBNMA
 	select BR2_PACKAGE_LIBGTK3
 	select BR2_PACKAGE_LIBGTK3_WAYLAND
+	select BR2_PACKAGE_NETWORK_MANAGER
+	select BR2_PACKAGE_PULSEAUDIO
+	select BR2_PACKAGE_PULSEAUDIO_DAEMON
 	select BR2_PACKAGE_SEATD
-	select BR2_PACKAGE_SFWBAR
-	select BR2_PACKAGE_SWAYBG
+	select BR2_PACKAGE_WF_PANEL_PI
+	select BR2_PACKAGE_WFPLUG_BATT
+	select BR2_PACKAGE_WFPLUG_CLOCK
+	select BR2_PACKAGE_WFPLUG_MENU
+	select BR2_PACKAGE_WFPLUG_NETMAN
+	select BR2_PACKAGE_WFPLUG_POWER
+	select BR2_PACKAGE_WFPLUG_VOLUMEPULSE
+	select BR2_PACKAGE_WPA_SUPPLICANT_DBUS
 	select BR2_PACKAGE_WLR_RANDR
 	help
 	  Install the T-Display K230's standard Labwc desktop session.
 
-	  Labwc provides the Wayland compositor, swaybg provides the background,
-	  sfwbar provides the standard launcher and taskbar, and foot is the
-	  default terminal. The package contains the XDG and systemd configuration
-	  for authenticated image desktop sessions.
+	  Labwc remains the Wayland compositor. Raspberry Pi's maintained
+	  wf-panel-pi supplies the single top panel and PCManFM owns the wallpaper,
+	  desktop icons and context menu. Foot is the default terminal. The package
+	  contains the XDG and systemd configuration for authenticated sessions.
 
 comment "TDVP Labwc desktop session needs systemd"
 	depends on !BR2_INIT_SYSTEMD

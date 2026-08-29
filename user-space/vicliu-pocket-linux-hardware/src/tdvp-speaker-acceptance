@@ -1,0 +1,61 @@
+#!/bin/sh
+# Human-in-the-loop external speaker acceptance for the MAX98357A path.
+#
+# A computer can prove the K230 ALSA route and control exists, but cannot
+# honestly infer that a physical loudspeaker emitted sound. Keep that fact
+# separate from driver registration: only explicit audible confirmation creates
+# the state publisher's speaker acceptance record.
+set -eu
+
+readonly ROUTE=/usr/local/bin/tdvp-audio-route
+readonly SPEAKER_TEST=/usr/bin/speaker-test
+readonly ACCEPTANCE_DIR=/run/vicliu-pocket-linux-hardware/acceptance
+readonly ACCEPTANCE_FILE="${ACCEPTANCE_DIR}/speaker.pass"
+
+fail() {
+	printf '%s\n' "tdvp-speaker-acceptance: $*" >&2
+	exit 1
+}
+
+usage() {
+	cat >&2 <<'EOF'
+Usage: tdvp-speaker-acceptance status|test|confirm-audible
+
+test:             select the external route and play an interactive sine test.
+                  Stop it with Ctrl-C after hearing both channels.
+confirm-audible:  record a human confirmation after the physical speaker test.
+status:           report the selected route and whether audible output was
+                  explicitly accepted for this boot.
+EOF
+	exit 2
+}
+
+[ "$(id -u)" -eq 0 ] || fail 'must run as root'
+
+case "${1:-}" in
+	status)
+		"${ROUTE}" status
+		if [ -f "${ACCEPTANCE_FILE}" ]; then
+			printf '%s\n' 'audible acceptance: passed'
+		else
+			printf '%s\n' 'audible acceptance: pending human confirmation'
+		fi
+		;;
+	test)
+		[ -x "${SPEAKER_TEST}" ] || fail 'speaker-test is unavailable'
+		"${ROUTE}" external
+		exec "${SPEAKER_TEST}" -D default -c 2 -t sine
+		;;
+	confirm-audible)
+		[ "$("${ROUTE}" status)" = external ] || fail 'external route is not selected'
+		mkdir -p "${ACCEPTANCE_DIR}"
+		temporary="${ACCEPTANCE_DIR}/.speaker.pass.$$"
+		umask 022
+		printf '%s confirmed-audible\n' "$(date -Iseconds 2>/dev/null || date)" > "${temporary}"
+		mv -f "${temporary}" "${ACCEPTANCE_FILE}"
+		printf '%s\n' 'tdvp-speaker-acceptance: audible external speaker accepted'
+		;;
+	*)
+		usage
+		;;
+esac

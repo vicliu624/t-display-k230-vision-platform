@@ -4,7 +4,7 @@
 
 | 源码 | 职责 |
 | --- | --- |
-| `tdvp-labwc-desktop` | Labwc 桌面会话的 systemd 服务与 XDG 配置。Labwc 获取 DRM backend 后启动 Swaybg 与 SFWBar。 |
+| `tdvp-labwc-desktop` | Labwc 桌面会话的 systemd 服务与 XDG 配置。Labwc 获取 DRM backend 后启动 PCManFM desktop mode 与 TDVP 主题的 wf-panel-pi 单顶栏；已启用鼠标模拟的触摸设备保留短按/拖动左键，并将静止长按转换为右键。 |
 | `tdvp-kpu-acceptance` | KPU runtime 检查与验收工具。 |
 | `vicliu-pocket-linux-hardware` | 板级集成服务与硬件状态发布工具。 |
 

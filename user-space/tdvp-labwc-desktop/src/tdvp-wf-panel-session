@@ -1,0 +1,41 @@
+#!/bin/sh
+set -u
+
+# The image is a pure Wayland Labwc session. Keep GTK clients on that backend
+# even though PCManFM needs GTK's X11 headers at build time for legacy code.
+export GDK_BACKEND=wayland
+# wfplug-netman has its schema in a private, product-owned cache so the
+# complete panel configuration is usable on the stripped-down Buildroot image.
+export GSETTINGS_SCHEMA_DIR="/etc/tdvp/gsettings${GSETTINGS_SCHEMA_DIR:+:${GSETTINGS_SCHEMA_DIR}}"
+# GTK3 on this K230 stack does not emit the Wayland `committed` signal used by
+# wf-panel-pi.  The small compatibility library defers that callback so the
+# existing Raspberry Pi smenu implementation can display normally.
+export LD_PRELOAD="/usr/local/lib/tdvp-gdk-committed-compat.so${LD_PRELOAD:+:${LD_PRELOAD}}"
+# Raspberry Pi's maintained netman plugin invokes iw by its normal command
+# name, while Buildroot installs iw and rfkill in /usr/sbin. Include the
+# conventional system administration directories for panel children so the
+# network status menu has the same tools as an interactive root shell.
+export PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+
+# wfplug-menu launches .desktop entries by inheriting the panel process's
+# current directory.  greetd may retain its own cwd while authenticating a
+# session, so make every menu-launched program start in the home directory of
+# the user that actually logged in.  Do not silently redirect another account
+# to TDVP's home if PAM/session setup is incomplete.
+if [ -z "${HOME:-}" ] || [ ! -d "${HOME}" ]; then
+	echo "tdvp-wf-panel: HOME is unavailable" >&2
+	exit 1
+fi
+cd "${HOME}"
+
+log_file="${XDG_RUNTIME_DIR:-/tmp}/tdvp-wf-panel-pi.log"
+while :; do
+	# wf-panel-pi builds its schema from /etc/xdg but subsequently reloads only
+	# its selected config file.  Pin that file here: otherwise its auto-created
+	# empty ~/.config override discards every product widget after first login.
+	/usr/bin/wf-panel-pi --config /etc/xdg/wf-panel-pi/wf-panel-pi.ini >>"${log_file}" 2>&1
+	status=$?
+	# A clean exit is intentional (for example, on session shutdown).
+	[ "$status" -eq 0 ] && exit 0
+	sleep 1
+done

@@ -19,7 +19,7 @@ bash buildroot/tools/assert-public-release.sh "$WORKTREE"
 
 ```sh
 uname -a
-systemctl status sshd systemd-networkd seatd tdvp-labwc-desktop
+systemctl status sshd NetworkManager seatd tdvp-labwc-desktop
 ip address
 ls -l /dev/dri /dev/input
 cat /sys/class/drm/card0-DSI-1/status
@@ -30,8 +30,8 @@ tdvp-display-smoke --device /dev/dri/card0 --seconds 5
 
 | 功能 | 验证接口 |
 | --- | --- |
-| Wi-Fi | `iw dev`、`wpa_cli -i wlan0 status`、`ip address show wlan0` |
-| USB 网卡 | `ethtool enu1`、`ip address show enu1` |
+| Wi-Fi | `nmcli device`、`nmcli connection show --active`、`ip address show wlan0` |
+| USB 网卡 | `nmcli device`、`ethtool enu1`、`ip address show enu1` |
 | 键盘 | `cat /proc/bus/input/devices`、`evtest` |
 | 触摸 | `cat /proc/bus/input/devices`、`evtest` |
 | I2C 外设 | `i2cdetect -y <bus>` |
@@ -40,5 +40,6 @@ tdvp-display-smoke --device /dev/dri/card0 --seconds 5
 | 摄像头/ISP | vendor ISP 服务状态与 V4L2 节点 |
 | KPU | `tdvp-kpu-acceptance` |
 
-当 `tdvp-labwc-desktop.service` 启动 Labwc、Swaybg、SFWBar 与 Foot，并且面板能够
-响应键盘和触摸输入时，Wayland 桌面通过验收。
+当 `tdvp-labwc-desktop.service` 启动 Labwc、Swaybg、PCManFM、wf-panel-pi 与 Foot，
+面板和桌面菜单能够响应键盘与触摸输入，并且 NetworkManager 管理活动网络连接时，
+Wayland 桌面通过验收。

@@ -16,6 +16,8 @@ define VICLIU_POCKET_LINUX_HARDWARE_ENABLE_SERVICE
 		$(TARGET_DIR)/etc/systemd/system/timers.target.wants
 	ln -sf ../../../../usr/lib/systemd/system/vicliu-pocket-linux-hardware.service \
 		$(TARGET_DIR)/etc/systemd/system/multi-user.target.wants/vicliu-pocket-linux-hardware.service
+	ln -sf ../../../../usr/lib/systemd/system/tdvp-rootfs-expand.service \
+		$(TARGET_DIR)/etc/systemd/system/multi-user.target.wants/tdvp-rootfs-expand.service
 	ln -sf ../../../../usr/lib/systemd/system/tdvp-rtc-load.service \
 		$(TARGET_DIR)/etc/systemd/system/sysinit.target.wants/tdvp-rtc-load.service
 	ln -sf ../../../../usr/lib/systemd/system/tdvp-rtc-restore.service \

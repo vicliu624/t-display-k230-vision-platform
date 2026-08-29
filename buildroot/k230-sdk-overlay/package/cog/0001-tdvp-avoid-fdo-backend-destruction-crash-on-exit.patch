@@ -1,0 +1,63 @@
+From 55a12b5e779f0bb5f67392f82f353745578d75d4 Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@tdvp.local>
+Date: Fri, 28 Aug 2026 04:38:00 +0800
+Subject: [PATCH] cog: avoid broken FDO backend destruction at process exit
+
+Buildroot 2025.02 ships Cog 0.18.4. Its Wayland platform creates an
+exportable FDO backend and gives WebKit the normal FDO destruction callback.
+On the K230's software-rendered wlroots session, closing Cog faults inside
+libWPEBackend-fdo's destruction path. Cog 0.18.4 already documents the same
+problem in its explicit finalize calls: both the view-backend and exportable
+backend destruction operations are deliberately commented out as known crash
+sites.
+
+The browser is a short-lived desktop application. Do not destroy the
+exportable backend after WebKit has torn down the Wayland view: retain it
+until process exit, where the kernel releases its mappings. This keeps normal
+page rendering, HTTPS, input, and window-management paths unchanged, while
+making a user-initiated close safe on the affected FDO implementation.
+
+This is intentionally limited to Cog 0.18.4's Wayland platform and can be
+removed once the upstream FDO teardown defect is fixed in the Buildroot
+baseline.
+
+---
+ platform/wayland/cog-platform-wl.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/platform/wayland/cog-platform-wl.c b/platform/wayland/cog-platform-wl.c
+index c81028c..a33225c 100644
+--- a/platform/wayland/cog-platform-wl.c
++++ b/platform/wayland/cog-platform-wl.c
+@@ -2565,6 +2565,19 @@ cog_wl_platform_finalize(GObject *object)
+     G_OBJECT_CLASS(cog_wl_platform_parent_class)->finalize(object);
+ }
+ 
++static void
++cog_wl_fdo_backend_destroy_at_process_exit(gpointer backend G_GNUC_UNUSED)
++{
++    /*
++     * Cog 0.18.4 already avoids explicitly destroying this object in
++     * cog_wl_platform_finalize() because that operation can fault in the FDO
++     * backend. WebKit invokes this destroy notifier after it has torn down
++     * the Wayland view, which reaches the same unsafe implementation. The
++     * Cog process exits immediately afterwards, so retaining this one object
++     * until process exit is safe and the OS releases its resources.
++     */
++}
++
+ static WebKitWebViewBackend *
+ cog_wl_platform_get_view_backend(CogPlatform *platform, WebKitWebView *related_view, GError **error)
+ {
+@@ -2588,7 +2601,7 @@ cog_wl_platform_get_view_backend(CogPlatform *platform, WebKitWebView *related_v
+ 
+     WebKitWebViewBackend *wk_view_backend =
+         webkit_web_view_backend_new(wpe_view_data.backend,
+-                                    (GDestroyNotify) wpe_view_backend_exportable_fdo_destroy,
++                                    cog_wl_fdo_backend_destroy_at_process_exit,
+                                     wpe_host_data.exportable);
+     g_assert(wk_view_backend);
+ 
+-- 
+2.43.0
+

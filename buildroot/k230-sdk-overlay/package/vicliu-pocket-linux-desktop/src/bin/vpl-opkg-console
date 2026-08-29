@@ -1,0 +1,17 @@
+#!/bin/sh
+# This is a terminal front end for the real opkg client, not a custom package
+# manager. The image embeds one ABI-fixed source and one public signing key.
+set -eu
+
+# Keep the command printed below usable in this interactive shell even when
+# the parent panel was launched before a PATH-policy update.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+printf '%s\n' 'TDVP Software Manager (opkg)'
+printf '%s\n' 'The signed, ABI-fixed TDVP application feed is configured.'
+printf '%s\n' 'Use: sudo tdvp-opkg update'
+printf '%s\n' 'Then: sudo tdvp-opkg list; sudo tdvp-opkg install <package>'
+printf '%s\n' 'If signature verification fails, do not bypass it; check feed publication.'
+printf '\n'
+
+exec /bin/sh -i

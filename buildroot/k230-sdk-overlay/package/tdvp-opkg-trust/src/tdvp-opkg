@@ -1,0 +1,8 @@
+#!/bin/sh
+# Initialise the immutable public-key ring immediately before an operator uses
+# opkg.  This is intentionally not a boot service: a network application feed
+# must never become a prerequisite for storage, login, or the desktop.
+set -eu
+
+/usr/local/libexec/tdvp-opkg-bootstrap
+exec /usr/bin/opkg "$@"

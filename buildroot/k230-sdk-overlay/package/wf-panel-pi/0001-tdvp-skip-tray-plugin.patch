@@ -1,0 +1,25 @@
+From: TDVP <tdvp@example.invalid>
+Date: Tue, 25 Aug 2026 12:00:00 +0800
+Subject: [PATCH] tdvp: omit the optional StatusNotifier tray
+
+The first TDVP migration image intentionally ships a small conventional
+desktop: menu, window-list, status adapters and clock. Building the upstream
+StatusNotifier tray would add dbusmenu solely for a component that is not yet
+part of that product surface. Keep the upstream panel and its plugin ABI
+unchanged, while excluding only that optional plugin from this profile.
+
+Signed-off-by: TDVP <tdvp@example.invalid>
+---
+ src/widgets/meson.build | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/widgets/meson.build b/src/widgets/meson.build
+index 82a93a8..fd4d1e1 100644
+--- a/src/widgets/meson.build
++++ b/src/widgets/meson.build
+@@ -1,5 +1,4 @@
+ subdir('launchers')
+ subdir('notify')
+ subdir('spacing')
+-subdir('tray')
+ subdir('window-list')

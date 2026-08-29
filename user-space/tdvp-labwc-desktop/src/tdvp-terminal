@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+# A desktop-entry launch is not guaranteed to inherit a login-shell working
+# directory.  Foot creates its shell from that directory, so make the
+# authenticated user's HOME an explicit part of the terminal contract.
+if [ -z "${HOME:-}" ] || [ ! -d "${HOME}" ]; then
+	echo "tdvp-terminal: HOME is unavailable" >&2
+	exit 1
+fi
+
+cd "${HOME}"
+
+# A terminal can also be opened from an already-running desktop after an image
+# update. Keep the standard local admin directories available independently of
+# the parent compositor's inherited PATH.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# A failed Wayland client otherwise disappears without any feedback from the
+# menu.  Keep only a small per-login diagnostic record; normal Foot output is
+# also harmless there and this does not affect its terminal I/O.
+log_dir="${XDG_STATE_HOME:-${HOME}/.local/state}/tdvp"
+mkdir -p "${log_dir}"
+exec /usr/bin/foot "$@" >>"${log_dir}/foot.log" 2>&1

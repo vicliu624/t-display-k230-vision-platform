@@ -18,6 +18,8 @@ mkdir -p "${rollback_dir}"
 for path in \
 	/usr/bin/greetd \
 	/usr/bin/gtkgreet \
+	/usr/bin/wf-panel-pi \
+	/usr/bin/pcmanfm \
 	/usr/bin/sfwbar \
 	/usr/bin/swaybg \
 	/usr/local/bin/tdvp-greeter-session \
@@ -31,9 +33,13 @@ for path in \
 	/etc/udev/rules.d/70-tdvp-touch.rules \
 	/etc/xdg/labwc/autostart \
 	/etc/xdg/labwc/rc.xml \
+	/etc/xdg/wf-panel-pi/wf-panel-pi.ini \
+	/etc/wf-panel-pi/tdvp.css \
+	/etc/xdg/pcmanfm/default/pcmanfm.conf \
+	/usr/local/bin/tdvp-wf-panel-session \
+	/usr/local/bin/tdvp-pcmanfm-desktop-session \
 	/etc/sfwbar/sfwbar.config \
 	/usr/share/sfwbar/tdvp-launcher.widget \
-	/usr/local/bin/vpl-app-launcher \
 	/usr/share/backgrounds/tdvp-pda-paper.png \
 	/usr/share/backgrounds/tdvp-pda-paper.svg \
 	/usr/lib/sfwbar \
@@ -74,6 +80,12 @@ chmod 0700 /var/lib/greetd /var/lib/greetd/.cache
 
 gzip -dc "${bundle}" | tar -x -f - -C /
 
+# The image moved from SFWBar/swaybg to wf-panel-pi/PCManFM. These targets were
+# saved in the rollback directory above; remove only the now-obsolete runtime
+# paths so an incremental graphical-login stage cannot resurrect the old dock.
+rm -f /usr/bin/sfwbar /usr/bin/swaybg /usr/local/bin/tdvp-sfwbar-session
+rm -rf /etc/sfwbar /usr/lib/sfwbar /usr/share/sfwbar
+
 if [ -e /root/tdvp-recover-direct-desktop ]; then
 	mkdir -p /usr/local/sbin
 	install -m 0755 /root/tdvp-recover-direct-desktop \
@@ -83,25 +95,28 @@ fi
 systemctl daemon-reload
 test -x /usr/bin/greetd
 test -x /usr/bin/gtkgreet
-test -x /usr/bin/sfwbar
-test -x /usr/bin/swaybg
+test -x /usr/bin/wf-panel-pi
+test -x /usr/bin/pcmanfm
 test -s /etc/greetd/gtkgreet.css
 test -s /etc/tdvp/labwc/environment
 test -s /etc/udev/rules.d/70-tdvp-touch.rules
 test -s /etc/xdg/labwc/autostart
 test -s /etc/xdg/labwc/rc.xml
-test -s /etc/sfwbar/sfwbar.config
-test -s /usr/share/sfwbar/tdvp-launcher.widget
+test -x /usr/local/bin/tdvp-wf-panel-session
+test -x /usr/local/bin/tdvp-pcmanfm-desktop-session
+test -s /etc/xdg/wf-panel-pi/wf-panel-pi.ini
+test -s /etc/wf-panel-pi/tdvp.css
+test -s /etc/xdg/pcmanfm/default/pcmanfm.conf
 test -s /usr/share/backgrounds/tdvp-pda-paper.png
 test -s /usr/share/backgrounds/tdvp-pda-paper.svg
-test -d /usr/lib/sfwbar
-test -d /usr/share/sfwbar
 sh -n /usr/local/bin/tdvp-greeter-session
 sh -n /usr/local/bin/tdvp-greeter-labwc
 sh -n /usr/local/bin/tdvp-labwc-session
+sh -n /usr/local/bin/tdvp-wf-panel-session
+sh -n /usr/local/bin/tdvp-pcmanfm-desktop-session
 grep -q 'mouseEmulation>yes' /etc/xdg/labwc/rc.xml
-grep -q 'widget "tdvp-launcher.widget"' /etc/sfwbar/sfwbar.config
-test -x /usr/local/bin/vpl-app-launcher
+grep -q 'widgets_left=smenu spacing8 window-list' /etc/xdg/wf-panel-pi/wf-panel-pi.ini
+grep -q 'show_wm_menu=0' /etc/xdg/pcmanfm/default/pcmanfm.conf
 
 echo "tdvp graphical login staged"
 echo "rollback=${rollback_dir}"

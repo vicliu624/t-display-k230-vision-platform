@@ -1,0 +1,192 @@
+From 4afc3a5a2e1185bc50d2cbcb4be6c1c791860c01 Mon Sep 17 00:00:00 2001
+From: TDVP <tdvp@example.invalid>
+Date: Mon, 25 Aug 2026 20:15:00 +0800
+Subject: [PATCH] input: emulate right click for a stationary touch long press
+
+The TDVP desktop deliberately uses Labwc's mouseEmulation mode for the
+Goodix panel so that Wayland applications, layer surfaces, and the panel have
+one consistent pointer-input path. That mode currently turns every contact
+into BTN_LEFT only, which leaves touch users without the ordinary desktop
+right-click affordance.
+
+For mouse-emulated touch contacts, keep the existing immediate left-button
+press so short taps, double taps and dragging retain their current behaviour.
+When a single contact remains within a small layout-space slop window for
+650 ms, release BTN_LEFT and press BTN_RIGHT. Releasing the physical contact
+then releases the active emulated button. A second contact or movement beyond
+the slop window cancels the pending long press.
+
+This does not affect native touch clients or devices that have not opted into
+mouseEmulation.
+
+---
+diff --git a/src/input/touch.c b/src/input/touch.c
+index 4c6bd7f..b09d608 100644
+--- a/src/input/touch.c
++++ b/src/input/touch.c
+@@ -11,27 +11,83 @@
+ #include "config/mousebind.h"
+ #include "action.h"
+ 
++/*
++ * Keep ordinary touch input responsive while providing the conventional
++ * desktop context-menu gesture. The values are deliberately in output
++ * layout pixels: device normalization, calibration and output transforms are
++ * already applied by wlr_cursor_absolute_to_layout_coords().
++ */
++#define TOUCH_LONG_PRESS_TIMEOUT_MS 650
++#define TOUCH_LONG_PRESS_SLOP_PX 18.0
++
+ /* Holds layout -> surface offsets to report motion events in relative coords */
+ struct touch_point {
+ 	int32_t touch_id;
+ 	uint32_t x_offset;
+ 	uint32_t y_offset;
+ 	struct wlr_surface *surface;
++	struct seat *seat;
++	struct wl_event_source *long_press_timer;
++	bool force_mouse_emulation;
++	uint32_t emulated_button;
++	uint32_t long_press_time_msec;
++	double initial_lx;
++	double initial_ly;
+ 	struct wl_list link; /* seat.touch_points */
+ };
+ 
++static bool
++touch_force_mouse_emulation(struct wlr_touch *touch)
++{
++	struct touch_config_entry *config_entry =
++		touch_find_config_for_device(touch->base.name);
++	return config_entry && config_entry->force_mouse_emulation;
++}
++
++static void
++touch_cancel_long_press(struct touch_point *touch_point)
++{
++	if (!touch_point->long_press_timer) {
++		return;
++	}
++
++	wl_event_source_remove(touch_point->long_press_timer);
++	touch_point->long_press_timer = NULL;
++}
++
++static int
++handle_touch_long_press(void *data)
++{
++	struct touch_point *touch_point = data;
++
++	if (!touch_point->force_mouse_emulation
++			|| touch_point->emulated_button != BTN_LEFT) {
++		return 0;
++	}
++
++	/*
++	 * A short tap has already been delivered as BTN_LEFT press. End that
++	 * sequence before starting BTN_RIGHT so clients observe a normal click
++	 * followed by a normal context-menu press/release pair.
++	 */
++	cursor_emulate_button(touch_point->seat, BTN_LEFT,
++		WL_POINTER_BUTTON_STATE_RELEASED, touch_point->long_press_time_msec);
++	cursor_emulate_button(touch_point->seat, BTN_RIGHT,
++		WL_POINTER_BUTTON_STATE_PRESSED, touch_point->long_press_time_msec);
++	touch_point->emulated_button = BTN_RIGHT;
++	return 0;
++}
++
+ static struct wlr_surface*
+ touch_get_coords(struct seat *seat, struct wlr_touch *touch, double x, double y,
+-		double *x_offset, double *y_offset)
++		double *x_offset, double *y_offset, bool force_mouse_emulation)
+ {
+ 	/*
+ 	 * Do not return a surface when mouse emulation is enforced. Not
+ 	 * having a surface will trigger the fallback to cursor move/button
+ 	 * emulation in the touch signal handlers.
+ 	 */
+-	struct touch_config_entry *config_entry =
+-		touch_find_config_for_device(touch->base.name);
+-	if (config_entry && config_entry->force_mouse_emulation) {
++	if (force_mouse_emulation) {
+ 		return NULL;
+ 	}
+ 
+@@ -87,6 +143,18 @@
+ 				wlr_seat_touch_notify_motion(seat->seat, event->time_msec,
+ 					event->touch_id, sx, sy);
+ 			} else {
++				if (touch_point->long_press_timer) {
++					double lx, ly;
++					wlr_cursor_absolute_to_layout_coords(seat->cursor,
++						&event->touch->base, event->x, event->y, &lx, &ly);
++					double dx = lx - touch_point->initial_lx;
++					double dy = ly - touch_point->initial_ly;
++					if (dx * dx + dy * dy
++							> TOUCH_LONG_PRESS_SLOP_PX * TOUCH_LONG_PRESS_SLOP_PX) {
++						touch_cancel_long_press(touch_point);
++					}
++				}
++
+ 				if (touch_point_count == 1) {
+ 					cursor_emulate_move_absolute(seat, &event->touch->base,
+ 						event->x, event->y, event->time_msec);
+@@ -116,14 +184,24 @@
+ 	/* Compute layout => surface offset and save for this touch point */
+ 	struct touch_point *touch_point = znew(*touch_point);
+ 	double x_offset = 0.0, y_offset = 0.0;
++	touch_point->seat = seat;
++	touch_point->force_mouse_emulation =
++		touch_force_mouse_emulation(event->touch);
+ 	touch_point->surface = touch_get_coords(seat, event->touch,
+-			event->x, event->y, &x_offset, &y_offset);
++			event->x, event->y, &x_offset, &y_offset,
++			touch_point->force_mouse_emulation);
+ 	touch_point->touch_id = event->touch_id;
+ 	touch_point->x_offset = x_offset;
+ 	touch_point->y_offset = y_offset;
+ 
+ 	wl_list_insert(&seat->touch_points, &touch_point->link);
+ 	int touch_point_count = wl_list_length(&seat->touch_points);
++	if (touch_point_count > 1) {
++		struct touch_point *point;
++		wl_list_for_each(point, &seat->touch_points, link) {
++			touch_cancel_long_press(point);
++		}
++	}
+ 
+ 	/* hide the cursor when starting touch input */
+ 	cursor_set_visible(seat, /* visible */ false);
+@@ -165,6 +243,21 @@
+ 		}
+ 		cursor_emulate_button(seat, BTN_LEFT, WL_POINTER_BUTTON_STATE_PRESSED,
+ 			event->time_msec);
++		touch_point->emulated_button = BTN_LEFT;
++
++		if (touch_point_count == 1 && touch_point->force_mouse_emulation) {
++			wlr_cursor_absolute_to_layout_coords(seat->cursor,
++				&event->touch->base, event->x, event->y,
++				&touch_point->initial_lx, &touch_point->initial_ly);
++			touch_point->long_press_time_msec =
++				event->time_msec + TOUCH_LONG_PRESS_TIMEOUT_MS;
++			touch_point->long_press_timer = wl_event_loop_add_timer(
++				seat->server->wl_event_loop, handle_touch_long_press, touch_point);
++			if (touch_point->long_press_timer) {
++				wl_event_source_timer_update(touch_point->long_press_timer,
++					TOUCH_LONG_PRESS_TIMEOUT_MS);
++			}
++		}
+ 	}
+ }
+ 
+@@ -184,7 +277,8 @@
+ 				wlr_seat_touch_notify_up(seat->seat, event->time_msec,
+ 					event->touch_id);
+ 			} else {
+-				cursor_emulate_button(seat, BTN_LEFT,
++				touch_cancel_long_press(touch_point);
++				cursor_emulate_button(seat, touch_point->emulated_button,
+ 					WL_POINTER_BUTTON_STATE_RELEASED, event->time_msec);
+ 			}
+ 			wl_list_remove(&touch_point->link);
+

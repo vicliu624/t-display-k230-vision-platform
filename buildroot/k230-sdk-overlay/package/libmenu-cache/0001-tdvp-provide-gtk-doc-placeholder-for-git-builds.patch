@@ -1,0 +1,45 @@
+From 2d68d40b6f09544a89ea436579fe72ab8b2b4c1b Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@tdvp.local>
+Date: Tue, 26 Aug 2026 09:18:00 +0800
+Subject: [PATCH] build: support documentation-disabled Git checkouts
+
+The upstream Git tree omits the gtkdocize-generated gtk-doc.make file.
+Automake parses the documentation Makefile before the --disable-gtk-doc
+conditional removes it from the build, so a Git checkout cannot configure in
+an embedded documentation-disabled build.
+
+Supply an intentionally empty include file and initialize EXTRA_DIST in the
+parsed documentation Makefile. The documentation subtree remains disabled by
+the package configure option and no documentation is installed in the image.
+---
+ docs/reference/libmenu-cache/Makefile.am | 2 +-
+ gtk-doc.make                             | 5 +++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+ create mode 100644 gtk-doc.make
+
+diff --git a/docs/reference/libmenu-cache/Makefile.am b/docs/reference/libmenu-cache/Makefile.am
+index 57132c3..526392d 100644
+--- a/docs/reference/libmenu-cache/Makefile.am
++++ b/docs/reference/libmenu-cache/Makefile.am
+@@ -86,7 +86,7 @@ include $(top_srcdir)/gtk-doc.make
+ 
+ # Other files to distribute
+ # e.g. EXTRA_DIST += version.xml.in
+-EXTRA_DIST +=
++EXTRA_DIST =
+ 
+ # Files not to distribute
+ # for --rebuild-types in $(SCAN_OPTIONS), e.g. $(DOC_MODULE).types
+diff --git a/gtk-doc.make b/gtk-doc.make
+new file mode 100644
+index 0000000..4e28dcd
+--- /dev/null
++++ b/gtk-doc.make
+@@ -0,0 +1,5 @@
++# Placeholder for a Git checkout built with --disable-gtk-doc.
++#
++# The source release creates this file with gtkdocize. It is only needed so
++# Automake can parse the documentation Makefile; documentation is disabled
++# for the embedded target.
+-- 
+2.46.0

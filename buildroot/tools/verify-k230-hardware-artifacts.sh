@@ -29,6 +29,15 @@ require_buildroot_selection() {
 	}
 }
 
+reject_buildroot_selection() {
+	local symbol="$1"
+
+	if grep -Fqx "${symbol}=y" "$OUTPUT_DIR/.config"; then
+		printf 'TDVP K230 preflight: retired Buildroot selection is still enabled: %s\n' "$symbol" >&2
+		exit 1
+	fi
+}
+
 require_file "$OUTPUT_DIR/.config"
 for symbol in \
 	BR2_INIT_SYSTEMD \
@@ -38,8 +47,37 @@ for symbol in \
 	BR2_PACKAGE_LIBGTK3_WAYLAND \
 	BR2_PACKAGE_GTK_LAYER_SHELL \
 	BR2_PACKAGE_LABWC \
-	BR2_PACKAGE_SFWBAR \
-	BR2_PACKAGE_SWAYBG \
+	BR2_PACKAGE_GTKMM3 \
+	BR2_PACKAGE_LIBFM_EXTRA \
+	BR2_PACKAGE_LIBMENU_CACHE \
+	BR2_PACKAGE_LIBFM \
+	BR2_PACKAGE_PCMANFM \
+	BR2_PACKAGE_OPKG \
+	BR2_PACKAGE_OPKG_GPG_SIGN \
+	BR2_PACKAGE_GNUPG2 \
+	BR2_PACKAGE_GNUPG2_GPGV \
+	BR2_PACKAGE_TDVP_OPKG_TRUST \
+	BR2_PACKAGE_GLIB_NETWORKING \
+	BR2_PACKAGE_NETWORK_MANAGER \
+	BR2_PACKAGE_NETWORK_MANAGER_CLI \
+	BR2_PACKAGE_GPTFDISK \
+	BR2_PACKAGE_GPTFDISK_SGDISK \
+	BR2_PACKAGE_E2FSPROGS \
+	BR2_PACKAGE_E2FSPROGS_RESIZE2FS \
+	BR2_PACKAGE_LIBCANBERRA \
+	BR2_PACKAGE_SOUND_THEME_FREEDESKTOP \
+	BR2_PACKAGE_LIBSECRET \
+	BR2_PACKAGE_LIBNMA \
+	BR2_PACKAGE_PULSEAUDIO \
+	BR2_PACKAGE_PULSEAUDIO_DAEMON \
+	BR2_PACKAGE_WF_PANEL_PI \
+	BR2_PACKAGE_WFPLUG_BATT \
+	BR2_PACKAGE_WFPLUG_MENU \
+	BR2_PACKAGE_WFPLUG_CLOCK \
+	BR2_PACKAGE_WFPLUG_NETMAN \
+	BR2_PACKAGE_WFPLUG_POWER \
+	BR2_PACKAGE_WFPLUG_VOLUMEPULSE \
+	BR2_PACKAGE_WPA_SUPPLICANT_DBUS \
 	BR2_PACKAGE_FOOT \
 	BR2_PACKAGE_WVKBD \
 	BR2_PACKAGE_TDVP_LABWC_DESKTOP \
@@ -49,6 +87,9 @@ for symbol in \
 	BR2_PACKAGE_TDVP_KEYBOARD_LAYOUT \
 	BR2_PACKAGE_TDVP_WAYLAND_ACCEPTANCE; do
 	require_buildroot_selection "$symbol"
+done
+for symbol in BR2_PACKAGE_SFWBAR BR2_PACKAGE_SWAYBG; do
+	reject_buildroot_selection "$symbol"
 done
 
 kernel_config="$(find "$OUTPUT_DIR/build" -maxdepth 2 -path '*/.config' -path '*linux*' -print -quit)"
@@ -98,6 +139,32 @@ file "$TARGET_DIR/usr/bin/wvkbd-mobintl" | grep -Fq 'RISC-V' || {
 	exit 1
 }
 
+for desktop_path in \
+	/usr/bin/wf-panel-pi \
+	/usr/bin/pcmanfm \
+	/usr/local/bin/tdvp-wf-panel-session \
+	/usr/local/bin/tdvp-pcmanfm-desktop-session \
+	/etc/xdg/wf-panel-pi/wf-panel-pi.ini \
+	/etc/xdg/pcmanfm/default/pcmanfm.conf; do
+	require_file "$TARGET_DIR$desktop_path"
+done
+grep -Fqx 'wallpaper=/usr/share/backgrounds/tdvp-pda-paper.png' \
+	"$TARGET_DIR/etc/xdg/pcmanfm/default/pcmanfm.conf" || {
+	printf '%s\n' 'TDVP K230 preflight: PCManFM does not retain the TDVP wallpaper profile' >&2
+	exit 1
+}
+grep -Fqx 'show_wm_menu=0' \
+	"$TARGET_DIR/etc/xdg/pcmanfm/default/pcmanfm.conf" || {
+	printf '%s\n' 'TDVP K230 preflight: PCManFM must own blank-desktop context menus' >&2
+	exit 1
+}
+for retired_path in /usr/bin/sfwbar /usr/bin/swaybg /usr/local/bin/tdvp-sfwbar-session; do
+	if [ -e "$TARGET_DIR$retired_path" ]; then
+		printf 'TDVP K230 preflight: retired desktop artifact is still installed: %s\n' "$retired_path" >&2
+		exit 1
+	fi
+done
+
 dtb="$IMAGE_DIR/k230-canmv-rm69a10.dtb"
 [ -f "$dtb" ] || {
 	printf 'TDVP K230 preflight: RM69A10 board DTB is missing: %s\n' "$dtb" >&2
@@ -125,6 +192,8 @@ done
 	printf 'kpu_service=tdvp-kpu-acceptance.service\n'
 	printf 'hardware_status_tool=/usr/local/bin/vpl-hwctl\n'
 	printf 'onscreen_keyboard=/usr/bin/wvkbd-mobintl\n'
+	printf 'panel=wf-panel-pi\n'
+	printf 'background=pcmanfm\n'
 	printf 'runtime_acceptance=requires_target_device_nodes_and_kmodel_execution\n'
 } > "$REPORT"
 

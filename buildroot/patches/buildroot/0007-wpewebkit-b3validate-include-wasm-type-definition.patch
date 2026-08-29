@@ -1,0 +1,49 @@
+From 8d639c3ba3c5c10e889a991c39509b96df9a6977 Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@tdvp.local>
+Date: Thu, 27 Aug 2026 00:40:00 +0800
+Subject: [PATCH] wpewebkit: include Wasm type conversion in B3 validator
+
+JavaScriptCore's B3 validator checks the scalar type for WebAssembly SIMD
+lane operations.  The checks call Wasm::toB3Type() through argument-dependent
+lookup, but B3Validate.cpp no longer gets the declaration transitively on the
+RISC-V WPE build path.
+
+Include the defining header directly.  This is an include-hygiene fix: it does
+not change WebAssembly code generation or any runtime behaviour.
+
+---
+ package/wpewebkit/0001-b3validate-include-wasm-type-definition.patch | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+ create mode 100644 package/wpewebkit/0001-b3validate-include-wasm-type-definition.patch
+
+diff --git a/package/wpewebkit/0001-b3validate-include-wasm-type-definition.patch b/package/wpewebkit/0001-b3validate-include-wasm-type-definition.patch
+new file mode 100644
+index 0000000000..42c6f9e620
+--- /dev/null
++++ b/package/wpewebkit/0001-b3validate-include-wasm-type-definition.patch
+@@ -0,0 +1,25 @@
++From 4d8a8f1493707689bff28c5048d3db09ded6db2b Mon Sep 17 00:00:00 2001
++From: TDVP Build <build@tdvp.local>
++Date: Thu, 27 Aug 2026 00:40:00 +0800
++Subject: [PATCH] JavaScriptCore: include WasmTypeDefinition in B3Validate
++
++B3Validate uses Wasm::toB3Type for SIMD lane validation.  Include its
++declaration directly rather than depending on an incidental transitive
++include, which is absent in the RISC-V configuration.
++
++---
++ Source/JavaScriptCore/b3/B3Validate.cpp | 1 +
++ 1 file changed, 1 insertion(+)
++
++diff --git a/Source/JavaScriptCore/b3/B3Validate.cpp b/Source/JavaScriptCore/b3/B3Validate.cpp
++index 808650daaaf..7320b782cf0 100644
++--- a/Source/JavaScriptCore/b3/B3Validate.cpp
+++++ b/Source/JavaScriptCore/b3/B3Validate.cpp
++@@ -45,6 +45,7 @@
++ #include "B3Variable.h"
++ #include "B3VariableValue.h"
++ #include "B3WasmBoundsCheckValue.h"
+++#include "WasmTypeDefinition.h"
++ #include <wtf/HashSet.h>
++ #include <wtf/StringPrintStream.h>
++ #include <wtf/text/CString.h>

@@ -1,0 +1,9 @@
+config BR2_PACKAGE_WFPLUG_POWER
+	bool "wf-panel-pi power warning plugin"
+	depends on BR2_PACKAGE_WF_PANEL_PI
+	depends on BR2_PACKAGE_HAS_UDEV
+	help
+	  Raspberry Pi's upstream power and system-warning plugin for wf-panel-pi.
+
+comment "wfplug-power needs wf-panel-pi and udev"
+	depends on !BR2_PACKAGE_WF_PANEL_PI || !BR2_PACKAGE_HAS_UDEV

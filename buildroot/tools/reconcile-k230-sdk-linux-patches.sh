@@ -86,7 +86,9 @@ for expected_patch in \
 	0047-tdvp-misc-add-radio-profile-selector.patch \
 	0048-tdvp-radio-lr2021-spi-transport.patch \
 	0049-tdvp-k230-spi-bound-irq-enumeration.patch \
-	0050-tdvp-hwmon-aht20-standard-binding.patch; do
+	0050-tdvp-hwmon-aht20-standard-binding.patch \
+	0051-tdvp-riscv-dts-canaan-add-external-i2s-amp.patch \
+	0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch; do
 	[ -f "$OVERLAY_DIR/$expected_patch" ] || fail "overlay is missing $expected_patch"
 	[ -f "$PATCH_DIR/$expected_patch" ] || fail "SDK sync did not install $expected_patch"
 done

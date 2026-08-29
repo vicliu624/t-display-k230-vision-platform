@@ -1,0 +1,77 @@
+From 8a3c2d68c5e6f3154a0b9b49c09a69abde7cf5d1 Mon Sep 17 00:00:00 2001
+From: TDVP <tdvp@example.invalid>
+Date: Wed, 26 Aug 2026 20:00:00 +0800
+Subject: [PATCH] input: advertise a pointer for mouse-emulated touch devices
+
+On the T-Display K230 the Goodix panel is the only pointing device.  Its
+Labwc configuration deliberately enables mouseEmulation so that conventional
+Wayland desktop clients receive pointer clicks and so a long press can map to
+the normal desktop right-click gesture.
+
+Labwc 0.8.4 emulates the cursor motion and buttons correctly, but determines
+wl_seat capabilities solely from physical input-device types.  A system with
+only a touch device therefore advertises keyboard + touch, not pointer.  GTK
+panel controls and pointer-oriented clients such as Foot never bind wl_pointer;
+they cannot receive clicks and a click cannot establish keyboard focus.
+
+Treat a touch device configured for mouse emulation as a pointer capability in
+addition to its native touch capability.  This does not create a fake input
+device, alter touch coordinate mapping, or affect ordinary native-touch
+configurations.
+
+Signed-off-by: TDVP <tdvp@example.invalid>
+---
+ src/seat.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/src/seat.c b/src/seat.c
+index 74d40f5..b892764 100644
+--- a/src/seat.c
++++ b/src/seat.c
+@@ -10,6 +10,7 @@
+ #include <wlr/util/log.h>
+ #include "common/mem.h"
+ #include "input/ime.h"
++#include "config/rcxml.h"
+ #include "input/tablet.h"
+ #include "input/tablet-pad.h"
+ #include "input/input.h"
+@@ -364,6 +365,20 @@ new_tablet_pad(struct seat *seat, struct wlr_input_device *dev)
+ 	return input;
+ }
+ 
++static bool
++touch_uses_mouse_emulation(const struct input *input)
++{
++	if (input->wlr_input_device->type != WLR_INPUT_DEVICE_TOUCH) {
++		return false;
++	}
++
++	struct wlr_touch *touch =
++		wlr_touch_from_input_device(input->wlr_input_device);
++	struct touch_config_entry *config_entry =
++		touch_find_config_for_device(touch->base.name);
++	return config_entry && config_entry->force_mouse_emulation;
++}
++
+ static void
+ seat_update_capabilities(struct seat *seat)
+ {
+@@ -380,6 +395,14 @@ seat_update_capabilities(struct seat *seat)
+ 			break;
+ 		case WLR_INPUT_DEVICE_TOUCH:
+ 			caps |= WL_SEAT_CAPABILITY_TOUCH;
++			/*
++			 * cursor_emulate_*() sends wl_pointer events for this device.
++			 * Advertise that interface even when the board has no physical
++			 * mouse, otherwise clients cannot bind the events we emulate.
++			 */
++			if (touch_uses_mouse_emulation(input)) {
++				caps |= WL_SEAT_CAPABILITY_POINTER;
++			}
+ 			break;
+		default:
+			break;
+		}
+-- 
+2.47.3

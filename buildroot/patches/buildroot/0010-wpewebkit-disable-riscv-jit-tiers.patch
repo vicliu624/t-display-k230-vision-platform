@@ -1,0 +1,54 @@
+From 2e5d4f96aa55a8ab4d6538e32f04da33a6af4302 Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@tdvp.local>
+Date: Fri, 28 Aug 2026 00:00:00 +0800
+Subject: [PATCH] wpewebkit: disable unsupported RISC-V JIT tiers
+
+WebKit 2.44 contains a native RISC-V LLInt backend, but JavaScriptCore's
+DFG/FTL tiers do not build with the K230 Buildroot toolchain.  Disabling only
+ENABLE_JIT is insufficient: CMake leaves DFG, FTL, and the WebAssembly JIT
+subfeatures independently enabled, so the unsupported FTL source files still
+enter the build graph.
+
+Do not add RISC-V to Buildroot's CLoop guard for old ARM/MIPS CPUs.  CLoop is
+not a usable RISC-V fallback in this WebKit release: its offline assembler
+cannot generate the required LLInt entry macro.  Keep RISC-V on its native
+LLInt interpreter while explicitly disabling the higher JIT tiers,
+WebAssembly, and its sub-JITs.
+
+---
+ package/wpewebkit/wpewebkit.mk | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/package/wpewebkit/wpewebkit.mk b/package/wpewebkit/wpewebkit.mk
+index 1b8f1b3c0b..d436a12fb4 100644
+--- a/package/wpewebkit/wpewebkit.mk
++++ b/package/wpewebkit/wpewebkit.mk
+@@ -141,12 +141,26 @@ WPEWEBKIT_CONF_OPTS += -DUSE_GBM=OFF
+ #                https://bugs.webkit.org/show_bug.cgi?id=172765
+ #                https://bugs.webkit.org/show_bug.cgi?id=265218
+ #
+ ifeq ($(BR2_ARM_CPU_ARMV5)$(BR2_ARM_CPU_ARMV6)$(BR2_MIPS_CPU_MIPS32R6)$(BR2_MIPS_CPU_MIPS64R6),y)
+ WPEWEBKIT_CONF_OPTS += \
+ 	-DENABLE_JIT=OFF \
+ 	-DENABLE_C_LOOP=ON \
+ 	-DENABLE_SAMPLING_PROFILER=OFF \
+ 	-DENABLE_WEBASSEMBLY=OFF
+ endif
+ 
++# WebKit has a RISC-V native LLInt but its DFG/FTL compiler tiers do not
++# build with the K230 toolchain. Do not use CLoop here: it has no RISC-V
++# offline-assembler entry point in WebKit 2.44.
++ifeq ($(BR2_riscv),y)
++WPEWEBKIT_CONF_OPTS += \
++	-DENABLE_JIT=OFF \
++	-DENABLE_DFG_JIT=OFF \
++	-DENABLE_FTL_JIT=OFF \
++	-DENABLE_SAMPLING_PROFILER=OFF \
++	-DENABLE_WEBASSEMBLY=OFF \
++	-DENABLE_WEBASSEMBLY_BBQJIT=OFF \
++	-DENABLE_WEBASSEMBLY_OMGJIT=OFF
++endif
++
+ $(eval $(cmake-package))
+-- 
+2.43.0

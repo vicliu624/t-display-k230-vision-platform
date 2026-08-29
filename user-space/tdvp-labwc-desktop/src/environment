@@ -9,10 +9,16 @@ WLR_DRM_NO_MODIFIERS=1
 WLR_RENDERER_ALLOW_SOFTWARE=1
 LIBSEAT_BACKEND=seatd
 XDG_SEAT=seat0
+# Image-owned administration wrappers live in /usr/local/sbin.  Expose that
+# conventional directory to graphical applications and terminals so users can
+# use `sudo tdvp-opkg …` instead of spelling out an internal installation path.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 XKB_DEFAULT_RULES=evdev
 XKB_DEFAULT_MODEL=pc105
 XKB_DEFAULT_LAYOUT=us
-XKB_DEFAULT_VARIANT=
+# us(tdvp) includes the normal US layout and maps the detachable keyboard's
+# physical KEY_FN to the printed yellow third level.  Tab remains Tab.
+XKB_DEFAULT_VARIANT=tdvp
 XKB_DEFAULT_OPTIONS=
 TDVP_K230_OUTPUT=DSI-1
 TDVP_K230_OUTPUT_TRANSFORM=90

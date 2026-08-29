@@ -6,6 +6,7 @@ config BR2_PACKAGE_VICLIU_POCKET_LINUX_DESKTOP
 	select BR2_PACKAGE_IW
 	select BR2_PACKAGE_MC
 	select BR2_PACKAGE_MPV
+	select BR2_PACKAGE_OPKG
 	select BR2_PACKAGE_SUDO
 	select BR2_PACKAGE_V4L2GRAB
 	select BR2_PACKAGE_WOFI
@@ -17,9 +18,11 @@ config BR2_PACKAGE_VICLIU_POCKET_LINUX_DESKTOP
 	  and privileged helper used by the T-Display K230 desktop profile.
 
 	  Each visible action is backed by a Linux device, service, or utility:
-	  Wi-Fi uses wpa_supplicant and systemd-networkd, display actions use the
-	  board hardware utility and wlr-randr, and media/camera actions inspect
-	  actual ALSA and V4L2 devices.
+	  Wi-Fi is managed by NetworkManager, display actions use the board hardware
+	  utility and wlr-randr, and media/camera actions inspect actual ALSA and
+	  V4L2 devices. Browser packages are supplied later through the signed
+	  TDVP opkg feed; the software-manager entry opens the actual ABI-gated
+	  opkg command line.
 
 comment "Vicliu Pocket Linux desktop integration needs systemd"
 	depends on !BR2_INIT_SYSTEMD

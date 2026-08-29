@@ -1,0 +1,129 @@
+From: TDVP Platform <platform@tdvp.invalid>
+Date: Thu, 27 Aug 2026 18:10:00 +0800
+Subject: [PATCH] tdvp: play the standard desktop output-volume event
+
+Use libcanberra and the Freedesktop audio-volume-change event after an
+output-volume adjustment. This keeps the Raspberry Pi panel plugin and its
+PulseAudio control path intact; TDVP adds no custom sound player or asset.
+The same event id is reused so repeated slider updates supersede the previous
+feedback instead of creating an audio queue.
+
+Signed-off-by: TDVP Platform <platform@tdvp.invalid>
+---
+ src/commongui.c  | 23 ++++++++++++++++++++++-
+ src/meson.build  |  3 ++-
+ src/volumepulse.h |  3 +++
+ 3 files changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/src/commongui.c b/src/commongui.c
+index bd01221..38a9232 100644
+--- a/src/commongui.c
++++ b/src/commongui.c
+@@ -79,6 +79,20 @@ static gboolean profiles_dialog_delete (GtkWidget *wid, GdkEvent *event, VolumeP
+ /* Generic helper functions                                                   */
+ /*----------------------------------------------------------------------------*/
+ 
++/* Play the XDG desktop event through libcanberra's PulseAudio backend. */
++static void play_output_volume_feedback (VolumePulsePlugin *vol)
++{
++    if (!vol->event_sounds && ca_context_create (&vol->event_sounds) != CA_SUCCESS)
++    {
++        return;
++    }
++
++    ca_context_play (vol->event_sounds, 1,
++        CA_PROP_EVENT_ID, "audio-volume-change",
++        CA_PROP_APPLICATION_NAME, "wf-panel-pi",
++        NULL);
++}
++
+ /* System command accepting variable arguments */
+ 
+ int vsystem (const char *fmt, ...)
+@@ -232,6 +246,7 @@ static void mouse_scrolled (GtkScale *, GdkEventScroll *evt, VolumePulsePlugin *
+     if (pulse_get_mute (vol, input)) return;
+ 
+     /* Update the PulseAudio volume by a step */
++    int old_val = pulse_get_volume (vol, input);
+     int val = pulse_get_volume (vol, input);
+ 
+     if (evt->direction == GDK_SCROLL_UP || evt->direction == GDK_SCROLL_LEFT
+@@ -246,6 +261,7 @@ static void mouse_scrolled (GtkScale *, GdkEventScroll *evt, VolumePulsePlugin *
+     }
+     pulse_set_volume (vol, val, input);
+ 
++    if (!input && val != old_val) play_output_volume_feedback (vol);
+     update_display (vol, input);
+ }
+ 
+@@ -395,6 +411,7 @@ static void volume_key (VolumePulsePlugin *vol, gboolean input, gboolean up)
+     if (pulse_get_mute (vol, input)) return;
+ 
+     /* Update the PulseAudio volume by a step */
++    int old_val = pulse_get_volume (vol, input);
+     int val = pulse_get_volume (vol, input);
+ 
+     if (up)
+@@ -407,6 +424,7 @@ static void volume_key (VolumePulsePlugin *vol, gboolean input, gboolean up)
+     }
+     pulse_set_volume (vol, val, input);
+ 
++    if (!input && val != old_val) play_output_volume_feedback (vol);
+     update_display (vol, input);
+ }
+ 
+@@ -417,8 +435,11 @@ static void popup_window_scale_changed_vol (GtkRange *range, VolumePulsePlugin *
+     if (pulse_get_mute (vol, FALSE)) return;
+ 
+     /* Update the PulseAudio volume */
+-    pulse_set_volume (vol, gtk_range_get_value (range), FALSE);
++    int old_val = pulse_get_volume (vol, FALSE);
++    int val = gtk_range_get_value (range);
++    pulse_set_volume (vol, val, FALSE);
+ 
++    if (val != old_val) play_output_volume_feedback (vol);
+     update_display (vol, FALSE);
+ }
+ 
+diff --git a/src/meson.build b/src/meson.build
+index 67b60d3..ef844af 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -1,6 +1,7 @@
+ gtkmm = dependency('gtkmm-3.0', version: '>=3.24')
+ wfpanel = dependency('wf-panel-pi')
+ libpulse = dependency('libpulse')
++libcanberra = dependency('libcanberra')
+ 
+ sources = files(
+   'volumepulse.c',
+@@ -10,7 +11,7 @@ sources = files(
+   'volumepulse.cpp'
+ )
+ 
+-wdeps = [ gtkmm, wfpanel, libpulse ]
++wdeps = [ gtkmm, wfpanel, libpulse, libcanberra ]
+ 
+ wargs = [ '-DPACKAGE_DATA_DIR="' + wresource_dir + '"', '-DGETTEXT_PACKAGE="wfplug_' + meson.project_name() +'"' ]
+ 
+diff --git a/src/volumepulse.h b/src/volumepulse.h
+index 95b6a63..249bca5 100644
+--- a/src/volumepulse.h
++++ b/src/volumepulse.h
+@@ -29,6 +29,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ /* Typedefs and macros                                                        */
+ /*----------------------------------------------------------------------------*/
+ 
++#include <canberra.h>
++
+ #define PLUGIN_TITLE N_("Volume")
+ 
+ #define DEBUG_ON
+@@ -73,6 +75,7 @@ typedef struct
+     guint popup_timer;
+ 
+     /* HDMI devices */
++    ca_context *event_sounds;           /* Standard desktop event-sound context */
+     char *hdmi_names[2];                /* Display names of HDMI devices */
+ 
+     /* PulseAudio interface */

@@ -1,0 +1,6 @@
+config BR2_PACKAGE_WFPLUG_BATT
+	bool "wf-panel-pi battery plugin"
+	depends on BR2_PACKAGE_WF_PANEL_PI
+	help
+	  Raspberry Pi's battery monitor plugin, built for the wf-panel-pi
+	  Wayland plugin ABI only.

@@ -1,0 +1,13 @@
+config BR2_PACKAGE_WFPLUG_VOLUMEPULSE
+	bool "wf-panel-pi PulseAudio volume plugin"
+	depends on BR2_PACKAGE_WF_PANEL_PI
+	depends on BR2_PACKAGE_PULSEAUDIO
+	select BR2_PACKAGE_LIBCANBERRA
+	help
+	  Raspberry Pi's volumepulse plugin for the wf-panel-pi Wayland ABI.
+	  It controls the standard PulseAudio protocol instead of TDVP-specific
+	  ALSA and Wofi scripts, and uses libcanberra for standard desktop event
+	  sounds when the output volume changes.
+
+comment "wfplug-volumepulse needs wf-panel-pi and PulseAudio"
+	depends on !BR2_PACKAGE_WF_PANEL_PI || !BR2_PACKAGE_PULSEAUDIO

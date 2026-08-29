@@ -1,0 +1,222 @@
+#!/bin/sh
+# Extend the image-sized root partition on the first boot of a larger SD card.
+#
+# The K230 image has a GPT. U-Boot names its root *partition* by PARTUUID, so
+# the resize must preserve that UUID. The first pass expands only the GPT and
+# reboots; the second pass expands mounted ext4 online. No /data partition is
+# created. util-linux sfdisk is deliberately used here because it is already
+# part of the base image; first-boot storage must not depend on an optional
+# additional GPT tool.
+set -eu
+
+readonly STATE_DIR=/var/lib/tdvp
+readonly DONE_FILE="${STATE_DIR}/rootfs-expand.done"
+readonly PENDING_FILE="${STATE_DIR}/rootfs-expand.pending"
+readonly STATUS_FILE="${STATE_DIR}/rootfs-expand.status"
+readonly SFDISK=/usr/sbin/sfdisk
+readonly BLOCKDEV=/usr/sbin/blockdev
+readonly PARTPROBE=/usr/sbin/partprobe
+readonly RESIZE2FS=/sbin/resize2fs
+# sfdisk aligns the final GPT partition to MiB boundaries. Retain a small
+# safety tolerance for that harmless tail gap instead of treating it as a
+# failed expansion; the root partition must nevertheless be the final one.
+readonly GPT_TAIL_TOLERANCE_SECTORS=4096
+
+note() {
+	printf '%s %s\n' "$(date -Iseconds 2>/dev/null || date)" "$*" >> "${STATUS_FILE}"
+	logger -t tdvp-rootfs-expand -- "$*" 2>/dev/null || true
+}
+
+fail() {
+	note "ERROR: $*"
+	exit 1
+}
+
+root_from_cmdline() {
+	root_argument="$(tr ' ' '\n' </proc/cmdline | sed -n 's/^root=//p' | head -n 1)"
+	case "${root_argument}" in
+		PARTUUID=*)
+			partuuid="${root_argument#PARTUUID=}"
+			lower_partuuid="$(printf '%s' "${partuuid}" | tr '[:upper:]' '[:lower:]')"
+			for candidate in \
+				"/dev/disk/by-partuuid/${partuuid}" \
+				"/dev/disk/by-partuuid/${lower_partuuid}"; do
+				if [ -e "${candidate}" ]; then
+					readlink -f "${candidate}" 2>/dev/null || true
+					return 0
+				fi
+			done
+			;;
+		/dev/*)
+			printf '%s\n' "${root_argument}"
+			;;
+	esac
+}
+
+root_device() {
+	findmnt_source="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+	proc_source="$(awk '$2 == "/" { print $1; exit }' /proc/mounts)"
+	cmdline_source="$(root_from_cmdline)"
+
+	for root_source in "${findmnt_source}" "${proc_source}" "${cmdline_source}"; do
+		[ -n "${root_source}" ] || continue
+		if [ "${root_source}" = /dev/root ]; then
+			root_source="$(readlink -f /dev/root 2>/dev/null || true)"
+		fi
+		case "${root_source}" in
+			/dev/mmcblk[0-9]p[0-9]*)
+				printf '%s\n' "${root_source}"
+				return 0
+				;;
+		esac
+	done
+	return 1
+}
+
+partition_number() {
+	printf '%s\n' "${1##*p}"
+}
+
+table_partition_number() {
+	printf '%s\n' "$1" | awk -v disk="$2" '
+		$1 ~ ("^" disk "p[0-9]+$") {
+			partition = $1
+			sub("^" disk "p", "", partition)
+			last = partition
+		}
+		END { print last }
+	'
+}
+
+table_partition_line() {
+	printf '%s\n' "$1" | awk -v device="$2" '
+		$1 == device && $2 == ":" { print; found = 1 }
+		END { exit !found }
+	'
+}
+
+line_value() {
+	key="$1"
+	line="$2"
+	printf '%s\n' "${line}" | sed -n "s/.*${key}=[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p"
+}
+
+mkdir -p "${STATE_DIR}"
+
+if [ -e "${DONE_FILE}" ]; then
+	exit 0
+fi
+
+ROOT_DEVICE="$(root_device || true)"
+[ -n "${ROOT_DEVICE}" ] || {
+	note 'could not resolve the mounted root SD partition; retrying next boot'
+	exit 0
+}
+
+DISK="${ROOT_DEVICE%p*}"
+PARTITION="$(partition_number "${ROOT_DEVICE}")"
+[ -b "${DISK}" ] && [ -b "${ROOT_DEVICE}" ] || fail "root block devices are unavailable: ${ROOT_DEVICE}"
+[ -x "${SFDISK}" ] || fail "sfdisk is unavailable"
+[ -x "${BLOCKDEV}" ] || fail "blockdev is unavailable"
+[ -x "${RESIZE2FS}" ] || fail "resize2fs is unavailable"
+
+if [ -e "${PENDING_FILE}" ]; then
+	if "${RESIZE2FS}" "${ROOT_DEVICE}"; then
+		rm -f "${PENDING_FILE}"
+		touch "${DONE_FILE}"
+		note "expanded ext4 root filesystem on ${ROOT_DEVICE}"
+		exit 0
+	fi
+	fail "resize2fs failed for ${ROOT_DEVICE}; retaining pending marker for retry"
+fi
+
+CURRENT_TABLE="$("${SFDISK}" --dump "${DISK}")" || fail "could not read GPT from ${DISK}"
+LAST_PARTITION="$(table_partition_number "${CURRENT_TABLE}" "${DISK}")"
+if [ "${LAST_PARTITION}" != "${PARTITION}" ]; then
+	note "root partition ${PARTITION} is not last (last is ${LAST_PARTITION:-unknown}); leaving the card unchanged"
+	exit 0
+fi
+
+if ! ROOT_LINE="$(table_partition_line "${CURRENT_TABLE}" "${ROOT_DEVICE}")"; then
+	fail "could not locate ${ROOT_DEVICE} in its GPT dump"
+fi
+CURRENT_START="$(line_value start "${ROOT_LINE}")"
+CURRENT_SIZE="$(line_value size "${ROOT_LINE}")"
+case "${CURRENT_START}:${CURRENT_SIZE}" in
+	*[!0-9:]*|:*) fail "GPT metadata for ${ROOT_DEVICE} is incomplete" ;;
+esac
+DISK_SECTORS="$("${BLOCKDEV}" --getsz "${DISK}")"
+case "${DISK_SECTORS}" in
+	*[!0-9]*|'') fail "could not read the sector count for ${DISK}" ;;
+esac
+CURRENT_END_EXCLUSIVE=$((CURRENT_START + CURRENT_SIZE))
+MINIMUM_END_EXCLUSIVE=$((DISK_SECTORS - GPT_TAIL_TOLERANCE_SECTORS))
+
+# A prior first pass may already have written the table and rebooted before
+# ext4 grew. Finish that normal second stage without attempting another GPT
+# rewrite; this also accepts an image written to a card with no spare space.
+if [ "${CURRENT_END_EXCLUSIVE}" -ge "${MINIMUM_END_EXCLUSIVE}" ]; then
+	if "${RESIZE2FS}" "${ROOT_DEVICE}"; then
+		rm -f "${PENDING_FILE}"
+		touch "${DONE_FILE}"
+		note "expanded ext4 root filesystem on ${ROOT_DEVICE}"
+		exit 0
+	fi
+	fail "resize2fs failed while finalising ${ROOT_DEVICE}"
+fi
+
+# Omit only root partition 2's explicit size while preserving every other
+# sfdisk field, including GPT type, name and UUID. sfdisk then fills the
+# remaining usable GPT sectors and repairs a raw-image backup header that is
+# still located at the old image boundary.
+if ! EXPANDED_TABLE="$(printf '%s\n' "${CURRENT_TABLE}" | awk -v device="${ROOT_DEVICE}" '
+	$1 == "last-lba:" { next }
+	$1 == device && $2 == ":" {
+		if (!sub(/, size=[[:space:]]*[0-9]+/, ""))
+			exit 1
+		changed = 1
+	}
+	{ print }
+	END { exit !changed }
+')"; then
+	fail "could not construct a safe GPT expansion table for ${ROOT_DEVICE}"
+fi
+
+if printf '%s\n' "${EXPANDED_TABLE}" | grep -Eq '^last-lba:'; then
+	fail 'expanded GPT table retained the old raw-image last-lba limit'
+fi
+
+if [ "${TDVP_ROOTFS_EXPAND_DRY_RUN:-0}" = 1 ]; then
+	EXPECTED_SIZE=$((DISK_SECTORS - 33 - CURRENT_START))
+	[ "${EXPECTED_SIZE}" -gt "${CURRENT_SIZE}" ] ||
+		fail "${ROOT_DEVICE} already occupies the final usable GPT sectors"
+	note "dry run: would expand ${ROOT_DEVICE} from ${CURRENT_SIZE} to ${EXPECTED_SIZE} sectors"
+	exit 0
+fi
+
+printf '%s\n' "${EXPANDED_TABLE}" | "${SFDISK}" --force --no-reread "${DISK}" ||
+	fail "could not extend GPT root partition on ${DISK}"
+
+UPDATED_TABLE="$("${SFDISK}" --dump "${DISK}")" || fail "could not re-read updated GPT"
+if ! UPDATED_LINE="$(table_partition_line "${UPDATED_TABLE}" "${ROOT_DEVICE}")"; then
+	fail "updated GPT no longer contains ${ROOT_DEVICE}"
+fi
+UPDATED_START="$(line_value start "${UPDATED_LINE}")"
+UPDATED_SIZE="$(line_value size "${UPDATED_LINE}")"
+case "${UPDATED_START}:${UPDATED_SIZE}" in
+	*[!0-9:]*|:*|*::*) fail "updated GPT metadata is incomplete" ;;
+esac
+
+UPDATED_END_EXCLUSIVE=$((UPDATED_START + UPDATED_SIZE))
+if [ "${UPDATED_START}" != "${CURRENT_START}" ] || \
+	[ "${UPDATED_SIZE}" -le "${CURRENT_SIZE}" ] || \
+	[ "${UPDATED_END_EXCLUSIVE}" -lt "${MINIMUM_END_EXCLUSIVE}" ]; then
+	fail 'GPT update did not preserve root start and consume the final usable sectors'
+fi
+
+touch "${PENDING_FILE}"
+sync
+"${PARTPROBE}" "${DISK}" 2>/dev/null || true
+note "expanded ${ROOT_DEVICE} partition with sfdisk; rebooting to resize ext4"
+/usr/bin/systemctl reboot --no-wall
+exit 0

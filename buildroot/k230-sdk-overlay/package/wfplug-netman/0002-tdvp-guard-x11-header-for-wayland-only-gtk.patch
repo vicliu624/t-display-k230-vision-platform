@@ -1,0 +1,33 @@
+From 0eebc25892ee011f2ed95f3ec69f8dcb3a32fb20 Mon Sep 17 00:00:00 2001
+From: TDVP <tdvp@example.invalid>
+Date: Thu, 27 Aug 2026 12:00:00 +0800
+Subject: [PATCH] netman: build with a Wayland-only GTK stack
+
+The Raspberry Pi netman plugin only uses GDK X11 APIs from code already
+guarded by GDK_WINDOWING_X11, but appler.h unconditionally includes the X11
+backend header.  That prevents building against GTK configured without X11.
+
+Keep the existing X11 implementation available when GTK exposes it, while
+allowing the panel plugin to build for the K230 Wayland-only desktop.
+
+Signed-off-by: TDVP <tdvp@example.invalid>
+---
+ src/applet.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/applet.h b/src/applet.h
+index 043e7f8..a22619f 100644
+--- a/src/applet.h
++++ b/src/applet.h
+@@ -11,7 +11,9 @@
+ #include <string.h>
+ 
+ #include <gtk/gtk.h>
++#ifdef GDK_WINDOWING_X11
+ #include <gdk/gdkx.h>
++#endif
+ 
+ #include <net/ethernet.h>
+ 
+-- 
+2.47.3

@@ -1,0 +1,7 @@
+#!/bin/sh
+# There is no custom graphical package manager here. Use the same terminal
+# entrypoint as the ordinary Foot menu item so the authenticated user's HOME
+# and working directory are always established before Foot starts.
+set -eu
+
+exec /usr/local/bin/tdvp-terminal --title='Software Manager' -e /usr/local/bin/vpl-opkg-console

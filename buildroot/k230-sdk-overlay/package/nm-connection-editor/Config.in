@@ -1,0 +1,18 @@
+config BR2_PACKAGE_NM_CONNECTION_EDITOR
+	bool "nm-connection-editor"
+	depends on BR2_USE_MMU
+	depends on BR2_USE_WCHAR
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on !BR2_STATIC_LIBS
+	select BR2_PACKAGE_LIBGTK3
+	select BR2_PACKAGE_LIBNMA
+	select BR2_PACKAGE_LIBSECRET
+	select BR2_PACKAGE_NETWORK_MANAGER
+	help
+	  Build the upstream GTK NetworkManager Connection Editor used by
+	  wfplug-netman's "Edit Connections" action. This package deliberately
+	  excludes the GNOME panel applet: Labwc and wf-panel-pi remain the
+	  desktop and panel implementation.
+
+comment "nm-connection-editor needs an MMU, wchar, threads and shared libraries"
+	depends on !BR2_USE_MMU || !BR2_USE_WCHAR || !BR2_TOOLCHAIN_HAS_THREADS || BR2_STATIC_LIBS

@@ -1,0 +1,195 @@
+From 6d816c3116eabda7d04be4e58d10b9a2e647d3e1 Mon Sep 17 00:00:00 2001
+From: Vicliu Pocket Linux <maintainers@vicliu.i234.me>
+Date: Fri, 28 Aug 2026 11:15:00 +0800
+Subject: [PATCH] ASoC: canaan: add managed external I2S amplifier route
+
+The RM69A10's MAX98357A-compatible speaker amplifier consumes the
+existing K230_I2S_INNO PCM stream.  Add an ALSA mixer switch for the
+internal-codec versus external-I2S route without creating a second
+sound card.
+
+The machine device owns amp-shutdown-gpios.  Changing the switch first
+disables the amplifier, applies the codec bypass and I2S output mode,
+and only enables the amplifier when an active playback stream exists.
+This keeps GPIO ownership out of PulseAudio, players, and panel plugins.
+
+Signed-off-by: Vicliu Pocket Linux <maintainers@vicliu.i234.me>
+---
+--- a/sound/soc/canaan/canaan_k230_inno.c
++++ b/sound/soc/canaan/canaan_k230_inno.c
+@@ -15,6 +15,8 @@
+  */
+ 
+ #include <linux/module.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+ #include <linux/gpio.h>
+@@ -34,6 +36,78 @@
+ 	struct clk *pclk;
+ 	struct mutex clk_lock;
+ 	int clk_users;
++	struct mutex route_lock;
++	struct gpio_desc *amp_shutdown;
++	unsigned int playback_users;
++	bool external_i2s_output;
++};
++
++static int k230_inno_apply_output_route(struct k230_inno_info *priv,
++					bool enable_amplifier)
++{
++	if (priv->external_i2s_output && !priv->amp_shutdown)
++		return -ENODEV;
++
++	/*
++	 * Never alter the K230's shared audio mux while the MAX98357A is
++	 * enabled. This prevents an audible transient on route changes.
++	 */
++	if (priv->amp_shutdown)
++		gpiod_set_value_cansleep(priv->amp_shutdown, 0);
++
++	audio_i2s_in_init();
++	audio_i2s_enable_audio_codec(!priv->external_i2s_output);
++	audio_i2s_out_init(true, 32);
++
++	if (priv->external_i2s_output && enable_amplifier) {
++		usleep_range(1000, 2000);
++		gpiod_set_value_cansleep(priv->amp_shutdown, 1);
++	}
++
++	return 0;
++}
++
++static int k230_inno_external_i2s_get(struct snd_kcontrol *kcontrol,
++				      struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
++	struct k230_inno_info *priv = snd_soc_card_get_drvdata(card);
++
++	ucontrol->value.integer.value[0] = priv->external_i2s_output;
++	return 0;
++}
++
++static int k230_inno_external_i2s_put(struct snd_kcontrol *kcontrol,
++				      struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
++	struct k230_inno_info *priv = snd_soc_card_get_drvdata(card);
++	const bool enable = !!ucontrol->value.integer.value[0];
++	int ret;
++
++	mutex_lock(&priv->route_lock);
++	if (priv->external_i2s_output == enable) {
++		mutex_unlock(&priv->route_lock);
++		return 0;
++	}
++	if (enable && !priv->amp_shutdown) {
++		mutex_unlock(&priv->route_lock);
++		return -ENODEV;
++	}
++
++	priv->external_i2s_output = enable;
++	ret = k230_inno_apply_output_route(priv, priv->playback_users > 0);
++	if (ret)
++		priv->external_i2s_output = !enable;
++	mutex_unlock(&priv->route_lock);
++
++	return ret ? ret : 1;
++}
++
++static const struct snd_kcontrol_new k230_inno_controls[] = {
++	SOC_SINGLE_BOOL_EXT("External I2S Output Switch", 0,
++			    k230_inno_external_i2s_get,
++			    k230_inno_external_i2s_put),
+ };
+ 
+ static int k230_inno_hw_params(struct snd_pcm_substream *substream,
+@@ -44,11 +118,37 @@
+ 
+ static void k230_inno_shutdown(struct snd_pcm_substream *substream)
+ {
++	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
++	struct k230_inno_info *priv = snd_soc_card_get_drvdata(rtd->card);
++
++	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
++		return;
++
++	mutex_lock(&priv->route_lock);
++	if (priv->playback_users > 0)
++		priv->playback_users--;
++	if (priv->playback_users == 0 && priv->amp_shutdown)
++		gpiod_set_value_cansleep(priv->amp_shutdown, 0);
++	mutex_unlock(&priv->route_lock);
+ }
+ 
+ static int k230_inno_startup(struct snd_pcm_substream *substream)
+ {
+-	return 0;
++	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
++	struct k230_inno_info *priv = snd_soc_card_get_drvdata(rtd->card);
++	int ret = 0;
++
++	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
++		return 0;
++
++	mutex_lock(&priv->route_lock);
++	priv->playback_users++;
++	ret = k230_inno_apply_output_route(priv, true);
++	if (ret)
++		priv->playback_users--;
++	mutex_unlock(&priv->route_lock);
++
++	return ret;
+ }
+ 
+ static const struct snd_soc_ops canaan_k230_inno_ops = {
+@@ -76,6 +176,8 @@
+ 	.owner = THIS_MODULE,
+ 	.dai_link = &canaan_k230_dailink,
+ 	.num_links = 1,
++	.controls = k230_inno_controls,
++	.num_controls = ARRAY_SIZE(k230_inno_controls),
+ };
+ 
+ static int canaan_k230_inno_probe(struct platform_device *pdev)
+@@ -97,6 +199,21 @@
+ 		return -ENOMEM;
+ 
+ 	mutex_init(&priv->clk_lock);
++	mutex_init(&priv->route_lock);
++	priv->external_i2s_output =
++		of_property_read_bool(np, "canaan,external-i2s-output-default");
++	priv->amp_shutdown = devm_gpiod_get_optional(&pdev->dev, "amp-shutdown",
++						       GPIOD_OUT_LOW);
++	if (IS_ERR(priv->amp_shutdown)) {
++		ret = PTR_ERR(priv->amp_shutdown);
++		dev_err_probe(&pdev->dev, ret, "failed to acquire amp shutdown GPIO\n");
++		return ret;
++	}
++	if (priv->external_i2s_output && !priv->amp_shutdown) {
++		dev_err(&pdev->dev,
++			"external I2S route requires amp-shutdown-gpios\n");
++		return -EINVAL;
++	}
+ 
+ 	card->dev = &pdev->dev;
+ 	snd_soc_card_set_drvdata(card, priv);
+@@ -133,11 +250,13 @@
+ 		return ret;
+ 	}
+ 
+-	audio_i2s_in_init();
+-	audio_i2s_enable_audio_codec(true);
+-	audio_i2s_out_init(true, 32);
++	ret = k230_inno_apply_output_route(priv, false);
++	if (ret)
++		return ret;
+ 
+-	return ret;
++	dev_info(&pdev->dev, "External I2S output %s by default\n",
++		 priv->external_i2s_output ? "enabled" : "disabled");
++	return 0;
+ }
+ 
+ static const struct of_device_id canaan_k230_inno_of_match[] = {

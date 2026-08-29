@@ -341,6 +341,16 @@ synchronize_stage_overlay() {
 		"$WORKTREE/output/.tdvp/sdk-baseline-manifest"
 	run_make sync
 	verify_synchronized_overlay
+	# The SDK synchronizer merges the platform overlay without --delete so it
+	# cannot remove vendor package files that the platform does not own. This
+	# product replaces PCManFM's source with the Raspberry Pi Wayland branch;
+	# the vendor's old gettext-tiny patch targets a different translation file
+	# and would otherwise survive an incremental sync and fail before our
+	# PCManFM patch can be applied. Remove precisely that retired patch only
+	# when it is absent from the staged platform package.
+	if [ ! -e "$WORKTREE/buildroot-overlay/package/pcmanfm/0001-po-de-po-fix-build-with-gettext-tiny.patch" ]; then
+		rm -f "$WORKTREE/output/buildroot-2025.02.1/package/pcmanfm/0001-po-de-po-fix-build-with-gettext-tiny.patch"
+	fi
 	bash "$SCRIPT_DIR/apply-buildroot-core-patches.sh" "$WORKTREE"
 	bash "$SCRIPT_DIR/reconcile-k230-sdk-linux-patches.sh" "$WORKTREE"
 	bash "$SCRIPT_DIR/register-k230-sdk-tdvp-packages.sh" "$WORKTREE"
@@ -369,8 +379,43 @@ required_product_config=(
 	BR2_PACKAGE_LIBGTK3
 	BR2_PACKAGE_LIBGTK3_WAYLAND
 	BR2_PACKAGE_GTK_LAYER_SHELL
-	BR2_PACKAGE_SFWBAR
-	BR2_PACKAGE_SWAYBG
+	BR2_PACKAGE_GTKMM3
+	BR2_PACKAGE_LIBFM_EXTRA
+	BR2_PACKAGE_LIBMENU_CACHE
+	BR2_PACKAGE_LIBFM
+	BR2_PACKAGE_PCMANFM
+	BR2_PACKAGE_OPKG
+	BR2_PACKAGE_OPKG_GPG_SIGN
+	BR2_PACKAGE_GNUPG2
+	BR2_PACKAGE_GNUPG2_GPGV
+	BR2_PACKAGE_TDVP_OPKG_TRUST
+	BR2_PACKAGE_GLIB_NETWORKING
+	BR2_PACKAGE_NETWORK_MANAGER
+	BR2_PACKAGE_NETWORK_MANAGER_CLI
+	BR2_PACKAGE_NM_CONNECTION_EDITOR
+	BR2_PACKAGE_PROCPS_NG
+	BR2_PACKAGE_UTIL_LINUX
+	BR2_PACKAGE_UTIL_LINUX_BINARIES
+	BR2_PACKAGE_UTIL_LINUX_RFKILL
+	BR2_PACKAGE_GPTFDISK
+	BR2_PACKAGE_GPTFDISK_SGDISK
+	BR2_PACKAGE_E2FSPROGS
+	BR2_PACKAGE_E2FSPROGS_RESIZE2FS
+	BR2_PACKAGE_LIBCANBERRA
+	BR2_PACKAGE_SOUND_THEME_FREEDESKTOP
+	BR2_PACKAGE_LIBSECRET
+	BR2_PACKAGE_LIBNMA
+	BR2_PACKAGE_PULSEAUDIO
+	BR2_PACKAGE_PULSEAUDIO_DAEMON
+	BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST
+	BR2_PACKAGE_WF_PANEL_PI
+	BR2_PACKAGE_WFPLUG_BATT
+	BR2_PACKAGE_WFPLUG_MENU
+	BR2_PACKAGE_WFPLUG_CLOCK
+	BR2_PACKAGE_WFPLUG_NETMAN
+	BR2_PACKAGE_WFPLUG_POWER
+	BR2_PACKAGE_WFPLUG_VOLUMEPULSE
+	BR2_PACKAGE_WPA_SUPPLICANT_DBUS
 	BR2_PACKAGE_FOOT
 	BR2_PACKAGE_WOFI
 	BR2_PACKAGE_WVKBD
@@ -514,7 +559,26 @@ if [ "$product_inputs_changed" = "1" ] && [ "$image_rebuild_mode" != "1" ]; then
 	# vendor toolchain or unrelated SDK packages.
 	product_packages=(
 		gtk-layer-shell
-		sfwbar
+		labwc
+		libfm-extra
+		libmenu-cache
+	libfm
+	pcmanfm
+		libcanberra
+		sound-theme-freedesktop
+		alsa-utils
+		opkg
+	gnupg2
+	nm-connection-editor
+	tdvp-opkg-trust
+	wf-panel-pi
+		libnma
+		wfplug-batt
+		wfplug-menu
+		wfplug-clock
+		wfplug-netman
+		wfplug-power
+		wfplug-volumepulse
 		wofi
 		wvkbd
 		mc

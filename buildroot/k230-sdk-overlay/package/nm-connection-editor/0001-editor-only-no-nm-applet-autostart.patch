@@ -1,0 +1,59 @@
+From 8accd508caa0400304a01da718eeab587ee8fb04 Mon Sep 17 00:00:00 2001
+From: TDVP Platform <platform@tdvp.invalid>
+Date: Fri, 28 Aug 2026 12:20:00 +0800
+Subject: [PATCH] build only nm-connection-editor
+
+The Labwc desktop uses the upstream GTK connection editor launched by
+wfplug-netman.  Do not build or install the separate GNOME panel applet,
+its desktop entry, autostart logic, tests, or manual pages.
+
+Signed-off-by: TDVP Platform <platform@tdvp.invalid>
+---
+--- a/meson.build
++++ b/meson.build
+@@ -228,8 +228,6 @@
+ subdir('icons')
+ subdir('shared')
+ subdir('src')
+-subdir('src/tests')
+-subdir('man')
+ 
+ i18n = import('i18n')
+ 
+@@ -237,7 +235,6 @@
+ #        There is a workaround in meson_post_install.py until proper solution arises:
+ #        https://groups.google.com/forum/#!topic/mesonbuild/3iIoYPrN4P0
+ desktop_files = [
+-  'nm-applet',
+   'nm-connection-editor',
+ ]
+ 
+@@ -306,11 +303,7 @@
+   configuration: config_h
+ )
+ 
+-meson.add_install_script(
+-  'meson_post_install.py',
+-  nma_datadir,
+-  nma_sysconfdir
+-)
++# The editor-only product does not ship nm-applet.desktop or an autostart file.
+ 
+ output = '\n'
+ output += '  LTO: ' + get_option('b_lto').to_string() + '\n'
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -77,6 +77,7 @@
+   deps += mm_glib_dep
+ endif
+ 
++if false
+ executable(
+   nma_name,
+   sources,
+@@ -89,3 +90,4 @@
+   install: true,
+   install_dir: nma_bindir
+ )
++endif
+

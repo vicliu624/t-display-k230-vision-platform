@@ -1,5 +1,6 @@
 config BR2_PACKAGE_TDVP_GTKGREET
 	bool "gtkgreet graphical PAM client"
+	select BR2_PACKAGE_JSON_C
 	depends on BR2_PACKAGE_LIBGTK3
 	depends on BR2_PACKAGE_LINUX_PAM
 	depends on BR2_PACKAGE_DBUS

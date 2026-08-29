@@ -1,0 +1,27 @@
+#!/bin/sh
+set -u
+
+# PCManFM is compiled with the GTK3 X11 backend for source compatibility, but
+# must use gtk-layer-shell against the running Labwc Wayland compositor.
+export GDK_BACKEND=wayland
+export PATH=/usr/local/bin:/usr/bin:/bin
+
+# This wrapper can be restarted independently of Labwc.  Keep its own
+# application launches in the authenticated desktop user's home directory.
+if [ -z "${HOME:-}" ] || [ ! -d "${HOME}" ]; then
+	echo "tdvp-pcmanfm: HOME is unavailable" >&2
+	exit 1
+fi
+cd "${HOME}"
+
+log_file="${XDG_RUNTIME_DIR:-/tmp}/tdvp-pcmanfm-desktop.log"
+while :; do
+	# Do not request PCManFM's single-output mode here. In the Raspberry Pi
+	# Wayland fork it disables the desktop instance on monitor 0; leaving it out
+	# creates the gtk-layer-shell background surface for every active Labwc
+	# output.
+	/usr/bin/pcmanfm --desktop >>"${log_file}" 2>&1
+	status=$?
+	[ "$status" -eq 0 ] && exit 0
+	sleep 1
+done

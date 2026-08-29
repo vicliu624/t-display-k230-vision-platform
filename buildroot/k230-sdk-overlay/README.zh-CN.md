@@ -14,7 +14,7 @@ configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig
 | Package | 职责 |
 | --- | --- |
 | `gtk-layer-shell` | 为面板提供 layer-shell 协议支持。 |
-| `sfwbar` | XDG 应用菜单、任务栏和时钟。 |
+| `wf-panel-pi` 与 `wfplug-*` | Raspberry Pi 维护的应用菜单、任务列表与状态模块。 |
 | `tdvp-labwc-desktop` | Labwc 会话、输出旋转、触摸校准、背景与面板启动。 |
 | `tdvp-display-smoke` | DRM/KMS 显示验收工具。 |
 | `tdvp-keyboard-layout` | T-Display K230 键盘布局服务。 |

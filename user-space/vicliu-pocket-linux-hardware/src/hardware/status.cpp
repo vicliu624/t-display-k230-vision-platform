@@ -40,6 +40,19 @@ bool any_alsa_card()
     return !cards.empty() && cards.find("no soundcards") == std::string::npos;
 }
 
+bool external_i2s_output_control()
+{
+    return paths::executable("/usr/bin/amixer") &&
+        paths::run_quietly({"/usr/bin/amixer", "amixer", "cget",
+                            "name=External I2S Output Switch"}) == 0;
+}
+
+std::string speaker_route()
+{
+    const std::string route = paths::read("/run/vicliu-pocket-linux-hardware/audio-route");
+    return route == "external" || route == "internal" ? route : "unknown";
+}
+
 bool any_camera()
 {
     for (const std::string &entry : paths::children("/sys/class/video4linux")) {
@@ -205,9 +218,18 @@ State collect_state()
     state["display_brightness_percent"] = backlight_percent({"display", "panel"});
 
     const bool audio = any_alsa_card();
+    const bool external_i2s = audio && external_i2s_output_control();
+    const std::string route = external_i2s ? speaker_route() : "unavailable";
     transport(&state, "audio", audio, audio, audio);
     transport(&state, "microphone", audio, audio, audio);
-    transport(&state, "speaker", audio, audio, audio);
+    // An ALSA card only proves that the internal K230 codec registered. The
+    // external speaker needs the managed ASoC route control and a policy that
+    // selected its MAX98357A-compatible I2S path; audible output still needs
+    // the explicit human acceptance record.
+    transport(&state, "speaker", audio, external_i2s, route == "external");
+    state["speaker_route"] = route;
+    state["speaker_route_control"] = external_i2s ? "External I2S Output Switch" : "";
+    state["speaker_amplifier_owner"] = external_i2s ? "asoc-k230-inno" : "";
 
     const bool camera = any_camera();
     transport(&state, "camera", camera, camera, camera);

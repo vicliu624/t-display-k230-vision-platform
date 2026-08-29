@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Wi-Fi
-Comment=Scan and connect to a wireless network
-Exec=vpl-wifi
-Terminal=false
-Categories=Settings;Network;
-Icon=network-wireless

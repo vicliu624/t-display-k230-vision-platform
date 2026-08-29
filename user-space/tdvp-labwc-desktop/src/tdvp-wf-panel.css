@@ -1,0 +1,158 @@
+/*
+ * TDVP panel theme. The layout/plugin host is Raspberry Pi's wf-panel-pi;
+ * this deliberately keeps the product's warm paper, graphite and orange
+ * language rather than adopting the Raspberry Pi desktop appearance.
+ */
+#PanelToplevel {
+  background-color: #f7f2e6;
+  color: #252421;
+  font-family: "DejaVu Sans Mono";
+  font-size: 18px;
+  border: 2px solid #292824;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  box-shadow: inset 0 -6px #e66a2c;
+}
+
+#PanelToplevel button {
+  min-width: 56px;
+  min-height: 56px;
+  margin: 0;
+  padding: 0 12px;
+  color: #252421;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+#PanelToplevel button:hover,
+#PanelToplevel button:checked,
+#PanelToplevel button:active {
+  color: #171717;
+  background-color: #efe6d6;
+  box-shadow: inset 0 -3px #e66a2c;
+}
+
+#PanelToplevel #smenu {
+  min-width: 68px;
+  color: #fffaf0;
+  background-color: #2b2a27;
+  box-shadow: inset 0 -6px #e66a2c;
+}
+
+#PanelToplevel #smenu:hover,
+#PanelToplevel #smenu:checked,
+#PanelToplevel #smenu:active {
+  color: #ffffff;
+  background-color: #3c3933;
+}
+
+#PanelToplevel #window-list button {
+  min-width: 64px;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+#PanelToplevel #clock {
+  min-width: 116px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+#PanelToplevel #netman,
+#PanelToplevel #volumepulse,
+#PanelToplevel #batt {
+  min-width: 58px;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+/*
+ * Upstream volumepulse owns two direct children: output and microphone.
+ * On K230 PulseAudio exposes only an output-monitor source, not a usable
+ * capture route. Until the package-level compatibility patch suppresses that
+ * endpoint at source, keep the transient second widget out of the live bar.
+ */
+#PanelToplevel #volumepulse > button:nth-child(2),
+#PanelToplevel #volumepulse > button:nth-child(2):hover,
+#PanelToplevel #volumepulse > button:nth-child(2):checked,
+#PanelToplevel #volumepulse > button:nth-child(2):active {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  box-shadow: none;
+}
+
+#PanelToplevel #volumepulse > button:nth-child(2) image {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/*
+ * wfplug-volumepulse itself uses an anonymous GtkBox (the maintained plugin
+ * does not assign it a CSS id).  With this panel layout it is the third item
+ * in the right box: netman, spacing, volumepulse.  Target that real GTK node
+ * as well, so the live theme and the source-level patch agree.
+ */
+#PanelToplevel > box > box:last-child > box:nth-child(3) > button:nth-child(2),
+#PanelToplevel > box > box:last-child > box:nth-child(3) > button:nth-child(2):hover,
+#PanelToplevel > box > box:last-child > box:nth-child(3) > button:nth-child(2):checked,
+#PanelToplevel > box > box:last-child > box:nth-child(3) > button:nth-child(2):active {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  box-shadow: none;
+}
+
+#PanelToplevel > box > box:last-child > box:nth-child(3) > button:nth-child(2) image {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+#PanelToplevel image {
+  -gtk-icon-style: symbolic;
+}
+
+menu,
+#panelpopup {
+  /* GTK3 on the quarter-turn K230 output can initially allocate a popup
+   * using only the icon column. Keep the upstream menu's category labels and
+   * nested-menu affordance visible in the logical desktop orientation. */
+  min-width: 280px;
+  color: #252421;
+  background-color: #fbf6eb;
+  border: 2px solid #292824;
+  border-radius: 0;
+  font-family: "DejaVu Sans Mono";
+  font-size: 17px;
+}
+
+menuitem {
+  min-width: 236px;
+  min-height: 42px;
+  padding: 7px 18px;
+}
+
+menuitem:hover,
+menuitem:checked {
+  color: #171717;
+  background-color: #efe6d6;
+  box-shadow: inset 4px 0 #e66a2c;
+}
+
+separator {
+  min-height: 1px;
+  background-color: #bdb5a4;
+}

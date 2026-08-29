@@ -1,9 +1,9 @@
 # 发布契约
 
-每次 CI 运行都从当前 Labwc 桌面 profile 产生一张可启动的 K230 SD 卡镜像。标签构建会
-将同一组产物作为 GitHub Release asset 发布。
+每个发行版交付一张可刷写的 T-Display K230 SD 卡镜像以及 Windows 可见的 release bundle。
+它是低性能、全键盘 Linux 掌机的长期维护基线，不是实验性的 Launcher 镜像。
 
-## 文件
+## 交付文件
 
 ```text
 vicliu-pocket-linux-k230-<revision>.img
@@ -14,24 +14,56 @@ README.txt
 SHA256SUMS
 ```
 
-镜像包含启动 payload、K230 内核与板级设备树、systemd、网络与 SSH 恢复服务、seatd、
-Labwc、Swaybg、SFWBar、Foot 和板级集成 package。
+最终 bundle 必须复制到本 Windows 仓库的 `output/`；只存在于 WSL 中的构建物不构成发布
+交付。镜像包含 K230 启动 payload、内核、RM69A10 DTB、systemd、OpenSSH 恢复、
+NetworkManager、seatd、greetd/gtkgreet、Labwc、PCManFM、Raspberry Pi `wf-panel-pi`
+插件、Foot、Cog/WPE WebKit、`nm-connection-editor`、`opkg`、签名软件源 bootstrap 与
+板级 package。
 
-`tdvp-image-manifest` 记录 SDK 和 Linux commit、生成镜像的哈希、固定文件系统/GPT
-标识和桌面 runtime 组件。`tdvp-sdk-baseline-manifest` 记录实际准备的源码输入。
-`SHA256SUMS` 覆盖 release 中的每一个文件。
+## 必须满足的镜像不变量
 
-## CI
+- U-Boot 使用固定 root `PARTUUID`，绝不能硬编码 `/dev/mmcblkN`。
+- GPT 只有 boot 分区 1 与 root 分区 2；首次启动可安全扩展根文件系统，不存在 `/data`
+  provisioner 或第三数据分区。
+- Greeter 登录的账户获得其自身 home 和 runtime 目录。
+- LilyGO/Menu 打开上游应用菜单；Fn 输出黄色字符；桌面空白处长按出现普通右键菜单。
+- PCManFM 提供壁纸、Desktop 与 Files；唯一面板是 `wf-panel-pi`，只有一个 NetworkManager
+  项和一个输出音量项。
+- Cog 具备 GIO TLS 支持且 Labwc 标题栏控制可触摸。
+- `libcanberra` 与 Freedesktop theme 提供输出音量的系统事件声音。
+- NetworkManager 独占网络并启动上游 `nm-connection-editor`；不交付直接配置旧
+  wpa_supplicant 的 UI。
+- 默认应用软件源 ABI 固定，且在使用 `opkg` 前会校验其发行公钥与索引签名。
 
-GitHub Actions 工作流依次执行：
+## 发布门禁
 
-1. 获取仓库并恢复源码/工具链下载缓存。
-2. 根据固定 source lock 准备新的 SDK 工作目录。
-3. 回放 K230 Linux 补丁队列并运行 patch-only 断言。
-4. 构建完整的可启动 SD 卡镜像。
-5. 断言生成镜像并收集 release bundle。
-6. 为 Pull Request、分支构建和手动运行上传 bundle。
-7. 为 `v*` 标签发布 bundle。
+1. 准备锁定的 SDK，回放 SDK/Linux/Buildroot/package 补丁并执行 patch-only 断言。
+2. 使用发行 defconfig 构建完整可启动镜像。
+3. 执行 post-image SD 卡校验：检查分区身份、rootfs 文件、systemd 链接、桌面配置、TLS、
+   事件声音及软件源信任物料，而不只依赖编译退出码。
+4. 运行硬件构建预检并保留其 evidence report。
+5. 实机检查 Greeter/会话、菜单键、键盘、触摸、Files、面板、Wi-Fi 编辑器、HTTPS 浏览器
+   和音量事件声音。
+6. 通过 HTTPS 下载配置的软件源的 `Packages.gz`、`Packages.gz.asc` 与
+   `release.json`；使用镜像内置公钥验证 detached signature，并要求每个已发布包精确依赖
+   当前镜像 ABI。
+7. 将镜像、压缩镜像、manifest 与 checksum 收集到 `output/`。
 
-Buildroot 镜像内置 `opkg` 作为现场包管理工具。软件源配置属于明确的管理员策略；镜像不
-安装未经验证的默认软件源。
+`tdvp-image-manifest` 记录源码版本、构建输入、文件系统/GPT 身份与镜像哈希；
+`tdvp-sdk-baseline-manifest` 记录实际 staged SDK 输入；`SHA256SUMS` 覆盖全部交付文件。
+
+## 签名软件发行源策略
+
+标准镜像只配置：
+
+```text
+https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r2/riscv64
+```
+
+公钥指纹为 `2B091A2A8E5810954FB9FD64EA9D1CD5EFC81500`。镜像只含公钥；镜像本身是很小的
+硬件/桌面种子，这个 ABI 匹配的软件源才是可扩展的用户态发行目录，承载库、工具、桌面程序
+和设备应用。发布端必须用离线私钥为 ABI 匹配的软件包、`Packages`/`Packages.gz` 及
+detached signature 签名。设备与本仓库不应持有私钥，发布说明也绝不能要求关闭签名校验。
+
+release collector 会对在线 Pages endpoint 强制执行该策略；镜像里仅仅存在一个 URL 和公钥，
+不能证明设备在现场一定可以通过软件源更新。

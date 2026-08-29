@@ -12,10 +12,23 @@ while [ "$attempt" -lt 40 ]; do
 	sleep 0.05
 done
 
-# Keep the desktop quiet behind windows while carrying the same warm paper
-# language as the greeter. swaybg owns only the background; labwc continues
-# to own the compositor and sfwbar continues to own the panel.
-/usr/bin/swaybg -o "$TDVP_K230_OUTPUT" \
-	-i /usr/share/backgrounds/tdvp-pda-paper.svg -m fill \
-	>"${XDG_RUNTIME_DIR}/tdvp-swaybg.log" 2>&1 &
-/usr/local/bin/tdvp-sfwbar-session &
+# PCManFM creates the background layer, desktop icons and conventional
+# right-click desktop menu. Its configuration keeps the existing TDVP paper
+# artwork and does not alter the board-validated Labwc output mapping above.
+/usr/local/bin/tdvp-pcmanfm-desktop-session &
+
+# Raspberry Pi's volumepulse plugin talks to a per-desktop-user PulseAudio
+# server.  Start and wait for that upstream server before the panel is loaded;
+# the SDK's system-wide daemon authenticates only its `pulse` account and made
+# the volume component disappear for the logged-in `tdvp` desktop user.
+/usr/local/bin/tdvp-pulseaudio-session
+
+# Keep one deliberately compact top panel. wf-panel-pi is the maintained
+# Raspberry Pi desktop panel host; its TDVP system configuration preserves our
+# warm-paper/orange visual language rather than importing Raspberry Pi styling.
+/usr/local/bin/tdvp-wf-panel-session &
+
+# Board-level key policy: the TCA8418 Menu key opens or closes Raspberry Pi's
+# existing smenu component through its documented wfpanelctl command.
+# It is a proper Wayland surface, unlike the currently affected GTK3 panel popup.
+/usr/local/bin/tdvp-key-bridge &

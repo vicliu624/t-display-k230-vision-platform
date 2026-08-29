@@ -51,8 +51,7 @@ done
 section 'System services'
 if command -v systemctl >/dev/null 2>&1; then
 	for unit in \
-		systemd-networkd.service \
-		wpa_supplicant@wlan0.service \
+		NetworkManager.service \
 		sshd.service \
 		bluetooth.service \
 		ModemManager.service \

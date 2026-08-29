@@ -1,0 +1,34 @@
+From: TDVP Platform <platform@tdvp.invalid>
+Date: Thu, 28 Aug 2026 16:20:00 +0800
+Subject: [PATCH] netman: retain Raspberry Pi's shared panel ABI
+
+The upstream wf-panel-pi C++ adapter calls the same C implementation as the
+LXPanel module.  Its NMApplet instance therefore requires the fields and
+callbacks selected by LXPANEL_PLUGIN, even though this product does not build
+or ship the LXPanel module itself.
+
+Keep that established shared ABI for the Wayland module.  The associated
+lp-connection-editor executable contract is supplied by the product's small
+compatibility launcher, which delegates to the upstream nm-connection-editor
+binary.
+
+Signed-off-by: TDVP Platform <platform@tdvp.invalid>
+---
+ src/applet.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/applet.h b/src/applet.h
+index a22619f..9f469e1 100644
+--- a/src/applet.h
++++ b/src/applet.h
+@@ -31,7 +31,7 @@
+ #include <libmm-glib.h>
+ #endif
+ 
+-#define LXPANEL_PLUGIN
++#define LXPANEL_PLUGIN /* shared by the wf-panel-pi adapter */
+ #ifdef LXPANEL_PLUGIN
+ #ifdef LXPLUG
+ #include "plugin.h"
+-- 
+2.47.3

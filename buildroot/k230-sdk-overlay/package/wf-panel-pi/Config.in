@@ -1,0 +1,19 @@
+config BR2_PACKAGE_WF_PANEL_PI
+	bool "wf-panel-pi"
+	depends on BR2_PACKAGE_LIBGTK3_WAYLAND
+	depends on BR2_INSTALL_LIBSTDCPP
+	depends on BR2_USE_MMU
+	select BR2_PACKAGE_GLM
+	select BR2_PACKAGE_GTK_LAYER_SHELL
+	select BR2_PACKAGE_GTKMM3
+	select BR2_PACKAGE_LIBEVDEV
+	select BR2_PACKAGE_LIBINPUT
+	select BR2_PACKAGE_LIBXML2
+	select BR2_PACKAGE_WAYLAND_PROTOCOLS
+	help
+	  Raspberry Pi's GTK3 Wayland desktop panel. TDVP uses its standard
+	  layer-shell panel and plugin API on top of Labwc, with a TDVP-specific
+	  theme and a deliberately small plugin set.
+
+comment "wf-panel-pi needs GTK3 Wayland, C++ and an MMU"
+	depends on !BR2_PACKAGE_LIBGTK3_WAYLAND || !BR2_INSTALL_LIBSTDCPP || !BR2_USE_MMU

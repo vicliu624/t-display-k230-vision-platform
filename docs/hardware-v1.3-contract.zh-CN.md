@@ -9,8 +9,8 @@ Labwc 桌面 profile 使用固定 K230 Linux SDK 中的 T-Display K230 V1.3 板�
 | GT9895 触摸 | Linux input event、libinput | 内核 touch fragment、`70-tdvp-touch.rules` |
 | 键盘扩展模块 | Linux input event | `tdvp-keyboard-layout.service` |
 | 键盘扩展 I2C 总线 | `/dev/i2c-*` | K230 keyboard/hardware fragment |
-| RTL8189FS Wi-Fi | `wlan0`、wpa_supplicant、systemd-networkd | RTL8189FS package 和网络配置 |
-| RTL8152 USB 网卡 | `enu1`、systemd-networkd | 内核 r8152 驱动和网络配置 |
+| RTL8189FS Wi-Fi | `wlan0`、NetworkManager / `nmcli` | RTL8189FS 软件包与 NetworkManager |
+| RTL8152 USB 网卡 | `enu1`、NetworkManager / `nmcli` | 内核 r8152 驱动与 NetworkManager |
 | 摄像头与 ISP | V4L2/media 节点和 vendor ISP 服务 | `vvcam` package 和 vendor 服务 |
 | 音频录制/播放 | ALSA 设备 | ALSA 工具 |
 | GPIO 与 I2C 诊断 | GPIO character device、`/dev/i2c-*` | libgpiod 工具和 i2c-tools |

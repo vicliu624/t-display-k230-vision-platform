@@ -1,0 +1,12 @@
+config BR2_PACKAGE_LIBMENU_CACHE
+	bool "libmenu-cache"
+	depends on BR2_USE_MMU
+	select BR2_PACKAGE_LIBGLIB2
+	select BR2_PACKAGE_LIBFM_EXTRA
+	help
+	  LXDE menu-cache library and daemon. It is used by Raspberry Pi's
+	  desktop menu and by wf-panel-pi's window-list plugin to discover XDG
+	  desktop entries.
+
+comment "libmenu-cache needs an MMU"
+	depends on !BR2_USE_MMU

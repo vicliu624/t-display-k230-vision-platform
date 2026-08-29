@@ -2,7 +2,7 @@
 Type=Application
 Name=Foot Terminal
 Comment=Wayland terminal emulator
-Exec=foot
+Exec=/usr/local/bin/tdvp-terminal
 Icon=utilities-terminal
 Categories=System;TerminalEmulator;
 Terminal=false

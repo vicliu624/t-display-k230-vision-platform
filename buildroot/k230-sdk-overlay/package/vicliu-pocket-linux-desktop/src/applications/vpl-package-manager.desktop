@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Software Manager
+Comment=Manage ABI-matched TDVP applications with opkg
+Exec=vpl-package-manager
+Terminal=false
+Categories=System;PackageManager;
+Icon=system-software-install

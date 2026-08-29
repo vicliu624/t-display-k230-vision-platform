@@ -1,0 +1,36 @@
+#!/bin/sh
+# Import precisely the release public key used by the ABI-fixed TDVP feed.
+# This service deliberately has no network side effects and never handles a
+# secret key.  opkg invokes gpg with this same homedir for index verification.
+set -eu
+
+readonly GPG=/usr/bin/gpg
+readonly GPG_HOME=/etc/opkg/gpg
+readonly PUBLIC_KEY=/usr/share/tdvp/opkg/tdvp-repo-public.asc
+readonly FINGERPRINT=2B091A2A8E5810954FB9FD64EA9D1CD5EFC81500
+
+fail() {
+	printf '%s\n' "tdvp-opkg-bootstrap: $*" >&2
+	exit 1
+}
+
+has_expected_key() {
+	"${GPG}" --batch --no-tty --homedir "${GPG_HOME}" --with-colons \
+		--list-keys "${FINGERPRINT}" 2>/dev/null |
+		awk -F: -v expected="${FINGERPRINT}" \
+			'$1 == "fpr" && $10 == expected { found = 1 } END { exit !found }'
+}
+
+[ -x "${GPG}" ] || fail "gpg is missing"
+[ -s "${PUBLIC_KEY}" ] || fail "embedded repository public key is missing"
+
+umask 077
+mkdir -p "${GPG_HOME}"
+chmod 0700 "${GPG_HOME}"
+
+if ! has_expected_key; then
+	"${GPG}" --batch --no-tty --homedir "${GPG_HOME}" --import "${PUBLIC_KEY}" ||
+		fail "could not import the embedded repository public key"
+fi
+
+has_expected_key || fail "the imported key does not match the release fingerprint"

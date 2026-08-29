@@ -1,0 +1,15 @@
+config BR2_PACKAGE_PCMANFM
+	bool "pcmanfm (Raspberry Pi Wayland desktop)"
+	depends on BR2_USE_MMU
+	select BR2_PACKAGE_GTK_LAYER_SHELL
+	select BR2_PACKAGE_LIBFM
+	select BR2_PACKAGE_LIBGTK3
+	select BR2_PACKAGE_LIBGTK3_WAYLAND
+	help
+	  Raspberry Pi's maintained PCManFM branch, built here for the Wayland
+	  desktop path only. Desktop mode uses gtk-layer-shell as the background
+	  surface and supplies icons plus context-menu behaviour, including touch
+	  long press, without adding an X11 server to the image.
+
+comment "pcmanfm needs an MMU"
+	depends on !BR2_USE_MMU

@@ -13,7 +13,8 @@ k230_canmv_t_display_rm69a10_labwc_desktop_defconfig
 
 The profile supplies a systemd root filesystem, the vendor K230 kernel and
 firmware runtime, the RM69A10 board device tree, and a Wayland desktop composed
-from seatd, Labwc, Swaybg, SFWBar, and Foot. All build outputs belong below one
+from seatd, greetd, Labwc, PCManFM, Raspberry Pi wf-panel-pi, Foot, Cog/WPE
+WebKit and NetworkManager. All build outputs belong below one
 stable worktree path:
 
 ```text

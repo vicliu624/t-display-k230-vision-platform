@@ -1,1 +1,2 @@
-tdvp ALL=(root) NOPASSWD: /usr/local/libexec/vpl-desktopctl
+Defaults:tdvp secure_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+tdvp ALL=(root) NOPASSWD: /usr/local/libexec/vpl-desktopctl, /usr/local/sbin/tdvp-opkg

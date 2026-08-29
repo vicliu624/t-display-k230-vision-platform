@@ -1,0 +1,55 @@
+From: TDVP <tdvp@example.invalid>
+Date: Tue, 25 Aug 2026 12:00:00 +0800
+Subject: [PATCH] tdvp: build only the wf-panel-pi clock module
+
+TDVP does not ship LXPanel. Avoid its build-only dependency and install just
+the upstream Raspberry Pi Wayland clock module.
+
+Signed-off-by: TDVP <tdvp@example.invalid>
+---
+ src/meson.build | 19 +++----------------
+ 1 file changed, 3 insertions(+), 16 deletions(-)
+
+diff --git a/src/meson.build b/src/meson.build
+index b4e7d43..f6ae9ae 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -1,26 +1,9 @@
+-gtk = dependency('gtk+-3.0')
+ gtkmm = dependency('gtkmm-3.0', version: '>=3.24')
+-lxpanel = dependency('lxpanel-pi')
+ wfpanel = dependency('wf-panel-pi')
+ 
+-lsources = files(
+-  'clock.c'
+-)
+-
+-ldeps = [ gtk, lxpanel ]
+-
+-largs = [ '-DPACKAGE_DATA_DIR="' + lresource_dir + '"', '-DGETTEXT_PACKAGE="lpplug_' + meson.project_name() + '"' ]
+-
+-shared_module(meson.project_name(), lsources,
+-        dependencies: ldeps,
+-        install: true,
+-        install_dir: get_option('libdir') / 'lxpanel-pi',
+-        c_args : largs,
+-        name_prefix: ''
+-)
+-
+-wsources = files(
+-  'clock.cpp'
++sources = files(
++  'clock.c',
++  'clock.cpp'
+ )
+ 
+ wdeps = [ gtkmm, wfpanel ]
+@@ -27,7 +10,7 @@ wdeps = [ gtkmm, wfpanel ]
+ 
+ wargs = [ '-DPACKAGE_DATA_DIR="' + wresource_dir + '"', '-DGETTEXT_PACKAGE="wfplug_' + meson.project_name() +'"' ]
+ 
+-shared_module('lib' + meson.project_name(), [ lsources, wsources ],
++shared_module('lib' + meson.project_name(), sources,
+         dependencies: wdeps,
+         install: true,
+         install_dir: get_option('libdir') / 'wf-panel-pi',

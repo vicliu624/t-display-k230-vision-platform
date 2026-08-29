@@ -1,0 +1,54 @@
+// T-Display K230 detachable keyboard: Wayland Fn/yellow layer.
+//
+// The controller reports both physical Fn keys as Linux KEY_FN.  xkeyboard-
+// config assigns that evdev key the stable name <I472>; map it to the normal
+// LevelThree modifier, then give the printed yellow glyphs their third level.
+// Tab is deliberately not involved: it remains a real Tab key.
+partial alphanumeric_keys modifier_keys
+xkb_symbols "fn-yellow" {
+    virtual_modifiers LevelThree;
+
+    // `ISO_Level3_Shift` needs a real modifier binding as well.  The stock
+    // right-Alt layout gets one via <RALT>'s existing Mod1 map; this is a
+    // board-specific KEY_FN key, so make its LevelThree state explicit.
+    modifier_map Mod5 { <I472> };
+
+    key <I472> { type[Group1] = "ONE_LEVEL",
+                 symbols[Group1] = [ ISO_Level3_Shift ] };
+
+    key <AE01> { type[Group1] = "FOUR_LEVEL", [ 1, exclam, exclam, exclam ] };
+    key <AE02> { type[Group1] = "FOUR_LEVEL", [ 2, at, at, at ] };
+    key <AE03> { type[Group1] = "FOUR_LEVEL", [ 3, numbersign, numbersign, numbersign ] };
+    key <AE04> { type[Group1] = "FOUR_LEVEL", [ 4, dollar, dollar, dollar ] };
+    key <AE05> { type[Group1] = "FOUR_LEVEL", [ 5, percent, percent, percent ] };
+    key <AE06> { type[Group1] = "FOUR_LEVEL", [ 6, asciicircum, asciicircum, asciicircum ] };
+    key <AE07> { type[Group1] = "FOUR_LEVEL", [ 7, ampersand, ampersand, ampersand ] };
+    key <AE08> { type[Group1] = "FOUR_LEVEL", [ 8, asterisk, asterisk, asterisk ] };
+    key <AE09> { type[Group1] = "FOUR_LEVEL", [ 9, parenleft, parenleft, parenleft ] };
+    key <AE10> { type[Group1] = "FOUR_LEVEL", [ 0, parenright, parenright, parenright ] };
+
+    key <AD01> { type[Group1] = "FOUR_LEVEL", [ q, Q, apostrophe, apostrophe ] };
+    key <AD02> { type[Group1] = "FOUR_LEVEL", [ w, W, underscore, underscore ] };
+    key <AD03> { type[Group1] = "FOUR_LEVEL", [ e, E, minus, minus ] };
+    key <AD04> { type[Group1] = "FOUR_LEVEL", [ r, R, plus, plus ] };
+    key <AD05> { type[Group1] = "FOUR_LEVEL", [ t, T, equal, equal ] };
+    key <AD06> { type[Group1] = "FOUR_LEVEL", [ y, Y, backslash, backslash ] };
+    key <AD07> { type[Group1] = "FOUR_LEVEL", [ u, U, bar, bar ] };
+    key <AD08> { type[Group1] = "FOUR_LEVEL", [ i, I, semicolon, semicolon ] };
+    key <AD09> { type[Group1] = "FOUR_LEVEL", [ o, O, colon, colon ] };
+    key <AD10> { type[Group1] = "FOUR_LEVEL", [ p, P, quotedbl, quotedbl ] };
+
+    key <AC01> { type[Group1] = "FOUR_LEVEL", [ a, A, asciitilde, asciitilde ] };
+    key <AC02> { type[Group1] = "FOUR_LEVEL", [ s, S, bracketleft, bracketleft ] };
+    key <AC03> { type[Group1] = "FOUR_LEVEL", [ d, D, bracketright, bracketright ] };
+    key <AC04> { type[Group1] = "FOUR_LEVEL", [ f, F, braceleft, braceleft ] };
+    key <AC05> { type[Group1] = "FOUR_LEVEL", [ g, G, braceright, braceright ] };
+    key <AC06> { type[Group1] = "FOUR_LEVEL", [ h, H, apostrophe, apostrophe ] };
+    key <AC07> { type[Group1] = "FOUR_LEVEL", [ j, J, grave, grave ] };
+    key <AC08> { type[Group1] = "FOUR_LEVEL", [ k, K, slash, slash ] };
+    key <AC09> { type[Group1] = "FOUR_LEVEL", [ l, L, question, question ] };
+
+    key <AB05> { type[Group1] = "FOUR_LEVEL", [ b, B, period, period ] };
+    key <AB06> { type[Group1] = "FOUR_LEVEL", [ n, N, less, less ] };
+    key <AB07> { type[Group1] = "FOUR_LEVEL", [ m, M, greater, greater ] };
+};

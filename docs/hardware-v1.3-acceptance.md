@@ -4,9 +4,10 @@ Run the commands below after flashing the Labwc desktop image. They record the
 standard Linux evidence used for board acceptance.
 
 ```sh
-systemctl status sshd systemd-networkd seatd tdvp-labwc-desktop
+systemctl status sshd NetworkManager seatd tdvp-labwc-desktop
 ip address
-iw dev
+nmcli device
+nmcli connection show --active
 cat /sys/class/drm/card0-DSI-1/status
 cat /proc/bus/input/devices
 arecord -l
@@ -34,5 +35,5 @@ tdvp-kpu-acceptance
 ```
 
 The device passes the desktop portion when the `DSI-1` panel shows Labwc,
-Swaybg, and SFWBar; Foot opens from the application menu; keyboard and touch
-both interact with the Wayland session.
+Swaybg, PCManFM, and wf-panel-pi; Foot opens from the application menu;
+keyboard and touch both interact with the Wayland session.

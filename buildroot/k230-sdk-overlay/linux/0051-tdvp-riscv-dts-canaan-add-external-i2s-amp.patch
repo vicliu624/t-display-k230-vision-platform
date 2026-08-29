@@ -1,0 +1,84 @@
+From 9af8e9c8df978384b75b44cce77eb37524f44e8d Mon Sep 17 00:00:00 2001
+From: Vicliu Pocket Linux <maintainers@vicliu.i234.me>
+Date: Fri, 28 Aug 2026 11:10:00 +0800
+Subject: [PATCH] riscv: dts: canaan: route RM69A10 audio to external I2S amp
+
+The T-Display K230 V1.3 speaker is driven by a MAX98357A-compatible
+I2S amplifier. It consumes the existing K230_I2S_INNO stream and must
+not appear as a second ALSA card.
+
+Route BCLK, LRCK and data-out to the board connector, and expose the
+amplifier shutdown line as an active-high GPIO consumer of the existing
+ASoC machine device. The companion machine-driver patch owns that line
+while it changes the internal/external output route.
+
+I2S BCLK: IO32
+I2S LRCK: IO33
+I2S data: IO35
+AMP SHDN: IO34 / GPIO34
+---
+ arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts | 43 ++++++++++++++++++++++
+ 1 file changed, 43 insertions(+)
+
+diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+index 73f5988..1f84e73 100644
+--- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
++++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+@@ -29,6 +29,10 @@
+ 		canaan,model = "K230_I2S_INNO";
+ 		canaan,k230-i2s-controller = <&i2s>;
+ 		canaan,k230-audio-codec = <&inno_codec>;
++		canaan,external-i2s-output-default;
++		amp-shutdown-gpios = <&gpio1_ports 2 GPIO_ACTIVE_HIGH>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&tdvp_amp_shutdown_pin>;
+ 	};
+ };
+ 
+@@ -35,3 +39,8 @@
++&i2s {
++	pinctrl-names = "default";
++	pinctrl-0 = <&tdvp_amp_i2s_pins>;
++};
++
+ &uart0 { status = "okay"; };
+ &uart2 { status = "okay"; };
+ &uart3 { status = "okay"; };
+@@ -205,4 +214,35 @@
+ &iomux {
++	tdvp_amp_i2s_pins: tdvp-amp-i2s-pins {
++		bclk {
++			pins = K230_IO32;
++			function = K230_IO32_IIS_CLK;
++			output-enable;
++			drive-strength = <8>;
++		};
++
++		lrck {
++			pins = K230_IO33;
++			function = K230_IO33_IIS_WS;
++			output-enable;
++			drive-strength = <8>;
++		};
++
++		data {
++			pins = K230_IO35;
++			function = K230_IO35_IIS_D_OUT0_PDM_IN1;
++			output-enable;
++			drive-strength = <8>;
++		};
++	};
++
++	tdvp_amp_shutdown_pin: tdvp-amp-shutdown-pin {
++		pins = K230_IO34;
++		function = K230_IO34_GPIO34;
++		bias-disable;
++		output-enable;
++		drive-strength = <8>;
++	};
++
+ 	tdvp_lr2021_spi_pins: tdvp-lr2021-spi-pins {
+ 		pins = K230_IO14, K230_IO15, K230_IO16, K230_IO17;
+ 		function = "alt1";
+-- 
+2.45.2

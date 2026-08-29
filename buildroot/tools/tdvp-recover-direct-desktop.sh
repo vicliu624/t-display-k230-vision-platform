@@ -1,7 +1,9 @@
 #!/bin/sh
-# Restore the known-good direct Labwc session after an interrupted greeter test.
+# Restore the supported graphical login after an interrupted session test.
+# A direct tdvp-labwc-desktop system service is retired: graphical applications
+# must run in the account that greetd actually authenticates.
 set -eu
 
-systemctl disable --now greetd.service 2>/dev/null || true
-systemctl enable --now tdvp-labwc-desktop.service
-systemctl --no-pager --full status tdvp-labwc-desktop.service
+systemctl reset-failed greetd.service
+systemctl enable --now greetd.service
+systemctl --no-pager --full status greetd.service

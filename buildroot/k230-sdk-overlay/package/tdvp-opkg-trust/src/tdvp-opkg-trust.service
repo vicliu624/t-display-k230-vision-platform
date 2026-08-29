@@ -1,0 +1,13 @@
+[Unit]
+Description=TDVP signed opkg feed trust bootstrap
+After=local-fs.target
+Before=greetd.service
+ConditionPathExists=/usr/share/tdvp/opkg/tdvp-repo-public.asc
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/tdvp-opkg-bootstrap
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

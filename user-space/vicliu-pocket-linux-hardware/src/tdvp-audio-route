@@ -1,0 +1,108 @@
+#!/bin/sh
+# One policy owner for the T-Display K230 external I2S speaker route.
+#
+# GPIO34 is intentionally not controlled here. It is requested by the
+# K230_I2S_INNO ASoC machine driver through amp-shutdown-gpios and is raised
+# only while an external-route playback stream is active. This tool changes
+# the standard ALSA mixer control, records the selected policy, and leaves
+# player, panel, and PulseAudio processes unable to race the amplifier GPIO.
+set -eu
+
+readonly CONTROL='External I2S Output Switch'
+readonly STATE_DIR=/run/vicliu-pocket-linux-hardware
+readonly ROUTE_FILE="${STATE_DIR}/audio-route"
+readonly AMIXER=/usr/bin/amixer
+
+fail() {
+	printf '%s\n' "tdvp-audio-route: $*" >&2
+	exit 1
+}
+
+usage() {
+	cat >&2 <<'EOF'
+Usage: tdvp-audio-route external|internal|status
+
+Select the existing K230_I2S_INNO card's external MAX98357A-compatible I2S
+route or its internal codec route. This root-only policy tool never drives
+GPIO34 itself; the kernel ASoC machine driver owns the amplifier enable.
+EOF
+	exit 2
+}
+
+[ "$(id -u)" -eq 0 ] || fail 'must run as root'
+[ -x "${AMIXER}" ] || fail 'amixer is unavailable'
+
+card_number() {
+	sed -n '/\[K230_I2S_INNO/ { s/^[[:space:]]*\([0-9][0-9]*\).*/\1/; p; q; }' \
+		/proc/asound/cards 2>/dev/null || true
+}
+
+wait_for_card() {
+	attempt=0
+	while :; do
+		card="$(card_number)"
+		if [ -n "${card}" ] && "${AMIXER}" -c "${card}" cget "name=${CONTROL}" >/dev/null 2>&1; then
+			printf '%s\n' "${card}"
+			return 0
+		fi
+		attempt=$((attempt + 1))
+		[ "${attempt}" -lt 10 ] || fail "K230_I2S_INNO control '${CONTROL}' did not become available"
+		sleep 1
+	done
+}
+
+write_route() {
+	mkdir -p "${STATE_DIR}"
+	temporary="${STATE_DIR}/.audio-route.$$"
+	umask 022
+	printf '%s\n' "$1" > "${temporary}"
+	mv -f "${temporary}" "${ROUTE_FILE}"
+}
+
+control_is() {
+	card="$1"
+	expected="$2"
+	case "${expected}" in
+		external)
+			"${AMIXER}" -c "${card}" cget "name=${CONTROL}" 2>/dev/null | \
+				grep -Eq 'values=(on|1)([[:space:]]|$)'
+			;;
+		internal)
+			"${AMIXER}" -c "${card}" cget "name=${CONTROL}" 2>/dev/null | \
+				grep -Eq 'values=(off|0)([[:space:]]|$)'
+			;;
+	esac
+}
+
+set_route() {
+	route="$1"
+	card="$(wait_for_card)"
+	case "${route}" in
+		external) value=1 ;;
+		internal) value=0 ;;
+		*) usage ;;
+	esac
+	"${AMIXER}" -q -c "${card}" cset "name=${CONTROL}" "${value}" >/dev/null
+	control_is "${card}" "${route}" || fail "ALSA control did not select '${route}'"
+	write_route "${route}"
+	printf '%s\n' "tdvp-audio-route: ${route} route selected on card ${card}"
+}
+
+case "${1:-}" in
+	external|internal)
+		set_route "$1"
+		;;
+	status)
+		card="$(wait_for_card)"
+		if control_is "${card}" external; then
+			printf '%s\n' 'external'
+		elif control_is "${card}" internal; then
+			printf '%s\n' 'internal'
+		else
+			fail 'ALSA route control has an unknown value'
+		fi
+		;;
+	*)
+		usage
+		;;
+esac

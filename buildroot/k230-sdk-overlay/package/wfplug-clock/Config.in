@@ -1,0 +1,6 @@
+config BR2_PACKAGE_WFPLUG_CLOCK
+	bool "wf-panel-pi clock plugin"
+	depends on BR2_PACKAGE_WF_PANEL_PI
+	help
+	  Raspberry Pi's panel clock plugin, built for the wf-panel-pi plugin API
+	  only. The legacy LXPanel module is not included.

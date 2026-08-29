@@ -1,0 +1,45 @@
+From 7d3ef32e2f5f8a81dcbdf63cfd78761d8d6f5d74 Mon Sep 17 00:00:00 2001
+From: TDVP Platform <platform@tdvp.invalid>
+Date: Fri, 28 Aug 2026 15:15:00 +0800
+Subject: [PATCH] connection-editor: build without unused X11-only headers
+
+The editor runs on the TDVP Labwc/GTK Wayland desktop.  Its two connection
+editor sources unconditionally include gdk/gdkx.h even though neither contains
+X11-specific symbols.  That header is unavailable in a GTK3 build without the
+X11 backend, which prevents the otherwise Wayland-capable editor from
+compiling.
+
+Drop the unused include instead of pulling the X11 backend into the image.
+
+Signed-off-by: TDVP Platform <platform@tdvp.invalid>
+---
+ src/connection-editor/nm-connection-editor.c | 1 -
+ src/connection-editor/nm-connection-list.c   | 1 -
+ 2 files changed, 2 deletions(-)
+
+diff --git a/src/connection-editor/nm-connection-editor.c b/src/connection-editor/nm-connection-editor.c
+index d8dd43b..6b6b9ac 100644
+--- a/src/connection-editor/nm-connection-editor.c
++++ b/src/connection-editor/nm-connection-editor.c
+@@ -15,7 +15,6 @@
+ #include <sys/types.h>
+ #include <unistd.h>
+ #include <errno.h>
+-#include <gdk/gdkx.h>
+ 
+ #if WITH_SELINUX
+ #include <selinux/selinux.h>
+diff --git a/src/connection-editor/nm-connection-list.c b/src/connection-editor/nm-connection-list.c
+index 3495a63..f8968ee 100644
+--- a/src/connection-editor/nm-connection-list.c
++++ b/src/connection-editor/nm-connection-list.c
+@@ -13,7 +13,6 @@
+ #include <string.h>
+ #include <sys/types.h>
+ #include <unistd.h>
+-#include <gdk/gdkx.h>
+ 
+ #include "ce-page.h"
+ #include "nm-connection-editor.h"
+-- 
+2.45.2

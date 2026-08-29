@@ -1,0 +1,45 @@
+From 6c1c5bf1ecba02931f7efc0ef44842748b09d41f Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@tdvp.local>
+Date: Tue, 26 Aug 2026 08:58:00 +0800
+Subject: [PATCH] build: provide gtk-doc include for Git checkouts
+
+The upstream Git tree intentionally excludes the gtkdocize-generated
+gtk-doc.make file. Automake still parses the documentation Makefile even
+when the package is configured with --disable-gtk-doc, so a Buildroot Git
+checkout fails before the documentation conditional can take effect.
+
+Provide the deliberately empty include file required for an embedded,
+documentation-disabled build. The actual libfm documentation subtree remains
+disabled by the package configure flags.
+---
+ docs/reference/libfm/Makefile.am | 2 +-
+ gtk-doc.make                     | 5 +++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+ create mode 100644 gtk-doc.make
+
+diff --git a/gtk-doc.make b/gtk-doc.make
+new file mode 100644
+index 0000000..933a1f7
+--- /dev/null
++++ b/gtk-doc.make
+@@ -0,0 +1,5 @@
++# Placeholder for a Git checkout built with --disable-gtk-doc.
++#
++# Upstream generates this file with gtkdocize for documentation builds. It
++# must still exist while Automake parses docs/reference/libfm/Makefile.am,
++# although that subtree is not built by the target configuration.
+diff --git a/docs/reference/libfm/Makefile.am b/docs/reference/libfm/Makefile.am
+index 46076f5..7f1d898 100644
+--- a/docs/reference/libfm/Makefile.am
++++ b/docs/reference/libfm/Makefile.am
+@@ -132,7 +132,7 @@ include $(top_srcdir)/gtk-doc.make
+ 
+ # Other files to distribute
+ # e.g. EXTRA_DIST += version.xml.in
+-EXTRA_DIST +=
++EXTRA_DIST =
+ 
+ # Files not to distribute
+ # for --rebuild-types in $(SCAN_OPTIONS), e.g. $(DOC_MODULE).types
+-- 
+2.46.0

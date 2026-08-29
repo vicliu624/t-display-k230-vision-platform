@@ -1,0 +1,28 @@
+From: TDVP <tdvp@example.invalid>
+Date: Tue, 25 Aug 2026 12:15:00 +0800
+Subject: [PATCH] tdvp: link libdl for runtime panel-plugin loading
+
+wf-panel-pi discovers its panel modules with dlopen() and dlsym().  On this
+RISC-V toolchain libdl is not pulled in transitively, so the final panel
+executable fails to link.  Declare the direct dependency in Meson rather than
+relying on a Buildroot-specific linker flag.
+
+Signed-off-by: TDVP <tdvp@example.invalid>
+---
+ src/panel/meson.build | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/panel/meson.build b/src/panel/meson.build
+index 620fc03..d695073 100644
+--- a/src/panel/meson.build
++++ b/src/panel/meson.build
+@@ -34,7 +34,8 @@ udev = dependency('libudev')
+ input = dependency('libinput')
+ evdev = dependency('libevdev')
+ libxml2 = dependency('libxml-2.0')
+-panel_deps = [ gtklayershell, udev, input, evdev, libxml2 ]
++libdl = meson.get_compiler('cpp').find_library('dl', required: true)
++panel_deps = [ gtklayershell, udev, input, evdev, libxml2, libdl ]
+ 
+ executable('wf-panel-pi', panel_sources + util_sources + config_sources,
+         dependencies: deps + panel_deps,

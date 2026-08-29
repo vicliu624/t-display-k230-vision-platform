@@ -1,0 +1,57 @@
+From: TDVP <tdvp@example.invalid>
+Date: Tue, 25 Aug 2026 12:00:00 +0800
+Subject: [PATCH] tdvp: build only the wf-panel-pi menu module
+
+TDVP uses Labwc and wf-panel-pi, not the legacy LXPanel ABI. Do not make the
+modern Wayland module depend on lxpanel-pi or build an unused legacy module.
+
+Signed-off-by: TDVP <tdvp@example.invalid>
+---
+ src/meson.build | 20 +++-----------------
+ 1 file changed, 3 insertions(+), 17 deletions(-)
+
+diff --git a/src/meson.build b/src/meson.build
+index 19f4d69..863fd18 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -1,36 +1,19 @@
+-gtk = dependency('gtk+-3.0')
+ gtkmm = dependency('gtkmm-3.0', version: '>=3.24')
+-lxpanel = dependency('lxpanel-pi')
+ wfpanel = dependency('wf-panel-pi')
+ menu_cache = dependency('libmenu-cache')
+ 
+-lsources = files(
++sources = files(
+   'smenu.c',
+   'gtk-launch.c',
+-  'properties.c'
++  'properties.c',
++  'smenu.cpp'
+ )
+ 
+-ldeps = [ gtk, lxpanel, menu_cache ]
+-
+-largs = [ '-DPACKAGE_DATA_DIR="' + lresource_dir + '"', '-DGETTEXT_PACKAGE="lpplug_' + meson.project_name() + '"' ]
+-
+-shared_module(meson.project_name(), lsources,
+-        dependencies: ldeps,
+-        install: true,
+-        install_dir: get_option('libdir') / 'lxpanel-pi',
+-        c_args : largs,
+-        name_prefix: ''
+-)
+-
+-wsources = files(
+-  'smenu.cpp'
+-)
+-
+ wdeps = [ gtkmm, wfpanel, menu_cache ]
+ 
+ wargs = [ '-DPACKAGE_DATA_DIR="' + wresource_dir + '"', '-DGETTEXT_PACKAGE="wfplug_' + meson.project_name() +'"' ]
+ 
+-shared_module('lib' + meson.project_name(), [ lsources, wsources ],
++shared_module('lib' + meson.project_name(), sources,
+         dependencies: wdeps,
+         install: true,
+         install_dir: get_option('libdir') / 'wf-panel-pi',

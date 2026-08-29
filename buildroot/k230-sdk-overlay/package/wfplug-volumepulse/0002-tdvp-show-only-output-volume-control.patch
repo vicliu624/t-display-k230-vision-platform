@@ -1,0 +1,41 @@
+From: TDVP <tdvp@example.invalid>
+Date: Thu, 27 Aug 2026 16:20:00 +0800
+Subject: [PATCH] tdvp: hide the unavailable microphone control
+
+The Raspberry Pi plugin creates separate buttons for output and microphone
+levels. T-Display K230 only exposes a usable output route; PulseAudio still
+reports a monitor source, which makes the upstream input button visible with
+an incomplete microphone icon. Keep the upstream output control and all of
+its popup, mute and device-selection behaviour, but never expose the input
+button on TDVP.
+
+Signed-off-by: TDVP <tdvp@example.invalid>
+---
+ src/commongui.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/commongui.c b/src/commongui.c
+index 4d5dbe9..a79c2dd 100644
+--- a/src/commongui.c
++++ b/src/commongui.c
+@@ -154,6 +154,18 @@ void update_display (VolumePulsePlugin *vol, gboolean input)
+ {
+     const char *icon;
+ 
++    /*
++     * K230 has no user-facing capture path. PulseAudio nevertheless exposes
++     * the output monitor as a source, so upstream would show a second,
++     * non-actionable microphone button. Keep the maintained output widget
++     * unchanged and suppress only that unavailable input endpoint.
++     */
++    if (input)
++    {
++        gtk_widget_hide (vol->button[1]);
++        gtk_widget_set_sensitive (vol->button[1], FALSE);
++        return;
++    }
+     pulse_count_devices (vol, input);
+     if ((!input || !vol->wizard) && vol->pa_devices + bluetooth_count_devices (vol, input) > 0)
+     {
+-- 
+2.47.1

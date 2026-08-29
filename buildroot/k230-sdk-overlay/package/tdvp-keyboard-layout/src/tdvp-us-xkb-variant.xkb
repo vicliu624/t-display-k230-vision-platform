@@ -1,0 +1,8 @@
+// The variant is kept as a product file and appended to symbols/us during the
+// final rootfs step.  This lets the standard xkeyboard-config package remain
+// the owner of all normal US symbols.
+partial alphanumeric_keys
+xkb_symbols "tdvp" {
+    include "us(basic)"
+    include "tdvp(fn-yellow)"
+};

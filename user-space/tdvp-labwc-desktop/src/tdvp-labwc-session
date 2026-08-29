@@ -11,7 +11,14 @@ if [ -z "${HOME:-}" ] || [ ! -d "${HOME}" ]; then
 	echo "tdvp-labwc: HOME is unavailable" >&2
 	exit 1
 fi
+# greetd changes identity for the authenticated account but, unlike a login
+# shell, deliberately retains its own working directory.  A desktop process
+# must not inherit the greeter's /root cwd: wfplug-menu launches desktop files
+# from the panel's cwd and terminal clients reject an inaccessible directory.
+cd "${HOME}"
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
 export XDG_CONFIG_DIRS=/etc/xdg
 export XDG_DATA_DIRS=/usr/local/share:/usr/share
 export XDG_SESSION_TYPE=wayland

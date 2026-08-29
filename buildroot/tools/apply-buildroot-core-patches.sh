@@ -34,11 +34,16 @@ normalize_vendor_rootfs_overlay() {
 	local merged_bin="${overlay_dir}/usr/bin"
 	local tool
 
-	[ -d "${legacy_bin}" ] || return 0
 	[ -d "${overlay_dir}" ] || {
 		printf 'TDVP Buildroot patch: missing vendor rootfs overlay: %s\n' "${overlay_dir}" >&2
 		exit 1
 	}
+	# A previous successful synchronization may already have converted the
+	# overlay to Buildroot's merged-/usr layout.  Do not follow that /bin
+	# symlink: its children are the same /usr/bin files and moving them again
+	# would be a self-move rather than a normalization.
+	[ -L "${legacy_bin}" ] && return 0
+	[ -d "${legacy_bin}" ] || return 0
 
 	mkdir -p "${merged_bin}"
 	for tool in ap.sh k230_iomux.py ldd pwm-test.sh sta.sh; do

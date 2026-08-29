@@ -1,0 +1,57 @@
+From: TDVP <tdvp@example.invalid>
+Date: Wed, 26 Aug 2026 16:45:00 +0800
+Subject: [PATCH] tdvp: build only the wf-panel-pi volumepulse module
+
+Keep the maintained Raspberry Pi volumepulse implementation intact, while
+omitting its unused legacy LXPanel target and dependency.
+
+Signed-off-by: TDVP <tdvp@example.invalid>
+---
+ src/meson.build | 20 +++-----------------
+ 1 file changed, 3 insertions(+), 17 deletions(-)
+
+diff --git a/src/meson.build b/src/meson.build
+index c23653e..c93657d 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -1,29 +1,12 @@
+-gtk = dependency('gtk+-3.0')
+ gtkmm = dependency('gtkmm-3.0', version: '>=3.24')
+-lxpanel = dependency('lxpanel-pi')
+ wfpanel = dependency('wf-panel-pi')
+ libpulse = dependency('libpulse')
+ 
+-lsources = files(
++sources = files(
+   'volumepulse.c',
+   'commongui.c',
+   'pulse.c',
+-  'bluetooth.c'
+-)
+-
+-ldeps = [ gtk, lxpanel, libpulse ]
+-
+-largs = [ '-DPACKAGE_DATA_DIR="' + lresource_dir + '"', '-DGETTEXT_PACKAGE="lpplug_' + meson.project_name() + '"' ]
+-
+-shared_module(meson.project_name(), lsources,
+-        dependencies: ldeps,
+-        install: true,
+-        install_dir: get_option('libdir') / 'lxpanel-pi',
+-        c_args : largs,
+-        name_prefix: ''
+-)
+-
+-wsources = files(
++  'bluetooth.c',
+   'volumepulse.cpp'
+ )
+ 
+@@ -31,7 +14,7 @@ wdeps = [ gtkmm, wfpanel, libpulse ]
+ 
+ wargs = [ '-DPACKAGE_DATA_DIR="' + wresource_dir + '"', '-DGETTEXT_PACKAGE="wfplug_' + meson.project_name() +'"' ]
+ 
+-shared_module('lib' + meson.project_name(), [ lsources, wsources ],
++shared_module('lib' + meson.project_name(), sources,
+         dependencies: wdeps,
+         install: true,
+         install_dir: get_option('libdir') / 'wf-panel-pi',

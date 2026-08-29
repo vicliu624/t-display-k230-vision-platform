@@ -3,15 +3,26 @@
   <core>
     <decoration>server</decoration>
   </core>
+  <theme>
+    <!-- Touch targets are provided by Labwc's existing server decoration;
+         keep the conventional minimize, maximize, and close controls. -->
+    <titlebar>
+      <layout>icon:iconify,max,close</layout>
+      <showTitle>yes</showTitle>
+    </titlebar>
+    <maximizedDecoration>titlebar</maximizedDecoration>
+  </theme>
   <keyboard>
     <default />
-    <keybind key="Super_L" onRelease="yes">
-      <action name="Execute" command="/usr/local/bin/vpl-app-launcher" />
-    </keybind>
     <keybind key="W-Return">
       <action name="Execute" command="foot" />
     </keybind>
     <keybind key="W-q">
+      <action name="Close" />
+    </keybind>
+    <!-- A fullscreen Wayland client has no visible server close button. Keep
+         the normal desktop convention available to every application. -->
+    <keybind key="A-F4">
       <action name="Close" />
     </keybind>
     <keybind key="W-m">

@@ -22,7 +22,7 @@ Perform the following checks on a flashed device:
 
 ```sh
 uname -a
-systemctl status sshd systemd-networkd seatd tdvp-labwc-desktop
+systemctl status sshd NetworkManager seatd tdvp-labwc-desktop
 ip address
 ls -l /dev/dri /dev/input
 cat /sys/class/drm/card0-DSI-1/status
@@ -33,8 +33,8 @@ For attached board functions, inspect the relevant standard Linux interface:
 
 | Function | Validation interface |
 | --- | --- |
-| Wi-Fi | `iw dev`, `wpa_cli -i wlan0 status`, `ip address show wlan0` |
-| USB Ethernet | `ethtool enu1`, `ip address show enu1` |
+| Wi-Fi | `nmcli device`, `nmcli connection show --active`, `ip address show wlan0` |
+| USB Ethernet | `nmcli device`, `ethtool enu1`, `ip address show enu1` |
 | Keyboard | `cat /proc/bus/input/devices`, `evtest` |
 | Touch | `cat /proc/bus/input/devices`, `evtest` |
 | I2C peripherals | `i2cdetect -y <bus>` |
@@ -43,6 +43,7 @@ For attached board functions, inspect the relevant standard Linux interface:
 | Camera/ISP | vendor ISP service status and V4L2 nodes |
 | KPU | `tdvp-kpu-acceptance` |
 
-The Wayland desktop is accepted when Labwc, Swaybg, SFWBar, and Foot start
-from `tdvp-labwc-desktop.service` and the panel is interactive with keyboard
-and touch input.
+The Wayland desktop is accepted when Labwc, Swaybg, PCManFM, wf-panel-pi, and
+Foot start from `tdvp-labwc-desktop.service`; the panel and desktop menu are
+interactive with keyboard and touch input; and NetworkManager owns the active
+network connection.

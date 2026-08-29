@@ -1,0 +1,11 @@
+config BR2_PACKAGE_LIBFM
+	bool "libfm"
+	depends on BR2_USE_MMU
+	select BR2_PACKAGE_LIBGTK3
+	select BR2_PACKAGE_LIBMENU_CACHE
+	help
+	  Raspberry Pi maintained libfm, built with GTK3 support for the
+	  Wayland desktop mode of PCManFM.
+
+comment "libfm needs an MMU"
+	depends on !BR2_USE_MMU

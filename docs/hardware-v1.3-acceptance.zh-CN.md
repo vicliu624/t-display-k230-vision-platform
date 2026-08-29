@@ -4,9 +4,10 @@
 证据。
 
 ```sh
-systemctl status sshd systemd-networkd seatd tdvp-labwc-desktop
+systemctl status sshd NetworkManager seatd tdvp-labwc-desktop
 ip address
-iw dev
+nmcli device
+nmcli connection show --active
 cat /sys/class/drm/card0-DSI-1/status
 cat /proc/bus/input/devices
 arecord -l
@@ -32,5 +33,5 @@ systemctl status vicliu-pocket-linux-hardware
 tdvp-kpu-acceptance
 ```
 
-当 `DSI-1` 面板显示 Labwc、Swaybg 和 SFWBar，能够从应用菜单打开 Foot，且键盘与
-触摸都可与 Wayland 会话交互时，设备通过桌面部分验收。
+当 `DSI-1` 面板显示 Labwc、Swaybg、PCManFM 和 wf-panel-pi，能够从应用菜单打开
+Foot，且键盘与触摸都可与 Wayland 会话交互时，设备通过桌面部分验收。

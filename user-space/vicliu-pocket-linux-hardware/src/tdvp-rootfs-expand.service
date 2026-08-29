@@ -1,0 +1,13 @@
+[Unit]
+Description=TDVP first-boot SD-card root filesystem expansion
+After=systemd-remount-fs.service
+Before=greetd.service
+ConditionPathExists=/proc/mounts
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/vicliu-pocket-linux-hardware/tdvp-expand-rootfs
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

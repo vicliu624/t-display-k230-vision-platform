@@ -1,8 +1,6 @@
 #!/bin/sh
 set -eu
 
-WLAN_IFACE=wlan0
-
 die() {
 	echo "vpl-desktopctl: $*" >&2
 	exit 2
@@ -13,39 +11,6 @@ require_percent() {
 		''|*[!0-9]*) die "percentage must be an integer" ;;
 	esac
 	[ "$1" -ge 0 ] && [ "$1" -le 100 ] || die "percentage must be 0 through 100"
-}
-
-wifi_scan() {
-	/usr/sbin/ip link set "$WLAN_IFACE" up
-	/usr/sbin/iw dev "$WLAN_IFACE" scan 2>/dev/null |
-		sed -n 's/^[[:space:]]*SSID: //p' |
-		sed '/^$/d' |
-		sort -u
-}
-
-wifi_connect() {
-	ssid="$1"
-	passphrase="$2"
-	[ -n "$ssid" ] || die "SSID is empty"
-	[ -n "$passphrase" ] || die "passphrase is empty"
-
-	install -d -m 0700 /etc/wpa_supplicant
-	tmp="$(mktemp /etc/wpa_supplicant/.wlan0.XXXXXX)"
-	trap 'rm -f "$tmp"' EXIT HUP INT TERM
-	/usr/bin/wpa_passphrase "$ssid" "$passphrase" > "$tmp"
-	{
-		echo 'ctrl_interface=/run/wpa_supplicant'
-		echo 'update_config=0'
-		cat "$tmp"
-	} > /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
-	chmod 0600 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
-	rm -f "$tmp"
-	trap - EXIT HUP INT TERM
-
-	/usr/sbin/ip link set "$WLAN_IFACE" up
-	/bin/systemctl enable wpa_supplicant@"$WLAN_IFACE".service
-	/bin/systemctl restart wpa_supplicant@"$WLAN_IFACE".service
-	/bin/systemctl restart systemd-networkd.service
 }
 
 set_volume() {
@@ -80,7 +45,7 @@ export_logs() {
 	/bin/dmesg > "$dir/dmesg.txt" 2>&1 || true
 	/usr/sbin/ip address > "$dir/ip-address.txt" 2>&1 || true
 	/usr/sbin/ip route > "$dir/ip-route.txt" 2>&1 || true
-	/usr/sbin/iw dev "$WLAN_IFACE" link > "$dir/wifi-link.txt" 2>&1 || true
+	/usr/bin/nmcli -f GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS,IP4.GATEWAY device show wlan0 > "$dir/wifi-state.txt" 2>&1 || true
 	install -d -o "$uid" -g "$gid" "$home/Downloads"
 	out="$home/Downloads/tdvp-support-$stamp.tar.gz"
 	tar -C "$dir" -czf "$out" .
@@ -90,14 +55,6 @@ export_logs() {
 
 [ "$#" -ge 1 ] || die "missing command"
 case "$1" in
-	wifi-scan)
-		[ "$#" -eq 1 ] || die "wifi-scan takes no arguments"
-		wifi_scan
-		;;
-	wifi-connect)
-		[ "$#" -eq 3 ] || die "wifi-connect requires SSID and passphrase"
-		wifi_connect "$2" "$3"
-		;;
 	volume)
 		[ "$#" -eq 2 ] || die "volume requires a percentage"
 		set_volume "$2"

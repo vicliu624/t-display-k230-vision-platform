@@ -43,8 +43,18 @@ target_link_libraries(vpl-nrf9151-probe PRIVATE vpl-hardware-core)
 
 install(TARGETS vpl-hwctl vpl-lora-probe vpl-nrf9151-probe RUNTIME DESTINATION local/bin)
 install(TARGETS vpl-hardwared RUNTIME DESTINATION local/libexec/vicliu-pocket-linux-hardware)
+install(PROGRAMS
+    tdvp-audio-route
+    tdvp-expand-rootfs
+    tdvp-speaker-acceptance
+    DESTINATION local/libexec/vicliu-pocket-linux-hardware)
+install(PROGRAMS
+    tdvp-audio-route
+    tdvp-speaker-acceptance
+    DESTINATION local/bin)
 install(FILES
     vicliu-pocket-linux-hardware.service
+    tdvp-rootfs-expand.service
     tdvp-rtc-load.service
     tdvp-rtc-restore.service
     tdvp-rtc-writeback.service

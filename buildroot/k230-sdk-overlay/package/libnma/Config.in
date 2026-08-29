@@ -1,0 +1,12 @@
+config BR2_PACKAGE_LIBNMA
+	bool "libnma"
+	depends on BR2_PACKAGE_LIBGTK3
+	depends on BR2_PACKAGE_NETWORK_MANAGER
+	select BR2_PACKAGE_LIBSECRET
+	help
+	  GNOME's NetworkManager application widget library.  It is an upstream
+	  dependency of Raspberry Pi's pplug-netman plugin and is packaged here
+	  unchanged because Buildroot 2025.02.1 does not provide it.
+
+comment "libnma needs GTK3 and NetworkManager"
+	depends on !BR2_PACKAGE_LIBGTK3 || !BR2_PACKAGE_NETWORK_MANAGER

@@ -51,12 +51,26 @@ register_package tdvp-dejavu-fonts
 # selection reaches Kconfig.
 register_package labwc
 register_package gtk-layer-shell
-register_package sfwbar
+register_package gtkmm3
+register_package libfm-extra
+register_package libmenu-cache
+register_package libfm
+register_package pcmanfm
+register_package wf-panel-pi
+register_package libnma
+register_package nm-connection-editor
+register_package wfplug-batt
+register_package wfplug-menu
+register_package wfplug-clock
+register_package wfplug-netman
+register_package wfplug-power
+register_package wfplug-volumepulse
 register_package wofi
 register_package wvkbd
 register_package tdvp-greetd
 register_package tdvp-gtkgreet
 register_package tdvp-greeter 1
+register_package tdvp-opkg-trust 1
 register_package tdvp-kpu-acceptance 1
 register_package tdvp-labwc-desktop 1
 register_package vicliu-pocket-linux-desktop 1

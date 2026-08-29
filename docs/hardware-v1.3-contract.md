@@ -10,8 +10,8 @@ Linux kernel subsystems and user-space interfaces.
 | GT9895 touch | Linux input event device, libinput | kernel touch fragment and `70-tdvp-touch.rules` |
 | Keyboard extension | Linux input event device | `tdvp-keyboard-layout.service` |
 | Keyboard expansion I2C bus | `/dev/i2c-*` | K230 keyboard/hardware fragments |
-| RTL8189FS Wi-Fi | `wlan0`, wpa_supplicant, systemd-networkd | RTL8189FS package and network configuration |
-| RTL8152 USB Ethernet | `enu1`, systemd-networkd | kernel r8152 driver and network configuration |
+| RTL8189FS Wi-Fi | `wlan0`, NetworkManager / `nmcli` | RTL8189FS package and NetworkManager |
+| RTL8152 USB Ethernet | `enu1`, NetworkManager / `nmcli` | kernel r8152 driver and NetworkManager |
 | Camera and ISP | V4L2/media nodes and vendor ISP service | `vvcam` package and vendor service |
 | Audio capture/playback | ALSA devices | ALSA utilities |
 | GPIO and I2C diagnostics | gpio character devices and `/dev/i2c-*` | libgpiod tools and i2c-tools |

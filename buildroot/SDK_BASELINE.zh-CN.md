@@ -12,8 +12,9 @@ k230_canmv_t_display_rm69a10_labwc_desktop_defconfig
 ```
 
 profile 提供 systemd rootfs、K230 vendor 内核和 firmware runtime、RM69A10
-板级设备树，以及由 seatd、Labwc、Swaybg、SFWBar 与 Foot 组成的 Wayland
-桌面。所有构建产物统一位于一个固定的工作目录输出路径：
+板级设备树，以及由 seatd、Labwc、Swaybg、PCManFM、Raspberry Pi 维护的
+wf-panel-pi／wfplug 模块与 Foot 组成的 Wayland 桌面。所有构建产物统一位于一个
+固定的工作目录输出路径：
 
 ```text
 $WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/

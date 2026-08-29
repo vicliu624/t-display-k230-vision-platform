@@ -23,10 +23,9 @@ bool has_ipv4_default_route()
     return routes.find("\t00000000\t") != std::string::npos;
 }
 
-bool wifi_association_service()
+bool network_manager_service()
 {
-    return paths::service_active("wpa_supplicant@wlan0.service") ||
-           paths::service_active("wpa_supplicant.service");
+    return paths::service_active("NetworkManager.service");
 }
 
 }  // namespace
@@ -34,13 +33,13 @@ bool wifi_association_service()
 void append_network_state(State *state)
 {
     const bool wifi_device = paths::exists("/sys/class/net/wlan0");
-    const bool wifi_service = wifi_association_service();
+    const bool network_manager = network_manager_service();
     const bool wifi_carrier = wifi_device && carrier("wlan0");
     put(state, "wifi_transport", wifi_device);
     put(state, "wifi_driver", wifi_device);
-    put(state, "wifi_runtime", wifi_service);
+    put(state, "wifi_runtime", network_manager);
     put(state, "wifi_link", wifi_carrier);
-    put(state, "wifi_available", wifi_device && wifi_service);
+    put(state, "wifi_available", wifi_device && network_manager);
     state->emplace("wifi_operstate", paths::read("/sys/class/net/wlan0/operstate"));
 
     bool ethernet_device = false;

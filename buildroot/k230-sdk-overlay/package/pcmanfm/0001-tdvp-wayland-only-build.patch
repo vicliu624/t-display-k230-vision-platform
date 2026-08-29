@@ -1,0 +1,214 @@
+From 6e6d71f07a7c4ae76435fbb5866307c10978dc5b Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@tdvp.local>
+Date: Tue, 25 Aug 2026 10:30:00 +0800
+Subject: [PATCH] desktop: make the Raspberry Pi desktop path Wayland-only
+
+The target image is a Labwc/Wayland session. PCManFM's remaining X11 code
+observes X root-window atoms and forwards a legacy event path; its actual
+desktop uses gtk-layer-shell. Do not force an X11 server and GL stack into the
+image merely to compile those inactive fallback paths.
+
+---
+ configure.ac    |  4 ----
+ src/Makefile.am |  2 --
+ src/desktop.c   | 31 +++++++++++--------------------
+ src/pcmanfm.c   |  6 +-----
+ 4 files changed, 12 insertions(+), 31 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 572b031..367b099 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -86,10 +86,6 @@ AC_ARG_WITH(gtk,
+ 
+ # Checks for libraries.
+ 
+-PKG_CHECK_MODULES(XLIB, "x11")
+-AC_SUBST(XLIB_CFLAGS)
+-AC_SUBST(XLIB_LIBS)
+-
+ gio_modules="gthread-2.0 gio-unix-2.0 >= 2.18.0"
+ PKG_CHECK_MODULES(GIO, [$gio_modules])
+ AC_SUBST(GIO_CFLAGS)
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 381405d..fa280b4 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -37,7 +37,6 @@ EXTRA_DIST= \
+ include_HEADERS = pcmanfm-modules.h
+ 
+ pcmanfm_CFLAGS = \
+-	$(XLIB_CFLAGS) \
+ 	$(FM_CFLAGS) \
+ 	$(G_CAST_CHECKS) \
+ 	-Wall \
+@@ -45,7 +44,6 @@ pcmanfm_CFLAGS = \
+ 	$(NULL)
+ 
+ pcmanfm_LDADD = \
+-	$(XLIB_LIBS) \
+ 	$(FM_LIBS) \
+ 	$(NULL)
+ 
+diff --git a/src/desktop.c b/src/desktop.c
+index def0a34..4161ebb 100644
+--- a/src/desktop.c
++++ b/src/desktop.c
+@@ -32,14 +32,9 @@
+ 
+ #include <glib/gi18n.h>
+ 
+-#include <gdk/gdkx.h>
+ #include <gdk/gdkkeysyms.h>
+-#include <X11/Xlib.h>
+-#include <X11/Xatom.h>
+ #include <math.h>
+ 
+-#include <cairo-xlib.h>
+-
+ #include "pref.h"
+ #include "main-win.h"
+ 
+@@ -100,12 +95,6 @@ static int n_monitors = 0;
+ static guint icon_theme_changed = 0;
+ static GtkAccelGroup* acc_grp = NULL;
+ 
+-static Atom XA_NET_WORKAREA = 0;
+-static Atom XA_NET_NUMBER_OF_DESKTOPS = 0;
+-static Atom XA_NET_CURRENT_DESKTOP = 0;
+-static Atom XA_XROOTMAP_ID = 0;
+-static Atom XA_XROOTPMAP_ID = 0;
+-
+ static GdkCursor* hand_cursor = NULL;
+ 
+ static guint idle_config_save = 0;
+@@ -2647,6 +2636,7 @@ static void update_working_area (FmDesktop* desktop)
+     return;
+ }
+ 
++#if 0 /* X11 root-window property notifications are not used by the Wayland image. */
+ static GdkFilterReturn on_root_event(GdkXEvent *xevent, GdkEvent *event, gpointer data)
+ {
+     if (gtk_layer_is_supported ()) return GDK_FILTER_CONTINUE;
+@@ -2663,6 +2653,7 @@ static GdkFilterReturn on_root_event(GdkXEvent *xevent, GdkEvent *event, gpointe
+     }
+     return GDK_FILTER_CONTINUE;
+ }
++#endif
+ 
+ static gboolean force_recon (FmDesktop* desktop)
+ {
+@@ -3151,6 +3142,7 @@ static void _focus_and_select_focused_item(FmDesktop *desktop, FmDesktopItem *it
+     set_focused_item(desktop, item);
+ }
+ 
++#if 0 /* X11 root-window event forwarding is not used by the Wayland image. */
+ /* This function is taken from xfdesktop */
+ static void forward_event_to_rootwin(GdkScreen *gscreen, GdkEvent *event)
+ {
+@@ -3222,6 +3214,7 @@ static void forward_event_to_rootwin(GdkScreen *gscreen, GdkEvent *event)
+     XSendEvent(dpy, xev2.window, False, ButtonPressMask | ButtonReleaseMask,
+                 (XEvent *) & xev2);
+ }
++#endif
+ 
+ 
+ static gboolean on_draw(GtkWidget* w, cairo_t* cr)
+@@ -3575,6 +3568,7 @@ static gboolean on_button_release(GtkWidget* w, GdkEventButton* evt)
+         pending_rename = 0;
+ 	}
+ 
++#if 0
+     /* forward the event to root window */
+     if (self->button_pressed == evt->button)
+     {
+@@ -3583,6 +3577,7 @@ static gboolean on_button_release(GtkWidget* w, GdkEventButton* evt)
+         self->button_pressed = 0;
+         self->forward_pending = FALSE;
+     }
++#endif
+ 
+     return TRUE;
+ }
+@@ -4772,7 +4767,9 @@ static void fm_desktop_destroy(GtkWidget *object)
+     if(self->icon_render) /* see bug #3533958 by korzhpavel@SF */
+     {
+         screen = gtk_widget_get_screen((GtkWidget*)self);
++#if 0
+         gdk_window_remove_filter(gdk_screen_get_root_window(screen), on_root_event, self);
++#endif
+ 
+         g_signal_handlers_disconnect_by_func(screen, on_screen_size_changed, self);
+         g_signal_handlers_disconnect_by_func(app_config, on_show_full_names_changed, self);
+@@ -4943,9 +4940,11 @@ static GObject* fm_desktop_constructor(GType type, guint n_construct_properties,
+     g_signal_connect(app_config, "changed::show_full_names",
+                      G_CALLBACK(on_show_full_names_changed), self);
+ 
++#if 0
+     root = gdk_screen_get_root_window(screen);
+     gdk_window_set_events(root, gdk_window_get_events(root)|GDK_PROPERTY_CHANGE_MASK);
+     gdk_window_add_filter(root, on_root_event, self);
++#endif
+     g_signal_connect(screen, "monitors-changed", G_CALLBACK(on_screen_size_changed), self);
+ 
+     /* init dnd support */
+@@ -5004,9 +5003,11 @@ static void fm_desktop_class_init(FmDesktopClass *klass)
+ {
+     GtkWidgetClass* widget_class = GTK_WIDGET_CLASS(klass);
+     typedef gboolean (*DeleteEvtHandler) (GtkWidget*, GdkEventAny*);
++#if 0
+     char* atom_names[] = {"_NET_WORKAREA", "_NET_NUMBER_OF_DESKTOPS",
+                           "_NET_CURRENT_DESKTOP", "_XROOTMAP_ID", "_XROOTPMAP_ID"};
+     Atom atoms[G_N_ELEMENTS(atom_names)] = {0};
++#endif
+     GObjectClass* object_class = G_OBJECT_CLASS(klass);
+ 
+     widget_class->destroy = fm_desktop_destroy;
+@@ -5036,6 +5037,7 @@ static void fm_desktop_class_init(FmDesktopClass *klass)
+     widget_class->drag_end = on_drag_end;
+     /* widget_class->drag_data_get = on_drag_data_get; */
+ 
++#if 0
+     if (!gtk_layer_is_supported ())
+     {
+     if(XInternAtoms(gdk_x11_get_default_xdisplay(), atom_names,
+@@ -5048,6 +5050,7 @@ static void fm_desktop_class_init(FmDesktopClass *klass)
+         XA_XROOTPMAP_ID = atoms[4];
+     }
+     }
++#endif
+ 
+     object_class->constructor = fm_desktop_constructor;
+     object_class->set_property = fm_desktop_set_property;
+diff --git a/src/pcmanfm.c b/src/pcmanfm.c
+index e78f1dc..477018e 100644
+--- a/src/pcmanfm.c
++++ b/src/pcmanfm.c
+@@ -26,7 +26,6 @@
+ #endif
+ 
+ #include <gtk/gtk.h>
+-#include <gdk/gdkx.h>
+ #include <stdio.h>
+ #include <glib/gi18n.h>
+ 
+@@ -196,7 +195,7 @@ int main(int argc, char** argv)
+ {
+     FmConfig* config;
+     GError* err = NULL;
+-    SingleInstData inst;
++    SingleInstData inst = {0};
+     GList *l;
+ 
+ #ifdef ENABLE_NLS
+@@ -217,9 +216,8 @@ int main(int argc, char** argv)
+     inst.prog_name = "pcmanfm";
+     inst.cb = single_inst_cb;
+     inst.opt_entries = opt_entries + 3;
+-    if (!gtk_layer_is_supported ())
+-        inst.screen_num = gdk_x11_get_default_screen();
++    inst.screen_num = 0;
+     switch(single_inst_init(&inst))
+     {
+     case SINGLE_INST_CLIENT: /* we're not the first instance. */
+         single_inst_finalize(&inst);

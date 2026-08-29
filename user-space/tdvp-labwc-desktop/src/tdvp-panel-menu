@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+# dbus-run-session exports a full address including its server GUID.  The
+# stripped-down libdbus client in the K230 rootfs times out against that form,
+# while the same UNIX socket works normally without the optional GUID field.
+# Keep this workaround local to commands sent from Labwc to wf-panel-pi.
+case "${DBUS_SESSION_BUS_ADDRESS:-}" in
+*,guid=*)
+	export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS%%,guid=*}"
+	;;
+esac
+
+exec /bin/wfpanelctl smenu menu

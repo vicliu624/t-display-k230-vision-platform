@@ -5,9 +5,10 @@ config BR2_PACKAGE_TDVP_KEYBOARD_LAYOUT
 	help
 	  Install the T-Display K230 virtual-console keyboard layout.
 
-	  The detachable keyboard has a non-PC Shift layer printed in yellow.
-	  This package loads the documented layer on tty1 without changing the
-	  TCA8418 driver, DeviceTree keyboard bus, or evdev event stream.
+	  The detachable keyboard has a printed yellow Fn layer.  This package
+	  installs the matching virtual-console map and the Wayland XKB symbols,
+	  without changing the TCA8418 driver, DeviceTree keyboard bus, or evdev
+	  event stream.
 
 comment "tdvp-keyboard-layout needs an MMU"
 	depends on !BR2_USE_MMU

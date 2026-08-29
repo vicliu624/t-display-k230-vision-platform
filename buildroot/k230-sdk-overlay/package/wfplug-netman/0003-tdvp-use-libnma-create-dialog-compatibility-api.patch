@@ -1,0 +1,33 @@
+From c49a9a5ff37414f01c9a1e895fc19436cb1e4f55 Mon Sep 17 00:00:00 2001
+From: TDVP <tdvp@example.invalid>
+Date: Thu, 27 Aug 2026 12:10:00 +0800
+Subject: [PATCH] netman: use libnma's supported create-network dialog API
+
+pplug-netman calls nma_wifi_dialog_new_for_hotspot() in its panel build.
+That API is not present in Buildroot's libnma 1.10.6, while the supported
+nma_wifi_dialog_new_for_create() API is present and creates the network
+configuration dialog needed by the plugin.
+
+Use that portable libnma API so the Raspberry Pi network panel remains fully
+usable with the libnma version shipped in the K230 image.
+
+Signed-off-by: TDVP <tdvp@example.invalid>
+---
+ src/applet-device-wifi.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/applet-device-wifi.c b/src/applet-device-wifi.c
+index c0c6364..d89cb18 100644
+--- a/src/applet-device-wifi.c
++++ b/src/applet-device-wifi.c
+@@ -242,7 +242,7 @@ applet_wifi_create_wifi_network (NMApplet *applet)
+ 	GtkWidget *dialog;
+ 
+ #ifdef LXPANEL_PLUGIN
+-	dialog = nma_wifi_dialog_new_for_hotspot (applet->nm_client);
++	dialog = nma_wifi_dialog_new_for_create (applet->nm_client);
+ #else
+ 	dialog = nma_wifi_dialog_new_for_create (applet->nm_client);
+ #endif
+-- 
+2.47.3

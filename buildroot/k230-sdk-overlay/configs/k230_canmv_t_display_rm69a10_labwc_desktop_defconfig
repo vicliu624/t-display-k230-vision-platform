@@ -17,6 +17,12 @@ BR2_DL_DIR="$(TOPDIR)/../../dl"
 # location. This removes build timestamps and host identity from Buildroot,
 # Linux, U-Boot, and rootfs artifacts where the upstream packages support it.
 BR2_REPRODUCIBLE=y
+# Several desktop and media dependencies contain large C/C++ or Rust build
+# graphs. The automatic value expands to every host CPU (17 on the release
+# builder) and can cause the kernel to kill compiler processes. Keep all
+# Buildroot package backends within the validated four-job ceiling;
+# TDVP_BUILD_JOBS uses the same ceiling.
+BR2_JLEVEL=4
 BR2_TARGET_GENERIC_HOSTNAME="tdisplay-k230"
 BR2_TARGET_GENERIC_ISSUE="T-Display K230 Labwc Desktop"
 BR2_GENERATE_LOCALE="en_US.UTF-8"
@@ -56,6 +62,7 @@ BR2_PACKAGE_ALSA_UTILS=y
 BR2_PACKAGE_ALSA_UTILS_AMIXER=y
 BR2_PACKAGE_ALSA_UTILS_APLAY=y
 BR2_PACKAGE_ALSA_UTILS_ARECORD=y
+BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
 BR2_PACKAGE_I2C_TOOLS=y
 BR2_PACKAGE_LIBGPIOD=y
 BR2_PACKAGE_LIBGPIOD_TOOLS=y
@@ -69,13 +76,20 @@ BR2_PACKAGE_LIBOPENSSL_BIN=y
 BR2_PACKAGE_LIBCURL=y
 BR2_PACKAGE_LIBCURL_CURL=y
 BR2_PACKAGE_LIBCURL_OPENSSL=y
+# GLib applications use this GIO module for TLS integration. It is required
+# by the graphical network tooling; a general browser is delivered separately
+# through the signed feed rather than expanding the base image.
+BR2_PACKAGE_GLIB_NETWORKING=y
 BR2_PACKAGE_OPKG=y
+BR2_PACKAGE_OPKG_GPG_SIGN=y
+BR2_PACKAGE_GNUPG2=y
+BR2_PACKAGE_GNUPG2_GPGV=y
+BR2_PACKAGE_TDVP_OPKG_TRUST=y
 BR2_PACKAGE_IPROUTE2=y
 BR2_PACKAGE_SYSTEMD=y
 BR2_PACKAGE_SEATD=y
 BR2_PACKAGE_SEATD_DAEMON=y
 BR2_PACKAGE_SYSTEMD_TIMESYNCD=y
-BR2_PACKAGE_SYSTEMD_NETWORKD=y
 BR2_PACKAGE_OPENSSH=y
 BR2_PACKAGE_OPENSSH_CLIENT=y
 BR2_PACKAGE_OPENSSH_SERVER=y
@@ -89,8 +103,20 @@ BR2_PACKAGE_MESA3D_OPENGL_ES=y
 BR2_PACKAGE_LIBGTK3=y
 BR2_PACKAGE_LIBGTK3_WAYLAND=y
 BR2_PACKAGE_GTK_LAYER_SHELL=y
-BR2_PACKAGE_SFWBAR=y
-BR2_PACKAGE_SWAYBG=y
+BR2_PACKAGE_GTKMM3=y
+BR2_PACKAGE_LIBFM_EXTRA=y
+BR2_PACKAGE_LIBMENU_CACHE=y
+BR2_PACKAGE_LIBFM=y
+BR2_PACKAGE_PCMANFM=y
+# A general browser is intentionally not part of the first base image. The
+# signed ABI-matched opkg feed is the delivery path for browser updates.
+BR2_PACKAGE_WF_PANEL_PI=y
+BR2_PACKAGE_WFPLUG_BATT=y
+BR2_PACKAGE_WFPLUG_MENU=y
+BR2_PACKAGE_WFPLUG_CLOCK=y
+BR2_PACKAGE_WFPLUG_NETMAN=y
+BR2_PACKAGE_WFPLUG_POWER=y
+BR2_PACKAGE_WFPLUG_VOLUMEPULSE=y
 BR2_PACKAGE_FOOT=y
 BR2_PACKAGE_FOOT_THEMES=y
 BR2_PACKAGE_WOFI=y
@@ -129,10 +155,39 @@ BR2_PACKAGE_XKEYBOARD_CONFIG=y
 # BR2_PACKAGE_LIBGTK4_GSTREAMER is not set
 BR2_PACKAGE_WIRELESS_TOOLS=y
 BR2_PACKAGE_WIRELESS_TOOLS_LIB=y
+BR2_PACKAGE_NETWORK_MANAGER=y
+BR2_PACKAGE_NETWORK_MANAGER_CLI=y
+BR2_PACKAGE_NM_CONNECTION_EDITOR=y
+BR2_PACKAGE_WIRELESS_REGDB=y
+# A desktop image needs the standard process-management utilities rather than
+# forcing every integration script to reimplement pgrep/pkill using ps output.
+BR2_PACKAGE_PROCPS_NG=y
+BR2_PACKAGE_UTIL_LINUX=y
+# Install the actual util-linux command set.  In particular this replaces the
+# limited BusyBox fdisk with large-media-capable fdisk/sfdisk, which is needed
+# to inspect and maintain full-size SD cards.
+BR2_PACKAGE_UTIL_LINUX_BINARIES=y
+BR2_PACKAGE_UTIL_LINUX_RFKILL=y
+# The image contains only boot and root. On first boot tdvp-expand-rootfs
+# grows GPT partition 2 (preserving its U-Boot PARTUUID), reboots once, and
+# expands ext4. No /data partition is created.
+BR2_PACKAGE_GPTFDISK=y
+BR2_PACKAGE_GPTFDISK_SGDISK=y
+BR2_PACKAGE_E2FSPROGS=y
+BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
+BR2_PACKAGE_LIBSECRET=y
+BR2_PACKAGE_LIBNMA=y
+BR2_PACKAGE_PULSEAUDIO=y
+BR2_PACKAGE_PULSEAUDIO_DAEMON=y
+# Standard desktop event sounds: wfplug-volumepulse uses libcanberra's
+# PulseAudio backend and the Freedesktop sound theme, not a bespoke player.
+BR2_PACKAGE_LIBCANBERRA=y
+BR2_PACKAGE_SOUND_THEME_FREEDESKTOP=y
 BR2_PACKAGE_WPA_SUPPLICANT=y
 BR2_PACKAGE_WPA_SUPPLICANT_WEXT=y
 BR2_PACKAGE_WPA_SUPPLICANT_WIRED=y
 BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
+BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y
 BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y

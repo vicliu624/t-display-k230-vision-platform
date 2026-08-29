@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Files
-Comment=Browse files in Midnight Commander
-Exec=vpl-files
-Terminal=false
-Categories=System;FileManager;
-Icon=system-file-manager

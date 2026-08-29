@@ -1,0 +1,71 @@
+From c466832001717676ba99f7e3a2a0b77f7d0325d2 Mon Sep 17 00:00:00 2001
+From: TDVP Build <build@tdvp.local>
+Date: Thu, 27 Aug 2026 01:15:00 +0800
+Subject: [PATCH] wpewebkit: guard B3 SIMD validator without Wasm JIT
+
+On RISC-V, JavaScriptCore builds its WebAssembly interpreter but intentionally
+does not enable either Wasm B3 JIT backend. In that configuration the
+Wasm::toB3Type helper is intentionally absent, while generic B3 validation is
+still compiled. The affected checks only validate nodes produced by a Wasm
+B3 JIT, so exclude those three checks when neither backend is present.
+
+This retains the checks on every configuration that can create those nodes and
+does not change runtime WebAssembly execution on the interpreter-only target.
+
+---
+ package/wpewebkit/0003-guard-simd-validator-for-no-wasm-jit.patch | 46 ++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+ create mode 100644 package/wpewebkit/0003-guard-simd-validator-for-no-wasm-jit.patch
+
+diff --git a/package/wpewebkit/0003-guard-simd-validator-for-no-wasm-jit.patch b/package/wpewebkit/0003-guard-simd-validator-for-no-wasm-jit.patch
+new file mode 100644
+index 0000000000..3b7fdd8cd0
+--- /dev/null
++++ b/package/wpewebkit/0003-guard-simd-validator-for-no-wasm-jit.patch
+@@ -0,0 +1,46 @@
++From 5b21e3efb2ffd846721c6d895ae1a0600a1ec94f Mon Sep 17 00:00:00 2001
++From: TDVP Build <build@tdvp.local>
++Date: Thu, 27 Aug 2026 01:15:00 +0800
++Subject: [PATCH] JavaScriptCore: guard Wasm B3 SIMD validation by JIT support
++
++Wasm::toB3Type exists only when a Wasm B3 JIT is built. Do not compile the
++B3 SIMD type assertions on interpreter-only architectures.
++
++---
++ Source/JavaScriptCore/b3/B3Validate.cpp | 6 ++++++
++ 1 file changed, 6 insertions(+)
++
++diff --git a/Source/JavaScriptCore/b3/B3Validate.cpp b/Source/JavaScriptCore/b3/B3Validate.cpp
++index d2768d71ce5..d9a0d8ffc1 100644
++--- a/Source/JavaScriptCore/b3/B3Validate.cpp
+++++ b/Source/JavaScriptCore/b3/B3Validate.cpp
++@@ -455,7 +455,9 @@
++             case VectorExtractLane:
++                 VALIDATE(!value->kind().hasExtraBits(), ("At ", *value));
++                 VALIDATE(value->numChildren() == 1, ("At ", *value));
+++#if ENABLE(WEBASSEMBLY_OMGJIT) || ENABLE(WEBASSEMBLY_BBQJIT)
++                 VALIDATE(value->type() == toB3Type(Wasm::simdScalarType(value->asSIMDValue()->simdLane())), ("At ", *value));
+++#endif
++                 VALIDATE(value->child(0)->type() == V128, ("At ", *value));
++                 break;
++             case VectorReplaceLane:
++@@ -463,7 +465,9 @@
++                 VALIDATE(value->numChildren() == 2, ("At ", *value));
++                 VALIDATE(value->type() == V128, ("At ", *value));
++                 VALIDATE(value->child(0)->type() == V128, ("At ", *value));
+++#if ENABLE(WEBASSEMBLY_OMGJIT) || ENABLE(WEBASSEMBLY_BBQJIT)
++                 VALIDATE(value->child(1)->type() == toB3Type(Wasm::simdScalarType(value->asSIMDValue()->simdLane())), ("At ", *value));
+++#endif
++                 break;
++             case VectorDupElement:
++                 VALIDATE(!value->kind().hasExtraBits(), ("At ", *value));
++@@ -485,7 +489,9 @@
++                 VALIDATE(!value->kind().hasExtraBits(), ("At ", *value));
++                 VALIDATE(value->numChildren() == 1, ("At ", *value));
++                 VALIDATE(value->type() == V128, ("At ", *value));
+++#if ENABLE(WEBASSEMBLY_OMGJIT) || ENABLE(WEBASSEMBLY_BBQJIT)
++                 VALIDATE(value->child(0)->type() == toB3Type(Wasm::simdScalarType(value->asSIMDValue()->simdLane())), ("At ", *value));
+++#endif
++                 break;
++ 
++             case VectorPopcnt:

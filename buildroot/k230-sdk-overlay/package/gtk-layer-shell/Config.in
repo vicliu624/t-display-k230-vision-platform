@@ -5,7 +5,7 @@ config BR2_PACKAGE_GTK_LAYER_SHELL
 	select BR2_PACKAGE_WAYLAND_PROTOCOLS
 	help
 	  GTK3 library for placing desktop components on a Wayland layer-shell.
-	  It is used by sfwbar, the standard Labwc desktop panel.
+	  It is used by the standard Labwc desktop panel and desktop background.
 
 comment "gtk-layer-shell needs the GTK3 Wayland backend"
 	depends on !BR2_PACKAGE_LIBGTK3_WAYLAND

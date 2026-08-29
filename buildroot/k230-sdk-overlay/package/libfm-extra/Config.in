@@ -1,0 +1,11 @@
+config BR2_PACKAGE_LIBFM_EXTRA
+	bool "libfm-extra"
+	depends on BR2_USE_MMU
+	select BR2_PACKAGE_LIBGLIB2
+	help
+	  Build the small libfm-extra support library used by libmenu-cache.
+	  It is kept as an independent package to break the upstream
+	  libfm -> libmenu-cache dependency cycle.
+
+comment "libfm-extra needs an MMU"
+	depends on !BR2_USE_MMU

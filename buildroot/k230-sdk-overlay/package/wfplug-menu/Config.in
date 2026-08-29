@@ -1,0 +1,7 @@
+config BR2_PACKAGE_WFPLUG_MENU
+	bool "wf-panel-pi menu plugin"
+	depends on BR2_PACKAGE_WF_PANEL_PI
+	select BR2_PACKAGE_LIBMENU_CACHE
+	help
+	  Raspberry Pi's XDG application menu plugin, built for the wf-panel-pi
+	  plugin API only. The legacy LXPanel module is not included.
