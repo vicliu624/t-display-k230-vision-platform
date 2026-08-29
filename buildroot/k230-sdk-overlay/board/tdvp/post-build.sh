@@ -308,7 +308,7 @@ EOF
 cat > "${TARGET_DIR}/etc/opkg/tdvp-feed.conf" <<'EOF'
 # The sole package source is ABI-fixed for this base image.  Do not add a
 # generic OpenWrt, Debian, or arbitrary riscv64 source.
-src/gz tdvp_apps_r3 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r3/riscv64
+src/gz tdvp_apps_r4 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r4/riscv64
 EOF
 cat > "${TARGET_DIR}/var/lib/opkg/status" <<'EOF'
 Package: tdvp-platform-abi
