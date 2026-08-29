@@ -519,7 +519,7 @@ require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option check_signature 1'
 require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option signature_type gpg-asc'
 require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option gpg_dir /etc/opkg/gpg'
 require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option gpg_trust_level TrustAny'
-require_rootfs_fixed_line '/etc/opkg/tdvp-feed.conf' 'src/gz tdvp_apps_r2 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r2/riscv64'
+require_rootfs_fixed_line '/etc/opkg/tdvp-feed.conf' 'src/gz tdvp_apps_r3 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r3/riscv64'
 reject_fs_path "${ROOTFS}" '/etc/opkg/tdvp-feed.conf.disabled'
 require_fs_path "${ROOTFS}" '/usr/share/tdvp/opkg/tdvp-repo-public.asc'
 require_rootfs_gpg_fingerprint "${ROOTFS}" '/usr/share/tdvp/opkg/tdvp-repo-public.asc' \
@@ -675,10 +675,6 @@ reject_rootfs_line '/etc/opkg/opkg.conf' '^src/gz '
 require_rootfs_content '/var/lib/opkg/status' 'Package: tdvp-platform-abi'
 require_rootfs_content '/var/lib/opkg/status' 'Version: 2025.02.1-k230.6.6.36-glibc2.33-rv64-lp64d-r1'
 require_fs_path "${ROOTFS}" '/var/lib/opkg/info/tdvp-platform-abi.list'
-for tdvp_seed_package in tdvp-base-runtime tdvp-base-desktop tdvp-base-network tdvp-base-audio; do
-	require_rootfs_content '/var/lib/opkg/status' "Package: ${tdvp_seed_package}"
-	require_fs_path "${ROOTFS}" "/var/lib/opkg/info/${tdvp_seed_package}.list"
-done
 require_rootfs_content '/usr/local/bin/vpl-package-manager' 'exec /usr/local/bin/tdvp-terminal'
 require_rootfs_content '/usr/local/bin/vpl-opkg-console' 'TDVP Software Manager (opkg)'
 require_rootfs_content '/usr/local/bin/vpl-opkg-console' 'sudo tdvp-opkg update'

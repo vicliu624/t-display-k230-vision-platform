@@ -90,7 +90,7 @@ ABI 固定且不可变的软件源修订版则是可扩展的用户态软件目�
 和设备应用：
 
 ```text
-https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r2/riscv64
+https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r3/riscv64
 ```
 
 每次从 Software Manager 或命令行开始操作前，受控的 `tdvp-opkg` wrapper 会把内置发行
@@ -112,7 +112,8 @@ sudo tdvp-opkg install <package>
 当更新失败时不要关闭签名校验。软件源发布端必须先发布 ABI 匹配的软件包、
 `Packages`/`Packages.gz` 及使用对应私钥生成的 detached signature。本固件与本仓库只保存
 公钥；私钥绝不应放入设备或源码树。追加软件意味着发布新的软件源修订版、再让后续镜像
-使用新 URL，绝不能覆盖任何已签名索引。通用库保留它们的上游包名（例如 `sdl2`、`sdl2-ttf`、
+使用新 URL，绝不能覆盖任何已签名索引。r3 中每一个非 ABI 动态运行时都有且只有一个可独立安装
+的 feed 所有者；叶子应用使用精确版本依赖，不会静态塞库或暗中借用基础镜像库。通用库保留它们的上游包名（例如 `sdl2`、`sdl2-ttf`、
 `libmgba`）；ABI 安全性来自精确的平台依赖和 `riscv64` 架构，而不是给库名强加前缀。
 
 ## 构建与发布

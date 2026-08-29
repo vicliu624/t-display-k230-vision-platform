@@ -69,7 +69,7 @@ inputs. `SHA256SUMS` covers every delivered file.
 The standard image configures only:
 
 ```text
-https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r2/riscv64
+https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r3/riscv64
 ```
 
 The key fingerprint is `2B091A2A8E5810954FB9FD64EA9D1CD5EFC81500`.

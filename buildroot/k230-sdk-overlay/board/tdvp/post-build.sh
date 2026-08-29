@@ -308,7 +308,7 @@ EOF
 cat > "${TARGET_DIR}/etc/opkg/tdvp-feed.conf" <<'EOF'
 # The sole package source is ABI-fixed for this base image.  Do not add a
 # generic OpenWrt, Debian, or arbitrary riscv64 source.
-src/gz tdvp_apps_r2 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r2/riscv64
+src/gz tdvp_apps_r3 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r3/riscv64
 EOF
 cat > "${TARGET_DIR}/var/lib/opkg/status" <<'EOF'
 Package: tdvp-platform-abi
@@ -317,30 +317,6 @@ Architecture: riscv64
 Status: install ok installed
 Description: ABI identity for TDVP K230 firmware r1
 
-Package: tdvp-base-runtime
-Version: 2025.02.1-k230.6.6.36-glibc2.33-rv64-lp64d-r1
-Architecture: riscv64
-Status: install ok installed
-Description: Image-owned glibc and C++ runtime seed for TDVP K230 r1
-
-Package: tdvp-base-desktop
-Version: 2025.02.1-k230.6.6.36-glibc2.33-rv64-lp64d-r1
-Architecture: riscv64
-Status: install ok installed
-Description: Image-owned Wayland and GTK desktop runtime seed for TDVP K230 r1
-
-Package: tdvp-base-network
-Version: 2025.02.1-k230.6.6.36-glibc2.33-rv64-lp64d-r1
-Architecture: riscv64
-Status: install ok installed
-Description: Image-owned TLS and NetworkManager runtime seed for TDVP K230 r1
-
-Package: tdvp-base-audio
-Version: 2025.02.1-k230.6.6.36-glibc2.33-rv64-lp64d-r1
-Architecture: riscv64
-Status: install ok installed
-Description: Image-owned ALSA and PulseAudio runtime seed for TDVP K230 r1
-
 EOF
 
 # tdvp-platform-abi is an image-owned virtual package, but opkg still expects
@@ -348,13 +324,6 @@ EOF
 # file, otherwise valid download/install transactions emit a spurious missing
 # ``.list`` error while scanning the installed package database.
 : > "${TARGET_DIR}/var/lib/opkg/info/tdvp-platform-abi.list"
-for tdvp_seed_package in \
-	tdvp-base-runtime \
-	tdvp-base-desktop \
-	tdvp-base-network \
-	tdvp-base-audio; do
-	: > "${TARGET_DIR}/var/lib/opkg/info/${tdvp_seed_package}.list"
-done
 
 # The immutable image intentionally contains no user credentials.  The
 # enabled NetworkManager instance owns all network state and waits for a Wi-Fi

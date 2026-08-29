@@ -14,7 +14,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-FEED_URL='https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r2/riscv64'
+FEED_URL='https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r3/riscv64'
 PUBLIC_KEY="${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-opkg-trust/src/tdvp-repo-public.asc"
 FINGERPRINT='2B091A2A8E5810954FB9FD64EA9D1CD5EFC81500'
 ABI_VERSION='2025.02.1-k230.6.6.36-glibc2.33-rv64-lp64d-r1'
@@ -80,7 +80,7 @@ gpgv --keyring "${tmpdir}/tdvp-release-keyring.gpg" \
 # leading/trailing JSON whitespace while keeping every published value exact.
 grep -Eq '^[[:space:]]*"platform_slug":[[:space:]]*"tdvp-k230-r1",[[:space:]]*$' "${tmpdir}/release.json"
 grep -Eq '^[[:space:]]*"platform_id":[[:space:]]*"tdvp-k230-br2025[.]02[.]1-glibc2[.]33-rv64-lp64d-k6[.]6[.]36-r1",[[:space:]]*$' "${tmpdir}/release.json"
-grep -Eq '^[[:space:]]*"feed_release":[[:space:]]*"r2",[[:space:]]*$' "${tmpdir}/release.json"
+grep -Eq '^[[:space:]]*"feed_release":[[:space:]]*"r3",[[:space:]]*$' "${tmpdir}/release.json"
 grep -Eq '^[[:space:]]*"architecture":[[:space:]]*"riscv64",[[:space:]]*$' "${tmpdir}/release.json"
 grep -Eq '^[[:space:]]*"index":[[:space:]]*"Packages[.]gz",[[:space:]]*$' "${tmpdir}/release.json"
 grep -Eq '^[[:space:]]*"signature":[[:space:]]*"Packages[.]asc"[[:space:]]*$' "${tmpdir}/release.json"
@@ -95,8 +95,13 @@ awk -v expected="${ABI_VERSION}" '
 	/^Depends: / {
 		dependencies = $0
 		sub(/^Depends: /, "", dependencies)
-		dependency_count = split(dependencies, dependency, /, /)
+		# opkg accepts a comma-delimited Depends field with or without a
+		# following space.  The composable feed generator emits the compact
+		# canonical form, while historical releases used comma-space; accept
+		# both before checking the exact ABI relation.
+		dependency_count = split(dependencies, dependency, /,/)
 		for (dependency_index = 1; dependency_index <= dependency_count; dependency_index++) {
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", dependency[dependency_index])
 			if (dependency[dependency_index] == "tdvp-platform-abi (= " expected ")") {
 				abi = 1
 			}
@@ -121,13 +126,17 @@ awk -v expected="${ABI_VERSION}" '
 	exit 1
 }
 
-# The r2 channel is the first distribution-style extension channel.  It must
-# contain both the end-user GBA application and the generic shared runtimes it
-# consumes; otherwise a successful index signature would still conceal a
-# static, non-composable application package.
-for required_package in tdvp-gba sdl2 sdl2-ttf libmgba; do
+# r3 is a composable userland release.  It must contain leaf applications and
+# independent GTK, TLS, graphics, media, image, SDL, and mGBA providers;
+# otherwise a valid signature could still conceal an application that borrows
+# a general-purpose runtime from the base image or bundles it privately.
+for required_package in \
+	tdvp-gba sdl2 sdl2-ttf libmgba \
+	tdvp-netsurf tdvp-mpv \
+	libgtk-3-0 libcurl-4 libpng16-16 libjpeg-9 \
+	glib-networking gtk3-data gdk-pixbuf-loaders pulse-modules; do
 	grep -Eq "^Package: ${required_package}$" "${tmpdir}/Packages" || {
-		printf 'TDVP feed release gate: required r2 package is missing: %s\n' \
+		printf 'TDVP feed release gate: required r3 package is missing: %s\n' \
 			"${required_package}" >&2
 		exit 1
 	}
