@@ -60,7 +60,7 @@ define TDVP_LABWC_DESKTOP_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-key-bridge \
 		$(TARGET_DIR)/usr/local/bin/tdvp-key-bridge
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-gdk-committed-compat.so \
-		$(TARGET_DIR)/usr/local/lib/tdvp-gdk-committed-compat.so
+		$(TARGET_DIR)/usr/lib/tdvp-gdk-committed-compat.so
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-pcmanfm-desktop-session \
 		$(TARGET_DIR)/usr/local/bin/tdvp-pcmanfm-desktop-session
 	$(INSTALL) -D -m 0644 $(@D)/backgrounds/tdvp-pda-paper.svg \

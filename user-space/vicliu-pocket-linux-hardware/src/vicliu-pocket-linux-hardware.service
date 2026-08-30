@@ -5,7 +5,7 @@ Before=greetd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/libexec/vicliu-pocket-linux-hardware/vpl-hardwared
+ExecStart=/usr/libexec/vicliu-pocket-linux-hardware/vpl-hardwared
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=yes

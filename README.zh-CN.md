@@ -79,9 +79,9 @@ NetworkManager 是有线与 Wi-Fi **连接策略**的唯一所有者。镜像不
 `nm-connection-editor`，不是自制网络对话框。
 
 基础镜像有意不包含通用浏览器，避免重量级 WebKit/Chromium 依赖成为 K230 的固件启动
-依赖。未来的浏览器包必须 ABI 匹配、经过签名并发布到新的软件源修订版后，才能出现正常的
-桌面入口；它必须提供正常的地址栏和导航，不能只是 kiosk 壳。现代大型 Web 应用仍可能
-超出 K230 的 CPU 与内存预算。
+依赖。已签名的 r5 软件源提供可选的 `tdvp-netsurf`，它有正常的地址栏和导航，可通过
+Software Manager 或 `tdvp-opkg` 安装。其他浏览器也必须 ABI 匹配、经过签名并发布到新的
+软件源修订版后，才能出现桌面入口。现代大型 Web 应用仍可能超出 K230 的 CPU 与内存预算。
 
 ## 已签名的软件发行源与 Software Manager
 
@@ -90,7 +90,7 @@ ABI 固定且不可变的软件源修订版则是可扩展的用户态软件目�
 和设备应用：
 
 ```text
-https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r4/riscv64
+https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r5/riscv64
 ```
 
 每次从 Software Manager 或命令行开始操作前，受控的 `tdvp-opkg` wrapper 会把内置发行
@@ -112,9 +112,10 @@ sudo tdvp-opkg install <package>
 当更新失败时不要关闭签名校验。软件源发布端必须先发布 ABI 匹配的软件包、
 `Packages`/`Packages.gz` 及使用对应私钥生成的 detached signature。本固件与本仓库只保存
 公钥；私钥绝不应放入设备或源码树。追加软件意味着发布新的软件源修订版、再让后续镜像
-使用新 URL，绝不能覆盖任何已签名索引。r4 中每一个非 ABI 动态运行时、插件和 `/usr/libexec` helper 都有且只有一个可独立安装
-的 feed 所有者；叶子应用使用精确版本依赖，不会静态塞库或暗中借用基础镜像库。通用库保留它们的上游包名（例如 `sdl2`、`sdl2-ttf`、
-`libmgba`）；ABI 安全性来自精确的平台依赖和 `riscv64` 架构，而不是给库名强加前缀。
+使用新 URL，绝不能覆盖任何已签名索引。r5 对这个发行版中的所有软件组件执行同一条规则：每一个非 ABI 动态运行时库、插件和
+runtime helper 都有且只有一个可独立安装的 feed 所有者；叶子应用使用精确版本依赖，不会静态塞库或暗中借用基础镜像库。基础镜像
+只是硬件/桌面与 ABI 种子，不是无版本、可任意借用的依赖仓库。通用库保留它们的上游包名（例如 `sdl2`、`sdl2-ttf`、`libmgba`）；
+ABI 安全性来自精确的平台依赖和 `riscv64` 架构，而不是给库名强加前缀。
 
 ## 构建与发布
 

@@ -193,6 +193,7 @@ fi
 require_content "${HARDWARE_SOURCE}/hardware/status.cpp" 'speaker_amplifier_owner'
 require_content "${DESKTOP_SOURCE}/tdvp-gdk-committed-compat.c" 'g_signal_handler_disconnect'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '-lglib-2.0'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '/usr/lib/tdvp-gdk-committed-compat.so'
 require_content "${DESKTOP_SOURCE}/environment" 'WLR_DRM_DEVICES=/dev/dri/card0'
 require_content "${DESKTOP_SOURCE}/environment" 'LIBSEAT_BACKEND=seatd'
 require_content "${DESKTOP_SOURCE}/environment" 'TDVP_K230_OUTPUT=DSI-1'
@@ -208,6 +209,7 @@ require_file "${DESKTOP_SOURCE}/menus/lxde-applications.menu"
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-keyboard-layout/src/tdvp-fn-yellow.xkb"
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-keyboard-layout/src/tdvp-us-xkb-variant.xkb"
 require_content "${DESKTOP_SOURCE}/tdvp-wf-panel-session" 'export GDK_BACKEND=wayland'
+require_content "${DESKTOP_SOURCE}/tdvp-wf-panel-session" 'LD_PRELOAD="/usr/lib/tdvp-gdk-committed-compat.so'
 require_content "${DESKTOP_SOURCE}/tdvp-wf-panel-session" 'PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin'
 require_content "${DESKTOP_SOURCE}/tdvp-wf-panel-session" '/usr/bin/wf-panel-pi --config /etc/xdg/wf-panel-pi/wf-panel-pi.ini'
 require_content "${DESKTOP_SOURCE}/tdvp-pcmanfm-desktop-session" 'export GDK_BACKEND=wayland'
@@ -318,7 +320,7 @@ require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'option signature_type gpg-asc'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'option gpg_dir /etc/opkg/gpg'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'option gpg_trust_level TrustAny'
-require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'src/gz tdvp_apps_r4 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r4/riscv64'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'src/gz tdvp_apps_r5 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r5/riscv64'
 require_file "${PROJECT_DIR}/buildroot/tools/assert-tdvp-opkg-feed-release.sh"
 require_content "${PROJECT_DIR}/buildroot/tools/assert-tdvp-opkg-feed-release.sh" "download 'Packages.asc' 'Packages.asc'"
 require_content "${PROJECT_DIR}/buildroot/tools/assert-tdvp-opkg-feed-release.sh" 'gpgv --keyring'

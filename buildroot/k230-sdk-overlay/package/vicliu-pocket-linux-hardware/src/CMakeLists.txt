@@ -42,7 +42,7 @@ target_compile_options(vpl-nrf9151-probe PRIVATE ${VPL_WARNING_FLAGS})
 target_link_libraries(vpl-nrf9151-probe PRIVATE vpl-hardware-core)
 
 install(TARGETS vpl-hwctl vpl-lora-probe vpl-nrf9151-probe RUNTIME DESTINATION local/bin)
-install(TARGETS vpl-hardwared RUNTIME DESTINATION local/libexec/vicliu-pocket-linux-hardware)
+install(TARGETS vpl-hardwared RUNTIME DESTINATION libexec/vicliu-pocket-linux-hardware)
 install(FILES
     vicliu-pocket-linux-hardware.service
     tdvp-rtc-load.service

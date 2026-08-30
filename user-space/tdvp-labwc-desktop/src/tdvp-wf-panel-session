@@ -10,7 +10,7 @@ export GSETTINGS_SCHEMA_DIR="/etc/tdvp/gsettings${GSETTINGS_SCHEMA_DIR:+:${GSETT
 # GTK3 on this K230 stack does not emit the Wayland `committed` signal used by
 # wf-panel-pi.  The small compatibility library defers that callback so the
 # existing Raspberry Pi smenu implementation can display normally.
-export LD_PRELOAD="/usr/local/lib/tdvp-gdk-committed-compat.so${LD_PRELOAD:+:${LD_PRELOAD}}"
+export LD_PRELOAD="/usr/lib/tdvp-gdk-committed-compat.so${LD_PRELOAD:+:${LD_PRELOAD}}"
 # Raspberry Pi's maintained netman plugin invokes iw by its normal command
 # name, while Buildroot installs iw and rfkill in /usr/sbin. Include the
 # conventional system administration directories for panel children so the

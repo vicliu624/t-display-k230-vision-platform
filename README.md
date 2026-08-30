@@ -105,11 +105,12 @@ network manager. Use the Wi-Fi item in the panel to select an access point or
 in-house dialog.
 
 The base image intentionally contains no general-purpose browser. This keeps a
-heavy WebKit/Chromium stack out of the boot-critical firmware. A future browser
-package must be ABI-matched, signed, and published in a new feed revision
-before it receives a desktop entry. It must provide a normal address bar and
-navigation rather than a kiosk-only shell. Heavy modern web applications may
-still exceed the K230's CPU and RAM budget.
+heavy WebKit/Chromium stack out of the boot-critical firmware. The signed r5
+feed provides `tdvp-netsurf` as an optional browser with normal address and
+navigation controls; install it through the Software Manager or `tdvp-opkg`.
+Any additional browser must be ABI-matched, signed, and published in a new
+feed revision before it receives a desktop entry. Heavy modern web applications
+may still exceed the K230's CPU and RAM budget.
 
 ## Signed software-distribution feed and Software Manager
 
@@ -119,7 +120,7 @@ ABI-fixed, immutable feed revision is the expandable userland catalogue for
 common libraries, command-line tools, desktop programs, and device apps:
 
 ```text
-https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r4/riscv64
+https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r5/riscv64
 ```
 
 Immediately before each Software Manager or command-line operation, the
@@ -146,10 +147,12 @@ signature made by the corresponding private release key. This firmware and
 repository deliberately contain only the public key; no signing secret belongs
 on a device or in this source tree. Adding software means publishing a new
 feed revision and then updating a future image's feed URL; it never means
-overwriting an already signed index. In r4, every non-ABI dynamic runtime,
-plugin, and `/usr/libexec` helper has one independently installable feed owner;
-leaf applications use exact versioned
-dependencies rather than static copies or undeclared base-image libraries.
+overwriting an already signed index. In r5, the same rule applies to every
+software component in this distribution: every non-ABI dynamic runtime library,
+plugin, and runtime helper has exactly one independently installable feed
+owner. Leaf applications use exact versioned dependencies rather than static
+copies or undeclared base-image libraries. The base image is only a
+hardware/desktop and ABI seed; it is not an unversioned dependency reservoir.
 Generic libraries retain their upstream
 package names (for example `sdl2`, `sdl2-ttf`, and `libmgba`); ABI safety comes
 from the exact platform dependency and `riscv64` architecture, not from an

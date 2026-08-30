@@ -53,7 +53,8 @@ Raspberry Pi `wf-panel-pi` plugins, Foot, Cog/WPE WebKit,
    signed-feed material rather than trusting a build exit status alone.
 4. Run hardware-build preflight and retain the generated evidence report.
 5. Boot a device and verify the greeter/session, menu key, keyboard, touch,
-   Files, panel, Wi-Fi editor, HTTPS browser and volume event feedback.
+   Files, panel, Wi-Fi editor and volume event feedback. Then install the
+   signed feed browser (`tdvp-netsurf`) and verify HTTPS browsing.
 6. Download the configured public feed's `Packages.gz`, `Packages.gz.asc`, and
    `release.json` over HTTPS; verify the detached signature with the embedded
    public key and require every published package to depend on the exact image
@@ -69,7 +70,7 @@ inputs. `SHA256SUMS` covers every delivered file.
 The standard image configures only:
 
 ```text
-https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r4/riscv64
+https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r5/riscv64
 ```
 
 The key fingerprint is `2B091A2A8E5810954FB9FD64EA9D1CD5EFC81500`.
@@ -80,6 +81,14 @@ applications. Publishing must produce ABI-matched packages,
 `Packages`/`Packages.gz`, and their detached signature using the offline
 private key. Neither devices nor this repository contain the private signing
 material, and release instructions must never disable signature checks.
+
+The feed is composable by contract. For every software component in this
+distribution, each non-ABI dynamic runtime library, plugin, and runtime helper
+has exactly one independently installable IPK owner in the same feed revision.
+Applications are leaves and can consume those providers only through exact
+versioned dependencies. They must not statically absorb common libraries or
+silently rely on a library merely because it happens to be present in the base
+image.
 
 The bundle collector enforces this policy against the live Pages endpoint; it
 does not treat an image containing a URL and public key as proof that updates
