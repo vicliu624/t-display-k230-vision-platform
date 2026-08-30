@@ -213,6 +213,7 @@ require_content "${DESKTOP_SOURCE}/tdvp-wf-panel-session" 'LD_PRELOAD="/usr/lib/
 require_content "${DESKTOP_SOURCE}/tdvp-wf-panel-session" 'PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin'
 require_content "${DESKTOP_SOURCE}/tdvp-wf-panel-session" '/usr/bin/wf-panel-pi --config /etc/xdg/wf-panel-pi/wf-panel-pi.ini'
 require_content "${DESKTOP_SOURCE}/tdvp-pcmanfm-desktop-session" 'export GDK_BACKEND=wayland'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" 'BR2_PACKAGE_UTF8PROC=y'
 require_content "${DESKTOP_SOURCE}/tdvp-pcmanfm-desktop-session" '/usr/bin/pcmanfm --desktop'
 if grep -Eq -- '(^|[[:space:]])--one-screen([[:space:]]|$)' "${DESKTOP_SOURCE}/tdvp-pcmanfm-desktop-session"; then
 	fail 'PCManFM desktop mode must not disable monitor 0 with --one-screen'
@@ -320,7 +321,7 @@ require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'option signature_type gpg-asc'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'option gpg_dir /etc/opkg/gpg'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'option gpg_trust_level TrustAny'
-require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'src/gz tdvp_apps_r5 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r5/riscv64'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'src/gz tdvp_apps_r6 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r6/riscv64'
 require_file "${PROJECT_DIR}/buildroot/tools/assert-tdvp-opkg-feed-release.sh"
 require_content "${PROJECT_DIR}/buildroot/tools/assert-tdvp-opkg-feed-release.sh" "download 'Packages.asc' 'Packages.asc'"
 require_content "${PROJECT_DIR}/buildroot/tools/assert-tdvp-opkg-feed-release.sh" 'gpgv --keyring'

@@ -118,6 +118,10 @@ BR2_PACKAGE_WFPLUG_NETMAN=y
 BR2_PACKAGE_WFPLUG_POWER=y
 BR2_PACKAGE_WFPLUG_VOLUMEPULSE=y
 BR2_PACKAGE_FOOT=y
+# Keep Foot's Unicode processing on the shared-library path.  The resulting
+# libutf8proc.so.3 is promoted into the ABI-matched composable feed rather than
+# being a private or static terminal dependency.
+BR2_PACKAGE_UTF8PROC=y
 BR2_PACKAGE_FOOT_THEMES=y
 BR2_PACKAGE_WOFI=y
 BR2_PACKAGE_WVKBD=y
