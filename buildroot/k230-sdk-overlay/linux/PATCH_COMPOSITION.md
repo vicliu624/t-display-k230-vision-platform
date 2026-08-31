@@ -18,6 +18,8 @@ SDK 0001..0024
   -> TDVP 0047: LR2021 pin and power profile, with an optional K256-04 nRF9151 selector
   -> TDVP 0048..0049: LR2021 SPI0 transport, reset sequencing and bounded IRQ enumeration
   -> TDVP 0050: AHT20 hwmon binding
+  -> TDVP 0051..0052: external-I2S amplifier declaration and managed ALSA route
+  -> TDVP 0053: hardware LLT cyclic PDMA transfers
 ```
 
 The Buildroot `linux/` package directory is the sole patch input. Buildroot
@@ -40,6 +42,7 @@ source; it is the gate for patch applicability.
 | RM69A10 board DTS and keyboard DTS | Lewis `0032`, `0033`; TDVP `0037` | Lewis creates `k230-canmv-rm69a10.dts`, enables SDIO WiFi and introduces the display. TDVP adds the detachable keyboard transport and matrix, while leaving `i2c4` disabled in this shell profile. | Decompile produced DTB; probe WiFi and TCA8418; verify the full matrix including `0` and `Shift+0`. |
 | TCA8418 driver extensions | TDVP `0036`, `0038`, `0039`, `0040` | The driver reset is performed before its first I2C transaction. FIFO polling is selected by the board DTS, controller debounce is selected by the board DTS, and the K230 pinctrl accepts the standard Schmitt property. | Boot with the keyboard fitted; use `evtest` or console input; test all yellow-key combinations. |
 | Audio and backlights | SDK `0013`; TDVP `0042`, `0043`, `0044` | The internal-codec sound card, RM69A10 brightness path and keyboard PWM backlight each use their corresponding Linux class interface. | Enumerate ALSA playback/capture, change LCD brightness through `/sys/class/backlight`, and change keyboard brightness through its PWM backlight class. |
+| I2S cyclic DMA continuity | K230 PDMA base driver; TDVP `0053` | Every cyclic DMA descriptor is a closed, coherent LLT ring. PDMA follows the next-node address in hardware and raises `PITEM` at a period boundary; the IRQ handler advances ALSA residue/callback state without reprogramming or restarting the channel. `PDONE` is a recovery-only fault for a closed ring. | Play a 44.1 kHz stereo PCM stream and a GBA title for at least 10 minutes. Require no ALSA/PulseAudio underrun or false-`POLLOUT` diagnostic and no audible periodic dropout; confirm PDMA reports period node interrupts without `PDONE` restarts. |
 | Dock GPIO and fuel gauge | TDVP `0045`, `0046`; existing `i2c_gpio_keyboard` node | The XL9555 at `0x20` is a standard `pca953x` GPIO provider. The BQ27220 at `0x55` uses its own standard-command register profile: instantaneous current is `0x0c`, remaining capacity is `0x10`, and no data-memory programming path is available. The static nodes share the accepted keyboard I2C bus without modifying the TCA8418 transport. | On the fitted dock, verify the full keyboard regression, `gpioinfo` reports the XL9555 chip, and BQ27220 `/sys/class/power_supply` values match independent I2C reads during charge and discharge. |
 | Dock environment sensor | TDVP `0050`; existing `i2c_gpio_keyboard` node | AHT20 at `0x38` uses the in-kernel `aosong,aht20` hwmon binding. The driver verifies the AHT20 CRC and publishes standard temperature and humidity attributes. | Compare `temp1_input` and `humidity1_input` with a direct CRC-checked I2C frame at two environmental conditions. |
 | LoRa and optional nRF9151 serial path | TDVP `0047` and `0048`; UART2, SPI0, K230 pinctrl and GPIO descriptors | The LR2021 reset input and the K256-04 nRF9151 UART2 TX path share IO5. `tdvp-radio-mux` owns the relevant pin and power states; the K256-04-A baseline stays in `lora` and keeps the optional modem unselected. SPI0 owns IO14 through IO17 for the LR2021 transport. | K256-04-A: run `vpl-lora-probe` and require a nonzero, non-`0xff` LR2021 firmware version. K256-04: additionally switch to `nrf9151`, confirm `/dev/ttyS2` exchanges AT commands with the fitted modem, then return to `lora` and repeat the LR2021 probe. |
@@ -84,3 +87,7 @@ second copy of a semantic patch from silently changing patch order.
 5. Run static XR24 bars, a labelled asymmetric XR24 frame, and a dynamic
    XR24 frame. Hardware rotation is accepted only after all three modes are
    stable at each selected rotation.
+6. Play a 44.1 kHz stereo PCM stress stream and the GBA emulator for at least
+   10 minutes. The acceptance trace must show regular PDMA node-period
+   callbacks, no cyclic `PDONE` restart, no ALSA/PulseAudio underrun diagnostic,
+   and no audible dropout.

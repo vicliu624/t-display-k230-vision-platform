@@ -17,6 +17,8 @@ SDK 0001..0024
   -> TDVP 0047：LR2021/nRF9151 互斥 pin 与 power profile
   -> TDVP 0048..0049：LR2021 SPI0 传输、复位时序与有边界的 IRQ 枚举
   -> TDVP 0050：AHT20 hwmon binding
+  -> TDVP 0051..0052：外置 I2S 功放声明与受管 ALSA 路由
+  -> TDVP 0053：硬件 LLT 循环 PDMA 传输
 ```
 
 Buildroot `linux/` package 目录是唯一的补丁输入。Buildroot 按文件名字典序应用其中的
@@ -38,6 +40,7 @@ Buildroot `linux/` package 目录是唯一的补丁输入。Buildroot 按文件�
 | RM69A10 board DTS 与 keyboard DTS | Lewis `0032`、`0033`；TDVP `0037` | Lewis 创建 `k230-canmv-rm69a10.dts`、启用 SDIO WiFi 并引入 display。TDVP 加入可拆卸键盘 transport 与 matrix，并在 shell profile 中保持 `i2c4` disabled。 | 反编译产物 DTB；probe WiFi 与 TCA8418；验证完整 matrix，包括 `0` 和 `Shift+0`。 |
 | TCA8418 driver 扩展 | TDVP `0036`、`0038`、`0039`、`0040` | driver 在首个 I2C transaction 前执行 reset。FIFO polling 和 controller debounce 由 board DTS 选择，K230 pinctrl 接受标准 Schmitt property。 | 装上键盘后启动；使用 `evtest` 或 console input；验证全部黄字组合键。 |
 | Audio 与 backlight | SDK `0013`；TDVP `0042`、`0043`、`0044` | internal-codec sound card、RM69A10 brightness path 和 keyboard PWM backlight 分别使用对应的 Linux class interface。 | 枚举 ALSA playback/capture，通过 `/sys/class/backlight` 调整 LCD brightness，并通过 PWM backlight class 调整 keyboard brightness。 |
+| I2S 循环 DMA 连续性 | K230 PDMA base driver；TDVP `0053` | 每个循环 DMA descriptor 都是封闭的 coherent LLT 环。PDMA 在硬件中跟随 next-node address，并在 period boundary 产生 `PITEM`；IRQ handler 只推进 ALSA residue/callback，不重新配置或重启 channel。封闭环出现 `PDONE` 被视为只用于恢复的故障。 | 连续至少 10 分钟播放 44.1 kHz stereo PCM 和 GBA 游戏。要求没有 ALSA/PulseAudio underrun 或 false-`POLLOUT` diagnostic、没有可听的周期性掉音；确认 PDMA 报告 period node interrupt 而没有 `PDONE` restart。 |
 | 扩展坞 GPIO 与电量计 | TDVP `0045`、`0046`；已有 `i2c_gpio_keyboard` node | `0x20` 的 XL9555 是标准 `pca953x` GPIO provider。`0x55` 的 BQ27220 使用其自身 standard-command register profile：瞬时电流是 `0x0c`，剩余容量是 `0x10`，不存在 data-memory programming path。静态 node 与已验收 keyboard I2C bus 共用总线，不改变 TCA8418 transport。 | 在已安装扩展坞上验证完整 keyboard regression、`gpioinfo` 可见 XL9555 chip，并在充放电时核对 BQ27220 `/sys/class/power_supply` 值与独立 I2C 读取一致。 |
 | 扩展坞环境传感器 | TDVP `0050`；已有 `i2c_gpio_keyboard` node | `0x38` AHT20 使用内核的 `aosong,aht20` hwmon binding。driver 校验 AHT20 CRC，并发布标准温湿度属性。 | 在两个环境条件下，将 `temp1_input` 和 `humidity1_input` 与直接读取且 CRC 通过的 I2C frame 对比。 |
 | LoRa 与 nRF9151 串口路径 | TDVP `0047` 与 `0048`；UART2、SPI0、K230 pinctrl 与 GPIO descriptor | LR2021 reset input 与 UART2 TX 都使用 IO5。`tdvp-radio-mux` 控制互斥的 `lora` 与 `nrf9151` profile，通过 sysfs 暴露当前 profile 和 LR2021 电源状态，并统一管理共享 GPIO。SPI0 使用 IO14 至 IO17 作为 LR2021 传输路径。 | 以 `lora` 启动，运行 `vpl-lora-probe` 并要求 LR2021 firmware version 既非全 `0x00` 也非全 `0xff`；切换 `nrf9151` 后确认 `/dev/ttyS2` 可与已供电 modem 交换 AT command；再切回 `lora` 并重复 LR2021 probe。 |
@@ -77,3 +80,5 @@ legacy Lewis 文件名。staged queue 只包含 [PATCHES.zh-CN.md](PATCHES.zh-CN
 4. cold boot 后验证 console、login、WiFi、SSH 与 keyboard。
 5. 分别运行静态 XR24 colour bar、带文字/非对称图形的 XR24 frame、动态 XR24 frame。所选
    rotation 的三类图像均稳定后，才能接受 hardware rotation。
+6. 连续至少 10 分钟播放 44.1 kHz stereo PCM 压力流和 GBA 模拟器。验收 trace 必须显示规则的 PDMA
+   node-period callback、没有循环 `PDONE` restart、没有 ALSA/PulseAudio underrun diagnostic，且没有可听掉音。

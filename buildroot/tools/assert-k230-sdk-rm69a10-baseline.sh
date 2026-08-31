@@ -166,6 +166,7 @@ LIBGTK3_WAYLAND_TRANSFORM_PATCH="${PROJECT_DIR}/buildroot/patches/buildroot/0006
 NM_CONNECTION_EDITOR_WAYLAND_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/nm-connection-editor/0002-tdvp-wayland-drop-unused-gdkx-header.patch"
 EXTERNAL_I2S_DTS_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/linux/0051-tdvp-riscv-dts-canaan-add-external-i2s-amp.patch"
 EXTERNAL_I2S_ASOC_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/linux/0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch"
+K230_PDMA_CYCLIC_LLT_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/linux/0053-tdvp-dma-k230-peridma-use-hardware-cyclic-llt.patch"
 HARDWARE_SOURCE="${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src"
 require_file "${EXTERNAL_I2S_DTS_PATCH}"
 require_content "${EXTERNAL_I2S_DTS_PATCH}" 'canaan,external-i2s-output-default;'
@@ -179,6 +180,11 @@ require_content "${EXTERNAL_I2S_ASOC_PATCH}" 'External I2S Output Switch'
 require_content "${EXTERNAL_I2S_ASOC_PATCH}" 'devm_gpiod_get_optional'
 require_content "${EXTERNAL_I2S_ASOC_PATCH}" 'audio_i2s_enable_audio_codec(!priv->external_i2s_output);'
 require_content "${EXTERNAL_I2S_ASOC_PATCH}" 'gpiod_set_value_cansleep'
+require_file "${K230_PDMA_CYCLIC_LLT_PATCH}"
+require_content "${K230_PDMA_CYCLIC_LLT_PATCH}" 'k230_peridma_build_cyclic_llt'
+require_content "${K230_PDMA_CYCLIC_LLT_PATCH}" 'node_intr = 1'
+require_content "${K230_PDMA_CYCLIC_LLT_PATCH}" 'PITEM_INT'
+require_content "${K230_PDMA_CYCLIC_LLT_PATCH}" 'do not stop, reconfigure, or restart the data request path'
 require_file "${HARDWARE_SOURCE}/tdvp-audio-route"
 require_file "${HARDWARE_SOURCE}/tdvp-speaker-acceptance"
 require_content "${HARDWARE_SOURCE}/tdvp-audio-route" "readonly CONTROL='External I2S Output Switch'"
@@ -428,6 +434,10 @@ require_content "${STAGED_OVERLAY}/package/vicliu-pocket-linux-desktop/vicliu-po
 	require_content "${STAGED_OVERLAY}/linux/0051-tdvp-riscv-dts-canaan-add-external-i2s-amp.patch" 'K230_IO35_IIS_D_OUT0_PDM_IN1'
 	require_file "${STAGED_OVERLAY}/linux/0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch"
 	require_content "${STAGED_OVERLAY}/linux/0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch" 'External I2S Output Switch'
+	require_file "${STAGED_OVERLAY}/linux/0053-tdvp-dma-k230-peridma-use-hardware-cyclic-llt.patch"
+	require_content "${STAGED_OVERLAY}/linux/0053-tdvp-dma-k230-peridma-use-hardware-cyclic-llt.patch" 'k230_peridma_build_cyclic_llt'
+	require_content "${STAGED_OVERLAY}/linux/0053-tdvp-dma-k230-peridma-use-hardware-cyclic-llt.patch" 'node_intr = 1'
+	require_content "${STAGED_OVERLAY}/linux/0053-tdvp-dma-k230-peridma-use-hardware-cyclic-llt.patch" 'PITEM_INT'
 	require_file "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/tdvp-expand-rootfs"
 	require_file "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/tdvp-rootfs-expand.service"
 	require_file "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/tdvp-audio-route"

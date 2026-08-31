@@ -1,0 +1,377 @@
+From 53ec3e25e6692de0727d958da699357b6afc5fa3 Mon Sep 17 00:00:00 2001
+From: Vicliu Pocket Linux <maintainers@vicliu.i234.me>
+Date: Mon, 31 Aug 2026 10:20:00 +0800
+Subject: [PATCH] dma: k230: keep cyclic PDMA requests in a hardware LLT ring
+
+The existing K230 PDMA cyclic path creates a one-entry LLT, waits for
+PDONE, and then reprograms and restarts PDMA from the interrupt handler
+for every period.  For a 44.1 kHz s16le stereo ALSA stream with the
+normal 256-frame period, that makes the I2S data request depend on a
+software round trip every 5.8 ms.  PDMA has only a 64-byte channel
+buffer, so ordinary interrupt or bus latency can starve the I2S FIFO.
+
+Build every cyclic descriptor into a coherent, closed LLT ring and set
+node_intr on each node.  PDMA advances directly to the next period in
+hardware; PITEM now updates the cyclic residue and invokes the DMAengine
+callback without stopping or reconfiguring the data path.  A PDONE from
+this closed ring is treated as a hardware/descriptor fault and restarted
+for recovery.  Retain the old one-shot LLT path for non-cyclic requests.
+
+While here, acknowledge PDMA W1C status bits per channel.  The old
+read-modify-write acknowledgement could accidentally clear pending
+interrupts from other channels.
+
+Signed-off-by: Vicliu Pocket Linux <maintainers@vicliu.i234.me>
+---
+ drivers/dma/k230_peridma.c | 233 ++++++++++++++++++++++++++++++++-------------
+ 1 file changed, 169 insertions(+), 64 deletions(-)
+
+diff --git a/drivers/dma/k230_peridma.c b/drivers/dma/k230_peridma.c
+index 227d5ba..2a28df2 100644
+--- a/drivers/dma/k230_peridma.c
++++ b/drivers/dma/k230_peridma.c
+@@ -201,6 +201,9 @@ struct k230_peridma_desc {
+ 	atomic_t hwdesc_remain;
+ 	bool next;
+ 	struct k230_peridma_hwdesc *cyclic;
++	struct pdma_llt_t *cyclic_llt;
++	dma_addr_t cyclic_llt_dma;
++	size_t cyclic_llt_bytes;
+ 	u32 remain;
+ 	u32 buf_len;
+ };
+@@ -326,13 +329,11 @@ static inline bool peridma_pchan_is_paused(struct k230_peridma_pchan *pchan)
+ static inline void peridma_pchan_irq_clear(struct k230_peridma_pchan *pchan)
+ {
+ 	struct k230_peridma_dev *pdev = pchan->pdev;
+-	u32 reg;
+ 	u32 ch_id = pchan->id;
+ 	u32 clear = PDONE_INT | PITEM_INT | PPAUSE_INT | PTOUT_INT;
+ 
+-	reg = ioread32(pdev->base + PDMA_INT_STAT);
+-	reg |= (clear << ch_id);
+-	iowrite32(reg, pdev->base + PDMA_INT_STAT);
++	/* PDMA_INT_STAT is write-one-to-clear: do not clear other channels. */
++	iowrite32(clear << ch_id, pdev->base + PDMA_INT_STAT);
+ }
+ 
+ static inline void peridma_pchan_irq_enable(struct k230_peridma_pchan *pchan)
+@@ -408,6 +409,9 @@ static void peridma_desc_put(struct k230_peridma_desc *desc)
+ 	struct k230_peridma_hwdesc *hwdesc, *tmp;
+ 
+ 	//	vchan->desc = NULL;
++	if (desc->cyclic_llt)
++		dma_free_coherent(vchan2dev(vchan), desc->cyclic_llt_bytes,
++				  desc->cyclic_llt, desc->cyclic_llt_dma);
+ 
+ 	list_for_each_entry_safe(hwdesc, tmp, &desc->xfer_list, list)
+ 		kfree(hwdesc);
+@@ -588,6 +592,72 @@ k230_peridma_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
+ 	return vchan_tx_prep(&vchan->vchan, &desc->vd, flags);
+ }
+ 
++/*
++ * A cyclic ALSA transfer must not leave the I2S data request idle between
++ * periods.  Build every period into one hardware LLT ring and use the node
++ * interrupt as the period boundary.  The old implementation programmed one
++ * one-node LLT after every PDONE interrupt; that creates a software-dependent
++ * gap after each ALSA period, while the K230 PDMA only has a 64-byte channel
++ * buffer.
++ */
++static int k230_peridma_build_cyclic_llt(struct k230_peridma_desc *desc)
++{
++	struct k230_peridma_vchan *vchan = desc->vchan;
++	struct k230_peridma_hwdesc *hwdesc;
++	struct pdma_llt_t *llt;
++	dma_addr_t llt_dma;
++	size_t llt_bytes;
++	unsigned int count = 0;
++	unsigned int index = 0;
++
++	list_for_each_entry(hwdesc, &desc->xfer_list, list)
++		count++;
++
++	if (!count || count > (SIZE_MAX / sizeof(*llt)))
++		return -EINVAL;
++
++	llt_bytes = count * sizeof(*llt);
++	llt = dma_alloc_coherent(vchan2dev(vchan), llt_bytes, &llt_dma,
++				 GFP_NOWAIT);
++	if (!llt)
++		return -ENOMEM;
++
++	/* K230's PDMA LLT address fields are 32 bits wide. */
++	if (upper_32_bits(llt_dma) ||
++	    upper_32_bits(llt_dma + llt_bytes - sizeof(*llt))) {
++		dma_free_coherent(vchan2dev(vchan), llt_bytes, llt, llt_dma);
++		return -EOVERFLOW;
++	}
++
++	list_for_each_entry(hwdesc, &desc->xfer_list, list) {
++		dma_addr_t next_dma;
++
++		if (upper_32_bits(hwdesc->usr_pdma_chn_cfg.src_addr) ||
++		    upper_32_bits(hwdesc->usr_pdma_chn_cfg.dst_addr)) {
++			dma_free_coherent(vchan2dev(vchan), llt_bytes, llt, llt_dma);
++			return -EOVERFLOW;
++		}
++
++		next_dma = llt_dma +
++			((index + 1) % count) * sizeof(*llt);
++		llt[index].line_size = hwdesc->usr_pdma_chn_cfg.line_size;
++		llt[index].pause = 0;
++		llt[index].node_intr = 1;
++		llt[index].src_addr = lower_32_bits(hwdesc->usr_pdma_chn_cfg.src_addr);
++		llt[index].dst_addr = lower_32_bits(hwdesc->usr_pdma_chn_cfg.dst_addr);
++		llt[index].next_llt_addr = lower_32_bits(next_dma);
++		index++;
++	}
++
++	/* Publish the descriptor ring before its address reaches the PDMA. */
++	dma_wmb();
++
++	desc->cyclic_llt = llt;
++	desc->cyclic_llt_dma = llt_dma;
++	desc->cyclic_llt_bytes = llt_bytes;
++	return 0;
++}
++
+ static struct dma_async_tx_descriptor *k230_peridma_prep_dma_cyclic(
+ 	struct dma_chan *chan, dma_addr_t buf_addr, size_t buf_len,
+ 	size_t period_len, enum dma_transfer_direction dir, unsigned long flags)
+@@ -608,9 +678,15 @@ static struct dma_async_tx_descriptor *k230_peridma_prep_dma_cyclic(
+ 		return NULL;
+ 
+ 	desc->vchan = vchan;
++	if (!buf_len || !period_len || buf_len % period_len ||
++	    buf_len > U32_MAX) {
++		kfree(desc);
++		return NULL;
++	}
+ 	desc->buf_len = buf_len;
+ 	desc->remain = buf_len;
+ 	INIT_LIST_HEAD(&desc->xfer_list);
++	INIT_LIST_HEAD(&desc->completed_list);
+ 
+ 	atomic_inc(&vchan->descs_allocated);
+ 
+@@ -660,6 +736,11 @@ static struct dma_async_tx_descriptor *k230_peridma_prep_dma_cyclic(
+ 		} while (avail);
+ 	}
+ 
++	if (k230_peridma_build_cyclic_llt(desc)) {
++		peridma_desc_put(desc);
++		return NULL;
++	}
++
+ 	return vchan_tx_prep(&vchan->vchan, &desc->vd, flags);
+ }
+ 
+@@ -823,7 +904,8 @@ static u32 *pdma_llt_cal(struct device *dev, struct k230_peridma_hwdesc *hwdesc,
+ }
+ 
+ static void configure_pchan(struct k230_peridma_pchan *pchan,
+-			    struct k230_peridma_hwdesc *hwdesc)
++			    struct k230_peridma_hwdesc *hwdesc,
++			    dma_addr_t llt_dma)
+ {
+ 	struct k230_peridma_dev *pdev = pchan->pdev;
+ 
+@@ -841,7 +923,10 @@ static void configure_pchan(struct k230_peridma_pchan *pchan,
+ 	iowrite32(ch_cfg, pchan->ch_regs + CH_CFG);
+ 	iowrite32(hwdesc->usr_pdma_chn_cfg.device,
+ 		  pdev->base + 0x120 + pchan->id * 4);
+-	iowrite32((u32)(uintptr_t)pdma_llt_cal(pdev->dev, hwdesc, pchan->id),
++	if (llt_dma)
++		iowrite32(lower_32_bits(llt_dma), pchan->ch_regs + CH_LLT_SADDR);
++	else
++		iowrite32((u32)(uintptr_t)pdma_llt_cal(pdev->dev, hwdesc, pchan->id),
+ 		  pchan->ch_regs + CH_LLT_SADDR);
+ }
+ 
+@@ -903,7 +988,8 @@ static void peridma_vchan_start_first_queued(struct k230_peridma_vchan *vchan)
+ 		desc->hwdesc = hwdesc;
+ 
+ 		peridma_pchan_irq_clear(vchan->pchan);
+-		configure_pchan(vchan->pchan, desc->hwdesc);
++		configure_pchan(vchan->pchan, desc->hwdesc,
++				desc->cyclic_llt_dma);
+ 		peridma_pchan_irq_enable(vchan->pchan);
+ 		peridma_pchan_start(vchan->pchan);
+ 
+@@ -956,19 +1042,11 @@ static void k230_peridma_issue_pending(struct dma_chan *dchan)
+ 	spin_unlock_irqrestore(&vchan->vchan.lock, flags);
+ }
+ 
+-static void _pdma_chn_state_clear(enum pdma_ch_e pdma_chn, u32 *int_state)
+-{
+-	if (*int_state & (1 << pdma_chn))
+-		*int_state |= (PDONE_INT << pdma_chn);
+-
+-	if (*int_state & (1 << (8 + pdma_chn)))
+-		*int_state |= (PITEM_INT << pdma_chn);
++#define PDMA_CHANNEL_INT_BITS ((u32)(PDONE_INT | PITEM_INT | PPAUSE_INT | PTOUT_INT))
+ 
+-	if (*int_state & (1 << (16 + pdma_chn)))
+-		*int_state |= (PPAUSE_INT << pdma_chn);
+-
+-	if (*int_state & (1 << (24 + pdma_chn)))
+-		*int_state |= (PTOUT_INT << pdma_chn);
++static u32 k230_peridma_channel_interrupts(u32 int_stat, unsigned int channel)
++{
++	return int_stat & (PDMA_CHANNEL_INT_BITS << channel);
+ }
+ 
+ static irqreturn_t k230_peridma_interrupt(int irq, void *dev_id)
+@@ -977,61 +1055,88 @@ static irqreturn_t k230_peridma_interrupt(int irq, void *dev_id)
+ 	struct k230_peridma_vchan *vchan;
+ 	struct k230_peridma_desc *desc = NULL;
+ 	struct k230_peridma_hwdesc *hwdesc = NULL;
++	u32 int_stat;
++	bool handled = false;
+ 	int i;
+-	u32 ch_id;
+-	u32 int_stat = 0;
+ 
+ 	int_stat = ioread32(priv->base + PDMA_INT_STAT);
+ 
+ 	for (i = 0; i < CH_NUM; i++) {
+-		if ((int_stat >> i) & 0x1) {
+-			_pdma_chn_state_clear(i, &int_stat);
+-			iowrite32(int_stat, priv->base + PDMA_INT_STAT);
+-			g_pdma_llt_list[i].use = false;
+-		} else {
++		u32 pending = k230_peridma_channel_interrupts(int_stat, i);
++
++		if (!pending)
++			continue;
++
++		/* PDMA_INT_STAT is W1C; acknowledge only this channel's events. */
++		iowrite32(pending, priv->base + PDMA_INT_STAT);
++		handled = true;
++		vchan = priv->pchan[i].vchan;
++		if (!vchan)
+ 			continue;
+-		}
+-		ch_id = i;
+-		vchan = priv->pchan[ch_id].vchan;
+-		if (vchan == NULL)
+-			return IRQ_HANDLED;
+ 
+ 		spin_lock(&vchan->vchan.lock);
+-		//dev_vdbg(vchan2dev(vchan),
+-		//"k230_peridma_interrupt: process Transfer done irq of phy ch%d, int_status(%x)\n",
+-		//ch_id, int_stat0);
+ 		desc = vchan->desc;
+-		//printk("========desc->cyclic:0x%llx\n",desc->cyclic);
+-		if (desc->cyclic) {
+-			hwdesc = desc->cyclic;
+-			//dev_vdbg(vchan2dev(vchan),
+-			//"hwdesc(%px): last=%d ctl=%x, cfg0=%x,\n cfg1=%x,
+-			//dev_tout=%x, dev_sel=%x, src_addr=%x, dst_addr=%x\n",
+-			//hwdesc, hwdesc->last, hwdesc->ctl, hwdesc->cfg0, hwdesc->cfg1,
+-			//hwdesc->dev_tout, hwdesc->dev_sel,
+-			//hwdesc->src_addr, hwdesc->dst_addr);
+-			desc->remain -= hwdesc->usr_pdma_chn_cfg.line_size;
+-			if (desc->remain == 0)
++		if (!desc) {
++			spin_unlock(&vchan->vchan.lock);
++			continue;
++		}
++
++		if (pending & ((u32)(PPAUSE_INT | PTOUT_INT) << i))
++			dev_err_ratelimited(vchan2dev(vchan),
++					    "PDMA channel %d paused or timed out\n", i);
++
++		if (desc->cyclic_llt) {
++			/*
++			 * A node interrupt means PDMA advanced autonomously to the next
++			 * entry in the hardware ring.  Only acknowledge the ALSA period;
++			 * do not stop, reconfigure, or restart the data request path.
++			 */
++			if (pending & ((u32)PITEM_INT << i)) {
++				hwdesc = desc->cyclic;
++				if (WARN_ON_ONCE(!hwdesc)) {
++					desc->remain = desc->buf_len;
++				} else {
++					if (hwdesc->usr_pdma_chn_cfg.line_size > desc->remain) {
++						dev_err_ratelimited(vchan2dev(vchan),
++								    "PDMA cyclic residue underflow\n");
++						desc->remain = desc->buf_len;
++					} else {
++						desc->remain -=
++							hwdesc->usr_pdma_chn_cfg.line_size;
++						if (!desc->remain)
++							desc->remain = desc->buf_len;
++					}
++
++					if (hwdesc->last)
++						vchan_cyclic_callback(&desc->vd);
++
++					if (list_is_last(&hwdesc->list, &desc->xfer_list))
++						desc->cyclic = list_first_entry(
++							&desc->xfer_list,
++							struct k230_peridma_hwdesc, list);
++					else
++						desc->cyclic = list_next_entry(hwdesc, list);
++					desc->hwdesc = desc->cyclic;
++				}
++			}
++
++			/* A closed ring is a hardware/descriptor fault; recover audibly. */
++			if (pending & ((u32)PDONE_INT << i)) {
++				dev_err_ratelimited(vchan2dev(vchan),
++						    "PDMA cyclic LLT terminated; restarting\n");
++				desc->cyclic = list_first_entry(&desc->xfer_list,
++							       struct k230_peridma_hwdesc, list);
++				desc->hwdesc = desc->cyclic;
+ 				desc->remain = desc->buf_len;
+-			if (hwdesc->last)
+-				vchan_cyclic_callback(&vchan->desc->vd);
+-
+-			if (desc->cyclic->list.next == &(desc->xfer_list))
+-				desc->cyclic = list_entry(
+-					desc->xfer_list.next,
+-					typeof(*(desc->cyclic)), list);
+-			else
+-				desc->cyclic =
+-					list_next_entry(desc->hwdesc, list);
+-
+-			hwdesc = desc->cyclic;
+-			desc->hwdesc = hwdesc;
+-			configure_pchan(vchan->pchan, hwdesc);
+-			peridma_pchan_start(vchan->pchan);
+-		} else {
++				configure_pchan(vchan->pchan, desc->hwdesc,
++						desc->cyclic_llt_dma);
++				peridma_pchan_start(vchan->pchan);
++			}
++		} else if (pending & ((u32)PDONE_INT << i)) {
++			g_pdma_llt_list[i].use = false;
+ 			list_del(&desc->hwdesc->list);
+ 			list_add_tail(&desc->hwdesc->list,
+-				      &desc->completed_list);
++					      &desc->completed_list);
+ 
+ 			if (!list_empty(&desc->xfer_list)) {
+ 				hwdesc = list_first_entry(
+@@ -1047,7 +1152,7 @@ static irqreturn_t k230_peridma_interrupt(int irq, void *dev_id)
+ 				//hwdesc->dev_sel,hwdesc->src_addr, hwdesc->dst_addr);
+ 				desc->hwdesc = hwdesc;
+ 				//			desc->next = true;
+-				configure_pchan(vchan->pchan, hwdesc);
++				configure_pchan(vchan->pchan, hwdesc, 0);
+ 				peridma_pchan_start(vchan->pchan);
+ 			} else {
+ 				vchan->desc = NULL;
+@@ -1057,7 +1162,7 @@ static irqreturn_t k230_peridma_interrupt(int irq, void *dev_id)
+ 		spin_unlock(&vchan->vchan.lock);
+ 	}
+ 
+-	return IRQ_HANDLED;
++	return handled ? IRQ_HANDLED : IRQ_NONE;
+ }
+ 
+ static int k230_peridma_vchan_pause(struct dma_chan *dchan)
+-- 
+2.47.1

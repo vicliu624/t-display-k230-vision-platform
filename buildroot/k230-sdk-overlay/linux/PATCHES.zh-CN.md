@@ -32,6 +32,9 @@
 | `0048-tdvp-radio-lr2021-spi-transport.patch` | TDVP | 启用 SPI0 的 LR2021 spidev 传输路径，并为 radio profile selector 增加电源和复位控制。 |
 | `0049-tdvp-k230-spi-bound-irq-enumeration.patch` | TDVP | 仅枚举 K230 SPI0 在设备树中声明的 interrupt resource。 |
 | `0050-tdvp-hwmon-aht20-standard-binding.patch` | TDVP | 加入扩展坞 `0x38` AHT20 与标准 `aosong,aht20` hwmon binding。 |
+| `0051-tdvp-riscv-dts-canaan-add-external-i2s-amp.patch` | TDVP | 声明外置 I2S 功放路由及其受控 shutdown GPIO。 |
+| `0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch` | TDVP | 加入由 ALSA 管理的 internal-codec 与外置 I2S 功放路由切换。 |
+| `0053-tdvp-dma-k230-peridma-use-hardware-cyclic-llt.patch` | TDVP | 将循环 peripheral-DMA 传输保持在硬件 LLT 环内，以 LLT node interrupt 报告 ALSA period，周期之间不重新启动 PDMA。 |
 
 编号遵循导入的 display queue。词法顺序是 build input，并由 baseline assertion 检查。
 

@@ -33,6 +33,9 @@ ordering constraints and validation gates for this queue.
 | `0048-tdvp-radio-lr2021-spi-transport.patch` | TDVP | Enables SPI0 with an LR2021 spidev transport and adds power/reset control to the radio profile selector. |
 | `0049-tdvp-k230-spi-bound-irq-enumeration.patch` | TDVP | Enumerates only the interrupt resources declared by K230 SPI0. |
 | `0050-tdvp-hwmon-aht20-standard-binding.patch` | TDVP | Adds the dock AHT20 at `0x38` and its standard `aosong,aht20` hwmon binding. |
+| `0051-tdvp-riscv-dts-canaan-add-external-i2s-amp.patch` | TDVP | Declares the external I2S amplifier route and its controlled shutdown GPIO. |
+| `0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch` | TDVP | Adds the managed ALSA switch for the internal-codec and external-I2S amplifier route. |
+| `0053-tdvp-dma-k230-peridma-use-hardware-cyclic-llt.patch` | TDVP | Keeps cyclic peripheral-DMA transfers in a hardware LLT ring and reports ALSA periods through LLT node interrupts, without rearming PDMA between periods. |
 
 The numbering follows the imported display queue. The lexical ordering is a
 build input and is checked by the baseline assertion.
