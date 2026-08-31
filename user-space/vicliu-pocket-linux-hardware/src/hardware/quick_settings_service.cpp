@@ -350,7 +350,7 @@ bool QuickSettingsService::handle_request(const std::string &raw_request, State 
             if (!ok)
                 *error = "backlight control rejected the requested value";
         } else if (key == "speaker-route" && (value == "external" || value == "internal")) {
-            ok = paths::run_quietly({"/usr/local/bin/tdvp-audio-route", "tdvp-audio-route", value}) == 0;
+            ok = paths::run_quietly({"/usr/local/bin/tdvp-audio-route", value}) == 0;
             if (!ok)
                 *error = "audio route change failed";
         } else if (key == "radio-profile") {
@@ -372,7 +372,7 @@ bool QuickSettingsService::handle_request(const std::string &raw_request, State 
         return true;
     }
     if (request == "SYSTEM lock") {
-        const bool ok = paths::run_quietly({"/usr/bin/loginctl", "loginctl", "lock-sessions"}) == 0;
+        const bool ok = paths::run_quietly({"/usr/bin/loginctl", "lock-sessions"}) == 0;
         if (!ok)
             *error = "the active desktop session does not provide screen locking";
         if (ok) {
@@ -383,7 +383,7 @@ bool QuickSettingsService::handle_request(const std::string &raw_request, State 
     }
     if (request == "SYSTEM reboot" || request == "SYSTEM poweroff") {
         const char *verb = request == "SYSTEM reboot" ? "reboot" : "poweroff";
-        const bool ok = paths::run_quietly({"/bin/systemctl", "systemctl", verb}) == 0;
+        const bool ok = paths::run_quietly({"/bin/systemctl", verb}) == 0;
         if (!ok)
             *error = "system manager rejected the power action";
         if (ok) {

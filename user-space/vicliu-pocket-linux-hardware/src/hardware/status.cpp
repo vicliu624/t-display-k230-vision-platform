@@ -43,8 +43,8 @@ bool any_alsa_card()
 bool external_i2s_output_control()
 {
     return paths::executable("/usr/bin/amixer") &&
-        paths::run_quietly({"/usr/bin/amixer", "amixer", "cget",
-                            "name=External I2S Output Switch"}) == 0;
+        paths::run_quietly({"/usr/bin/amixer", "cget",
+                             "name=External I2S Output Switch"}) == 0;
 }
 
 std::string speaker_route()
