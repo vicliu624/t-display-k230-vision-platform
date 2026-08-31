@@ -144,6 +144,19 @@ bool read_response(int descriptor, std::string *response, std::string *error)
     return true;
 }
 
+bool send_expect_ok(int descriptor, const char *command, std::string *response, std::string *error)
+{
+    const std::size_t response_start = response->size();
+    if (!write_all(descriptor, command, std::strlen(command), error) ||
+        !read_response(descriptor, response, error))
+        return false;
+    if (response->find("OK", response_start) != std::string::npos)
+        return true;
+    if (error->empty())
+        *error = std::string("nRF9151 rejected ") + command;
+    return false;
+}
+
 }  // namespace
 
 Nrf9151ProbeResult probe_nrf9151()
@@ -192,6 +205,45 @@ Nrf9151ProbeResult probe_nrf9151()
         result.error = std::move(error);
     if (result.response.empty() && result.error.empty())
         result.error = "nRF9151 returned no bytes after an 8 second startup wait and four identity/AT queries";
+    return result;
+}
+
+Nrf9151GnssResult set_nrf9151_gnss(bool enabled)
+{
+    Nrf9151GnssResult result;
+    if (paths::read(kProfilePath) != "nrf9151") {
+        result.error = "nRF9151 GNSS command requires the nrf9151 radio profile";
+        return result;
+    }
+    const int descriptor = open(kUartDevice, O_RDWR | O_NOCTTY | O_CLOEXEC | O_NONBLOCK);
+    if (descriptor < 0) {
+        result.error = std::string("open ") + kUartDevice + ": " + std::strerror(errno);
+        return result;
+    }
+    result.uart_opened = true;
+    std::string error;
+    if (!configure_uart(descriptor, &error)) {
+        close(descriptor);
+        result.error = std::move(error);
+        return result;
+    }
+    result.uart_configured = true;
+
+    if (enabled) {
+        // Nordic documents this ordering: transition to offline mode, declare
+        // the LTE-M + GNSS system mode, then activate GNSS without activating
+        // LTE.  CFUN=4 is intentionally used instead of CFUN=0 so a normal
+        // touch toggle does not force a non-volatile settings write.
+        const bool ok = send_expect_ok(descriptor, "AT+CFUN=4\r\n", &result.response, &error) &&
+            send_expect_ok(descriptor, "AT%XSYSTEMMODE=1,0,1,0\r\n", &result.response, &error);
+        result.mode_configured = ok;
+        result.gnss_active = ok && send_expect_ok(descriptor, "AT+CFUN=31\r\n", &result.response, &error);
+    } else {
+        result.gnss_active = false;
+        result.mode_configured = send_expect_ok(descriptor, "AT+CFUN=30\r\n", &result.response, &error);
+    }
+    close(descriptor);
+    result.error = std::move(error);
     return result;
 }
 

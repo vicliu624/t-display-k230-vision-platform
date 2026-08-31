@@ -28,6 +28,13 @@ done
 # warm-paper/orange visual language rather than importing Raspberry Pi styling.
 /usr/local/bin/tdvp-wf-panel-session &
 
+# The touch control center is an optional, independent layer-shell client. It
+# must not supervise, replace or restart the existing desktop components; if a
+# user uninstalls it, Labwc, PCManFM and wf-panel-pi continue unchanged.
+if [ -x /usr/bin/tdvp-quick-settings ]; then
+	/usr/bin/tdvp-quick-settings &
+fi
+
 # Board-level key policy: the TCA8418 Menu key opens or closes Raspberry Pi's
 # existing smenu component through its documented wfpanelctl command.
 # It is a proper Wayland surface, unlike the currently affected GTK3 panel popup.

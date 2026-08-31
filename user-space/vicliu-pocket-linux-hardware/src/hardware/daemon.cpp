@@ -1,6 +1,7 @@
 #include "contract.hpp"
 
 #include "paths.hpp"
+#include "quick_settings_service.hpp"
 
 #include <chrono>
 #include <cerrno>
@@ -43,13 +44,23 @@ int run_daemon()
     std::signal(SIGINT, stop);
     std::signal(SIGTERM, stop);
 
+    QuickSettingsService quick_settings;
+    (void)quick_settings.initialise();
+
     while (keep_running) {
         if (ensure_runtime_directory()) {
-            const State state = collect_state();
+            State state = collect_state();
+            quick_settings.refresh(&state);
             (void)paths::write_atomically("/run/vicliu-pocket-linux-hardware/status.env", serialize(state));
         }
-        for (int second = 0; keep_running && second < 2; ++second)
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+        // The status contract is refreshed at a deliberately low rate, but
+        // the optional touch control center must not make a user wait two
+        // seconds for a brightness or radio request.  Poll the local socket
+        // in short idle slices without creating another resident process.
+        for (int slice = 0; keep_running && slice < 20; ++slice) {
+            quick_settings.process_requests();
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
     return 0;
 }

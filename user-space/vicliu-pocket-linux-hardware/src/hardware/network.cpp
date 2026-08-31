@@ -40,6 +40,10 @@ void append_network_state(State *state)
     put(state, "wifi_runtime", network_manager);
     put(state, "wifi_link", wifi_carrier);
     put(state, "wifi_available", wifi_device && network_manager);
+    // NetworkManager is the radio authority.  Expose a conservative enabled
+    // state to lightweight clients; link remains the separate connection
+    // signal and must never be inferred from radio availability.
+    put(state, "wifi_enabled", wifi_device && network_manager);
     state->emplace("wifi_operstate", paths::read("/sys/class/net/wlan0/operstate"));
 
     bool ethernet_device = false;

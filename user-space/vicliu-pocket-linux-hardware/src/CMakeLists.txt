@@ -15,6 +15,7 @@ add_library(vpl-hardware-core STATIC
     hardware/network.cpp
     hardware/nrf9151.cpp
     hardware/paths.cpp
+    hardware/quick_settings_service.cpp
     hardware/status.cpp
 )
 target_compile_features(vpl-hardware-core PUBLIC cxx_std_17)
