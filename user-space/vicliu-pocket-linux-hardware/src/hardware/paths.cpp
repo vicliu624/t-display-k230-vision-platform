@@ -6,6 +6,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <array>
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -168,6 +170,61 @@ int run_quietly(const std::vector<std::string> &arguments)
     while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
     }
     return WIFEXITED(status) ? WEXITSTATUS(status) : 127;
+}
+
+std::string run_capture(const std::vector<std::string> &arguments, int *exit_status)
+{
+    if (exit_status != nullptr)
+        *exit_status = 127;
+    if (arguments.empty())
+        return {};
+    int pipe_fds[2] {};
+    if (pipe(pipe_fds) != 0)
+        return {};
+    const pid_t child = fork();
+    if (child < 0) {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        return {};
+    }
+    if (child == 0) {
+        close(pipe_fds[0]);
+        (void)dup2(pipe_fds[1], STDOUT_FILENO);
+        (void)dup2(pipe_fds[1], STDERR_FILENO);
+        if (pipe_fds[1] > STDERR_FILENO)
+            close(pipe_fds[1]);
+        std::vector<char *> argv;
+        argv.reserve(arguments.size() + 1);
+        for (const std::string &argument : arguments)
+            argv.push_back(const_cast<char *>(argument.c_str()));
+        argv.push_back(nullptr);
+        execv(argv[0], argv.data());
+        _exit(127);
+    }
+
+    close(pipe_fds[1]);
+    constexpr std::size_t maximum_output = 4096;
+    std::string output;
+    std::array<char, 512> buffer {};
+    for (;;) {
+        const ssize_t count = ::read(pipe_fds[0], buffer.data(), buffer.size());
+        if (count == 0)
+            break;
+        if (count < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        const std::size_t remaining = maximum_output - output.size();
+        output.append(buffer.data(), std::min(remaining, static_cast<std::size_t>(count)));
+    }
+    close(pipe_fds[0]);
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
+    }
+    if (exit_status != nullptr)
+        *exit_status = WIFEXITED(status) ? WEXITSTATUS(status) : 127;
+    return output;
 }
 
 bool service_active(const std::string &unit)

@@ -40,17 +40,22 @@ bool any_alsa_card()
     return !cards.empty() && cards.find("no soundcards") == std::string::npos;
 }
 
-bool external_i2s_output_control()
+std::string external_i2s_route()
 {
-    return paths::executable("/usr/bin/amixer") &&
-        paths::run_quietly({"/usr/bin/amixer", "cget",
-                             "name=External I2S Output Switch"}) == 0;
-}
-
-std::string speaker_route()
-{
-    const std::string route = paths::read("/run/vicliu-pocket-linux-hardware/audio-route");
-    return route == "external" || route == "internal" ? route : "unknown";
+    if (!paths::executable("/usr/bin/amixer"))
+        return {};
+    int status = 127;
+    const std::string control = paths::run_capture(
+        {"/usr/bin/amixer", "cget", "name=External I2S Output Switch"}, &status);
+    if (status != 0)
+        return {};
+    if (control.find("values=on") != std::string::npos ||
+        control.find("values=1") != std::string::npos)
+        return "external";
+    if (control.find("values=off") != std::string::npos ||
+        control.find("values=0") != std::string::npos)
+        return "internal";
+    return "unknown";
 }
 
 bool any_camera()
@@ -218,8 +223,9 @@ State collect_state()
     state["display_brightness_percent"] = backlight_percent({"display", "panel"});
 
     const bool audio = any_alsa_card();
-    const bool external_i2s = audio && external_i2s_output_control();
-    const std::string route = external_i2s ? speaker_route() : "unavailable";
+    const std::string managed_route = audio ? external_i2s_route() : std::string {};
+    const bool external_i2s = !managed_route.empty();
+    const std::string route = external_i2s ? managed_route : "unavailable";
     transport(&state, "audio", audio, audio, audio);
     transport(&state, "microphone", audio, audio, audio);
     // An ALSA card only proves that the internal K230 codec registered. The

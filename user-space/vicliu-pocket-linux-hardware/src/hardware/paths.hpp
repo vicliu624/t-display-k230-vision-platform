@@ -16,5 +16,6 @@ std::vector<std::string> children(const std::string &path);
 bool service_active(const std::string &unit);
 int run(const std::vector<std::string> &arguments);
 int run_quietly(const std::vector<std::string> &arguments);
+std::string run_capture(const std::vector<std::string> &arguments, int *exit_status = nullptr);
 
 }  // namespace vpl::hardware::paths
