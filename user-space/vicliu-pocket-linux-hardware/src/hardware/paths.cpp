@@ -177,7 +177,7 @@ bool service_active(const std::string &unit)
     // as absent merely because the distribution did not create a usrmerge
     // compatibility path.
     const char *systemctl = executable("/bin/systemctl") ? "/bin/systemctl" : "/usr/bin/systemctl";
-    return run_quietly({systemctl, "systemctl", "is-active", "--quiet", unit}) == 0;
+    return run_quietly({systemctl, "is-active", "--quiet", unit}) == 0;
 }
 
 }  // namespace vpl::hardware::paths
