@@ -55,6 +55,7 @@ require_content() {
 packages=(
 	gtk-layer-shell
 	labwc
+	swaylock
 	libfm-extra
 	libmenu-cache
 	libfm
@@ -90,6 +91,7 @@ required_config=(
 	BR2_PACKAGE_LIBGTK3_WAYLAND
 	BR2_PACKAGE_GTK_LAYER_SHELL
 	BR2_PACKAGE_LABWC
+	BR2_PACKAGE_SWAYLOCK
 	BR2_PACKAGE_GTKMM3
 	BR2_PACKAGE_LIBFM_EXTRA
 	BR2_PACKAGE_LIBMENU_CACHE
@@ -191,6 +193,12 @@ if grep -Fq 'tdvp-external-audio.service' "${PROJECT_DIR}/buildroot/k230-sdk-ove
 	fail 'external audio route service must not be enabled at boot'
 fi
 require_content "${HARDWARE_SOURCE}/hardware/status.cpp" 'speaker_amplifier_owner'
+require_content "${HARDWARE_SOURCE}/hardware/status.cpp" 'pcm_playback_state'
+require_content "${HARDWARE_SOURCE}/hardware/quick_settings_service.cpp" 'speaker-volume'
+require_content "${HARDWARE_SOURCE}/hardware/quick_settings_service.cpp" 'speaker-mute'
+require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/src/swaylock"
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/swaylock.mk" '-Dpam=enabled'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/src/swaylock" 'auth       required   pam_unix.so'
 require_content "${DESKTOP_SOURCE}/tdvp-gdk-committed-compat.c" 'g_signal_handler_disconnect'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '-lglib-2.0'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '/usr/lib/tdvp-gdk-committed-compat.so'

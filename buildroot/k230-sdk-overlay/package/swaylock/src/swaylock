@@ -1,0 +1,7 @@
+# TDVP's local authenticated Wayland lock service.
+#
+# This intentionally delegates password verification to the existing PAM
+# stack instead of using an unauthenticated overlay or direct shadow access.
+auth       required   pam_unix.so
+account    required   pam_unix.so
+session    required   pam_unix.so

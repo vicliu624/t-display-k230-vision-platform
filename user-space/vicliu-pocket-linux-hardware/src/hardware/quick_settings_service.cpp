@@ -349,6 +349,17 @@ bool QuickSettingsService::handle_request(const std::string &raw_request, State 
             ok = set_control(key == "display-brightness" ? "display-brightness" : "keyboard-brightness", value) == 0;
             if (!ok)
                 *error = "backlight control rejected the requested value";
+        } else if (key == "speaker-volume" && parse_percent(value)) {
+            ok = paths::run_quietly(
+                {"/usr/bin/amixer", "-c", "0", "sset", "PCM", value + "%"}) == 0;
+            if (!ok)
+                *error = "physical speaker volume control failed";
+        } else if (key == "speaker-mute" &&
+                   (value == "mute" || value == "unmute" || value == "toggle")) {
+            ok = paths::run_quietly(
+                {"/usr/bin/amixer", "-c", "0", "sset", "PCM", value}) == 0;
+            if (!ok)
+                *error = "physical speaker mute control failed";
         } else if (key == "speaker-route" && (value == "external" || value == "internal")) {
             ok = paths::run_quietly({"/usr/local/bin/tdvp-audio-route", value}) == 0;
             if (!ok)
@@ -372,14 +383,8 @@ bool QuickSettingsService::handle_request(const std::string &raw_request, State 
         return true;
     }
     if (request == "SYSTEM lock") {
-        const bool ok = paths::run_quietly({"/usr/bin/loginctl", "lock-sessions"}) == 0;
-        if (!ok)
-            *error = "the active desktop session does not provide screen locking";
-        if (ok) {
-            *state = collect_state();
-            refresh(state);
-        }
-        return ok;
+        *error = "screen locking is an authenticated Wayland session action";
+        return false;
     }
     if (request == "SYSTEM reboot" || request == "SYSTEM poweroff") {
         const char *verb = request == "SYSTEM reboot" ? "reboot" : "poweroff";

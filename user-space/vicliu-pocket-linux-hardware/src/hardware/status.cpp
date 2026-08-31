@@ -58,6 +58,45 @@ std::string external_i2s_route()
     return "unknown";
 }
 
+std::string pcm_playback_state()
+{
+    if (!paths::executable("/usr/bin/amixer"))
+        return {};
+    int status = 127;
+    const std::string control = paths::run_capture(
+        {"/usr/bin/amixer", "-c", "0", "sget", "PCM"}, &status);
+    return status == 0 ? control : std::string {};
+}
+
+std::optional<int> pcm_volume_percent(const std::string &playback)
+{
+    for (std::size_t bracket = playback.find('['); bracket != std::string::npos;
+         bracket = playback.find('[', bracket + 1)) {
+        std::size_t cursor = bracket + 1;
+        if (cursor >= playback.size() || playback[cursor] < '0' || playback[cursor] > '9')
+            continue;
+        int percent = 0;
+        while (cursor < playback.size() && playback[cursor] >= '0' && playback[cursor] <= '9') {
+            percent = percent * 10 + (playback[cursor] - '0');
+            if (percent > 100)
+                break;
+            ++cursor;
+        }
+        if (percent <= 100 && cursor < playback.size() && playback[cursor] == '%')
+            return percent;
+    }
+    return std::nullopt;
+}
+
+std::optional<bool> pcm_muted(const std::string &playback)
+{
+    if (playback.find("[off]") != std::string::npos)
+        return true;
+    if (playback.find("[on]") != std::string::npos)
+        return false;
+    return std::nullopt;
+}
+
 bool any_camera()
 {
     for (const std::string &entry : paths::children("/sys/class/video4linux")) {
@@ -223,6 +262,9 @@ State collect_state()
     state["display_brightness_percent"] = backlight_percent({"display", "panel"});
 
     const bool audio = any_alsa_card();
+    const std::string pcm_playback = audio ? pcm_playback_state() : std::string {};
+    const std::optional<int> volume_percent = pcm_volume_percent(pcm_playback);
+    const std::optional<bool> muted = pcm_muted(pcm_playback);
     const std::string managed_route = audio ? external_i2s_route() : std::string {};
     const bool external_i2s = !managed_route.empty();
     const std::string route = external_i2s ? managed_route : "unavailable";
@@ -236,6 +278,9 @@ State collect_state()
     state["speaker_route"] = route;
     state["speaker_route_control"] = external_i2s ? "External I2S Output Switch" : "";
     state["speaker_amplifier_owner"] = external_i2s ? "asoc-k230-inno" : "";
+    state["volume_percent"] = volume_percent ? std::to_string(*volume_percent) : "";
+    put(&state, "muted", muted.value_or(false));
+    put(&state, "audio_volume_control_available", volume_percent.has_value() && muted.has_value());
 
     const bool camera = any_camera();
     transport(&state, "camera", camera, camera, camera);

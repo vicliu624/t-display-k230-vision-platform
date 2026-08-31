@@ -1,0 +1,18 @@
+config BR2_PACKAGE_SWAYLOCK
+	bool "swaylock"
+	depends on BR2_USE_MMU
+	depends on BR2_PACKAGE_LINUX_PAM
+	select BR2_PACKAGE_CAIRO
+	select BR2_PACKAGE_LIBXKBCOMMON
+	select BR2_PACKAGE_WAYLAND
+	select BR2_PACKAGE_WAYLAND_PROTOCOLS
+	help
+	  Swaylock is a small Wayland session-lock client. Labwc 0.8.4 supports
+	  ext-session-lock, so this provides a real authenticated screen lock for
+	  TDVP Quick Settings without a GNOME desktop component or a permanent
+	  background process.
+
+	  https://github.com/swaywm/swaylock
+
+comment "swaylock needs an MMU and Linux PAM"
+	depends on !BR2_USE_MMU || !BR2_PACKAGE_LINUX_PAM

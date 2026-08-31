@@ -50,6 +50,7 @@ register_package tdvp-dejavu-fonts
 # top-level package menu. Register it here so the profile's explicit Labwc
 # selection reaches Kconfig.
 register_package labwc
+register_package swaylock 1
 register_package gtk-layer-shell
 register_package gtkmm3
 register_package libfm-extra
