@@ -51,6 +51,7 @@ register_package tdvp-dejavu-fonts
 # selection reaches Kconfig.
 register_package labwc
 register_package swaylock 1
+register_package tdvp-quick-settings
 register_package gtk-layer-shell
 register_package gtkmm3
 register_package libfm-extra

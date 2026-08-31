@@ -56,6 +56,7 @@ packages=(
 	gtk-layer-shell
 	labwc
 	swaylock
+	tdvp-quick-settings
 	libfm-extra
 	libmenu-cache
 	libfm
@@ -92,6 +93,7 @@ required_config=(
 	BR2_PACKAGE_GTK_LAYER_SHELL
 	BR2_PACKAGE_LABWC
 	BR2_PACKAGE_SWAYLOCK
+	BR2_PACKAGE_TDVP_QUICK_SETTINGS
 	BR2_PACKAGE_GTKMM3
 	BR2_PACKAGE_LIBFM_EXTRA
 	BR2_PACKAGE_LIBMENU_CACHE
@@ -199,6 +201,8 @@ require_content "${HARDWARE_SOURCE}/hardware/quick_settings_service.cpp" 'speake
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/src/swaylock"
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/swaylock.mk" '-Dpam=enabled'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/src/swaylock" 'auth       required   pam_unix.so'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'TDVP_QUICK_SETTINGS_VERSION = 0.1.1'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'vicliu624,tdvp-quick-settings'
 require_content "${DESKTOP_SOURCE}/tdvp-gdk-committed-compat.c" 'g_signal_handler_disconnect'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '-lglib-2.0'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '/usr/lib/tdvp-gdk-committed-compat.so'
@@ -229,6 +233,7 @@ fi
 require_content "${DESKTOP_SOURCE}/autostart" '/usr/local/bin/tdvp-pcmanfm-desktop-session &'
 require_content "${DESKTOP_SOURCE}/autostart" '/usr/local/bin/tdvp-wf-panel-session &'
 require_content "${DESKTOP_SOURCE}/autostart" '/usr/local/bin/tdvp-key-bridge &'
+require_content "${DESKTOP_SOURCE}/autostart" '/usr/bin/tdvp-quick-settings &'
 require_content "${DESKTOP_SOURCE}/tdvp-key-bridge.c" 'event.code == KEY_MENU && event.value == 1'
 require_content "${DESKTOP_SOURCE}/tdvp-key-bridge.c" 'TDVP_KEYBOARD_NAME "tca8418"'
 require_content "${DESKTOP_SOURCE}/tdvp-key-bridge.c" 'MENU_DEBOUNCE_MS 450'
@@ -385,6 +390,7 @@ if [ "${PATCH_ONLY}" = "1" ]; then
 	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/autostart" '/usr/local/bin/tdvp-wf-panel-session &'
 	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/autostart" '/usr/local/bin/tdvp-pcmanfm-desktop-session &'
 	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/autostart" '/usr/local/bin/tdvp-key-bridge &'
+	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/autostart" '/usr/bin/tdvp-quick-settings &'
 	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-key-bridge.c" 'event.code == KEY_MENU && event.value == 1'
 	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-key-bridge.c" 'MENU_DEBOUNCE_MS 450'
 	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-key-bridge.c" 'toggle_panel_menu(void)'
