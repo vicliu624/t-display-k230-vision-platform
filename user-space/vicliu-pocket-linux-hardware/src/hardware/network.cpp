@@ -28,6 +28,23 @@ bool network_manager_service()
     return paths::service_active("NetworkManager.service");
 }
 
+bool wifi_radio_enabled()
+{
+    bool wlan_rfkill_found = false;
+    for (const std::string &entry : paths::children("/sys/class/rfkill")) {
+        const std::string base = "/sys/class/rfkill/" + entry;
+        if (paths::read(base + "/type") != "wlan")
+            continue;
+        wlan_rfkill_found = true;
+        if (paths::read(base + "/state") == "1")
+            return true;
+    }
+    // Some USB Wi-Fi drivers do not expose a dedicated rfkill node.  In that
+    // case availability is still the only kernel-level signal; NetworkManager
+    // owns the actual radio policy and the UI treats the state as enabled.
+    return !wlan_rfkill_found;
+}
+
 }  // namespace
 
 void append_network_state(State *state)
@@ -40,10 +57,10 @@ void append_network_state(State *state)
     put(state, "wifi_runtime", network_manager);
     put(state, "wifi_link", wifi_carrier);
     put(state, "wifi_available", wifi_device && network_manager);
-    // NetworkManager is the radio authority.  Expose a conservative enabled
-    // state to lightweight clients; link remains the separate connection
-    // signal and must never be inferred from radio availability.
-    put(state, "wifi_enabled", wifi_device && network_manager);
+    // Radio state comes from the kernel rfkill class when the driver exposes
+    // it.  Link remains a separate signal and must never be inferred from
+    // radio availability.
+    put(state, "wifi_enabled", wifi_device && network_manager && wifi_radio_enabled());
     state->emplace("wifi_operstate", paths::read("/sys/class/net/wlan0/operstate"));
 
     bool ethernet_device = false;

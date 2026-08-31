@@ -2,6 +2,7 @@
 
 #include "paths.hpp"
 
+#include <cctype>
 #include <string>
 
 namespace vpl::hardware {
@@ -9,9 +10,17 @@ namespace {
 
 bool input_named(const std::string &needle)
 {
+    std::string lowered_needle;
+    lowered_needle.reserve(needle.size());
+    for (const char character : needle)
+        lowered_needle += static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
     for (const std::string &entry : paths::children("/sys/class/input")) {
         const std::string name = paths::read("/sys/class/input/" + entry + "/device/name");
-        if (name.find(needle) != std::string::npos)
+        std::string lowered_name;
+        lowered_name.reserve(name.size());
+        for (const char character : name)
+            lowered_name += static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+        if (lowered_name.find(lowered_needle) != std::string::npos)
             return true;
     }
     return false;

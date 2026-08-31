@@ -172,7 +172,12 @@ int run_quietly(const std::vector<std::string> &arguments)
 
 bool service_active(const std::string &unit)
 {
-    return run_quietly({"/usr/bin/systemctl", "systemctl", "is-active", "--quiet", unit}) == 0;
+    // Buildroot's systemd tools may live under /bin rather than /usr/bin.
+    // Resolve the installed location instead of reporting an active service
+    // as absent merely because the distribution did not create a usrmerge
+    // compatibility path.
+    const char *systemctl = executable("/bin/systemctl") ? "/bin/systemctl" : "/usr/bin/systemctl";
+    return run_quietly({systemctl, "systemctl", "is-active", "--quiet", unit}) == 0;
 }
 
 }  // namespace vpl::hardware::paths
