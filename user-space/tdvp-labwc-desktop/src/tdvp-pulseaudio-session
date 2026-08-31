@@ -12,8 +12,28 @@ fi
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${HOME}/.cache/wayland-runtime}"
 export PULSE_SERVER="unix:${XDG_RUNTIME_DIR}/pulse/native"
 
+start_supervisor() {
+	# The ALSA sink runs in PulseAudio's I/O thread.  If that thread ever exits,
+	# keep the desktop's authenticated server contract intact by restarting the
+	# per-user daemon with a bounded backoff.  The server stays in the foreground
+	# of this private supervisor, while this launcher returns once the socket is
+	# available to the panel and ordinary applications.
+	(
+		delay=1
+		while :; do
+			/usr/bin/pulseaudio --daemonize=no --exit-idle-time=-1 --log-target=journal &
+			server_pid=$!
+			wait "$server_pid" || true
+			sleep "$delay"
+			if [ "$delay" -lt 8 ]; then
+				delay=$((delay * 2))
+			fi
+		done
+	) >/dev/null 2>&1 &
+}
+
 if ! /usr/bin/pactl info >/dev/null 2>&1; then
-	/usr/bin/pulseaudio --daemonize=yes --exit-idle-time=-1 --log-target=journal
+	start_supervisor
 fi
 
 # Do not launch wf-panel-pi until its volume backend can authenticate.  The

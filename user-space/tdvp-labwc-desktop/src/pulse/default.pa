@@ -1,0 +1,44 @@
+#!/usr/bin/pulseaudio -nF
+#
+# K230 user-session PulseAudio startup. The board has one supported playback
+# PCM (hw:0,0). Load that sink explicitly so the K230 timing contract reaches
+# module-alsa-sink directly; module-udev-detect/card profiles did not
+# consistently propagate tsched=0 to the sink on this driver.
+
+.fail
+
+load-module module-device-restore
+load-module module-stream-restore
+load-module module-card-restore
+load-module module-augment-properties
+load-module module-switch-on-port-available
+
+load-module module-alsa-sink device=hw:0,0 tsched=0 fragments=4 fragment_size=1024 sink_name=tdvp_k230_output sink_properties="device.description='TDVP K230 Output'"
+
+.ifexists module-jackdbus-detect.so
+.nofail
+load-module module-jackdbus-detect channels=2
+.fail
+.endif
+
+.ifexists module-esound-protocol-unix.so
+load-module module-esound-protocol-unix
+.endif
+load-module module-native-protocol-unix
+
+load-module module-default-device-restore
+load-module module-always-sink
+load-module module-intended-roles
+load-module module-suspend-on-idle
+
+.ifexists module-console-kit.so
+load-module module-console-kit
+.endif
+.ifexists module-systemd-login.so
+load-module module-systemd-login
+.endif
+
+load-module module-position-event-sounds
+load-module module-role-cork
+load-module module-filter-heuristics
+load-module module-filter-apply

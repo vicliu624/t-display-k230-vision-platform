@@ -55,6 +55,10 @@ define TDVP_LABWC_DESKTOP_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/local/bin/tdvp-wf-panel-session
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-pulseaudio-session \
 		$(TARGET_DIR)/usr/local/bin/tdvp-pulseaudio-session
+	$(INSTALL) -D -m 0644 $(@D)/pulse/daemon.conf \
+		$(TARGET_DIR)/etc/pulse/daemon.conf
+	$(INSTALL) -D -m 0644 $(@D)/pulse/default.pa \
+		$(TARGET_DIR)/etc/pulse/default.pa
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-panel-menu \
 		$(TARGET_DIR)/usr/local/bin/tdvp-panel-menu
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-key-bridge \
