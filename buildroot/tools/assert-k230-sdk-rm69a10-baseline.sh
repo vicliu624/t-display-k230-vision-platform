@@ -80,6 +80,7 @@ packages=(
 	tdvp-kpu-acceptance
 	tdvp-labwc-desktop
 	tdvp-wayland-acceptance
+	tdvp-vglite-acceptance
 	vicliu-pocket-linux-hardware
 )
 
@@ -146,6 +147,8 @@ required_config=(
 	BR2_PACKAGE_TDVP_DISPLAY_SMOKE
 	BR2_PACKAGE_TDVP_KEYBOARD_LAYOUT
 	BR2_PACKAGE_TDVP_WAYLAND_ACCEPTANCE
+	BR2_PACKAGE_TDVP_VGLITE_ACCEPTANCE
+	BR2_PACKAGE_VG_LITE
 )
 
 require_file "${MANIFEST}"
@@ -175,6 +178,9 @@ NM_CONNECTION_EDITOR_WAYLAND_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/pa
 EXTERNAL_I2S_DTS_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/linux/0051-tdvp-riscv-dts-canaan-add-external-i2s-amp.patch"
 EXTERNAL_I2S_ASOC_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/linux/0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch"
 HARDWARE_SOURCE="${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src"
+VENDOR_VG_LITE_PACKAGE="${PROJECT_DIR}/vendor/k230_linux_sdk/buildroot-overlay/package/vg_lite"
+require_file "${VENDOR_VG_LITE_PACKAGE}/Config.in"
+require_file "${VENDOR_VG_LITE_PACKAGE}/vg_lite.mk"
 require_file "${EXTERNAL_I2S_DTS_PATCH}"
 require_content "${EXTERNAL_I2S_DTS_PATCH}" 'canaan,external-i2s-output-default;'
 require_content "${EXTERNAL_I2S_DTS_PATCH}" 'amp-shutdown-gpios = <&gpio1_ports 2 GPIO_ACTIVE_HIGH>;'

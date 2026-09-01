@@ -96,6 +96,12 @@ BR2_PACKAGE_OPENSSH_SERVER=y
 BR2_PACKAGE_OPENSSH_KEY_UTILS=y
 BR2_PACKAGE_OPENSSH_SANDBOX=y
 BR2_PACKAGE_LIBDRM=y
+# The kernel already carries the K230 VGLite driver.  Install only its matched
+# userspace library and a bounded off-screen acceptance probe; Labwc remains on
+# Pixman until that probe has passed on hardware and the wlroots renderer fork
+# is ready.
+BR2_PACKAGE_VG_LITE=y
+BR2_PACKAGE_TDVP_VGLITE_ACCEPTANCE=y
 BR2_PACKAGE_MESA3D=y
 BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_SWRAST=y
 BR2_PACKAGE_MESA3D_OPENGL_EGL=y

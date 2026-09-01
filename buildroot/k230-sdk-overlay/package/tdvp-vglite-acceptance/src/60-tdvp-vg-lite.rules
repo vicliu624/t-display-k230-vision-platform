@@ -1,0 +1,5 @@
+# The K230 VGLite driver exposes a virtual class device rather than a PCI/DRM
+# node.  Match its actual subsystem so that only the VGLite device becomes
+# usable by the normal Labwc session.  Do not grant this to every char device
+# named vg_lite from an unrelated driver.
+SUBSYSTEM=="vg_lite_class", KERNEL=="vg_lite", GROUP="render", MODE="0660"

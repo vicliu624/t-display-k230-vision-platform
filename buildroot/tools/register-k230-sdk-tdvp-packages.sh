@@ -46,6 +46,7 @@ register_package() {
 }
 
 register_package tdvp-dejavu-fonts
+register_package vg_lite
 # The vendor SDK carries labwc's recipe but omits it from its synchronized
 # top-level package menu. Register it here so the profile's explicit Labwc
 # selection reaches Kconfig.
@@ -80,6 +81,7 @@ register_package vicliu-pocket-linux-hardware 1
 register_package tdvp-display-smoke 1
 register_package tdvp-keyboard-layout 1
 register_package tdvp-wayland-acceptance 1
+register_package tdvp-vglite-acceptance 1
 
 # The vendor SDK sync target may replace package/Config.in with the upstream
 # Buildroot copy. Insert our own small, idempotent section immediately before
