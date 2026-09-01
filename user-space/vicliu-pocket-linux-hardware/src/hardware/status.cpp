@@ -49,11 +49,14 @@ std::string external_i2s_route()
         {"/usr/bin/amixer", "cget", "name=External I2S Output Switch"}, &status);
     if (status != 0)
         return {};
-    if (control.find("values=on") != std::string::npos ||
-        control.find("values=1") != std::string::npos)
+    // `amixer cget` first reports the control's channel count as
+    // `values=1`; that is not the boolean state. Only the subsequent
+    // `: values=on/off` line is authoritative.
+    if (control.find(": values=on") != std::string::npos ||
+        control.find(": values=1") != std::string::npos)
         return "external";
-    if (control.find("values=off") != std::string::npos ||
-        control.find("values=0") != std::string::npos)
+    if (control.find(": values=off") != std::string::npos ||
+        control.find(": values=0") != std::string::npos)
         return "internal";
     return "unknown";
 }

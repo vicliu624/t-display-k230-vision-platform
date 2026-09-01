@@ -201,7 +201,7 @@ require_content "${HARDWARE_SOURCE}/hardware/quick_settings_service.cpp" 'speake
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/src/swaylock"
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/swaylock.mk" '-Dpam=enabled'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/src/swaylock" 'auth       required   pam_unix.so'
-require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'TDVP_QUICK_SETTINGS_VERSION = 0.1.7'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'TDVP_QUICK_SETTINGS_VERSION = 0.1.8'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'vicliu624,tdvp-quick-settings'
 require_content "${DESKTOP_SOURCE}/tdvp-gdk-committed-compat.c" 'g_signal_handler_disconnect'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '-lglib-2.0'

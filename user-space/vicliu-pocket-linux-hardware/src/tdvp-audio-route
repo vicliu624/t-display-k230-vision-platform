@@ -33,8 +33,10 @@ EOF
 [ -x "${AMIXER}" ] || fail 'amixer is unavailable'
 
 card_number() {
-	sed -n '/\[K230_I2S_INNO/ { s/^[[:space:]]*\([0-9][0-9]*\).*/\1/; p; q; }' \
-		/proc/asound/cards 2>/dev/null || true
+	# The machine driver model remains K230_I2S_INNO, but ALSA's short card
+	# identifier is kernel-version dependent (the target currently reports
+	# K230I2SINNO). Match the stable model text instead of a presentation name.
+	awk '/K230_I2S_INNO/ { print $1; exit }' /proc/asound/cards 2>/dev/null || true
 }
 
 wait_for_card() {
@@ -62,14 +64,14 @@ write_route() {
 control_is() {
 	card="$1"
 	expected="$2"
+	actual="$("${AMIXER}" -c "${card}" cget "name=${CONTROL}" 2>/dev/null | \
+		sed -n 's/^[[:space:]]*: values=//p' | sed -n '1p')"
 	case "${expected}" in
 		external)
-			"${AMIXER}" -c "${card}" cget "name=${CONTROL}" 2>/dev/null | \
-				grep -Eq 'values=(on|1)([[:space:]]|$)'
+			[ "${actual}" = "on" ] || [ "${actual}" = "1" ]
 			;;
 		internal)
-			"${AMIXER}" -c "${card}" cget "name=${CONTROL}" 2>/dev/null | \
-				grep -Eq 'values=(off|0)([[:space:]]|$)'
+			[ "${actual}" = "off" ] || [ "${actual}" = "0" ]
 			;;
 	esac
 }
