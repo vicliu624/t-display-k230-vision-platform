@@ -12,8 +12,44 @@
     </titlebar>
     <maximizedDecoration>titlebar</maximizedDecoration>
   </theme>
+  <!--
+       Workspaces are compositor-owned Labwc state.  Keep the number fixed for
+       the small TDVP display so touch edge navigation has a predictable end
+       rather than dynamically creating or wrapping desktops.
+  -->
+  <desktops>
+    <number>4</number>
+    <prefix>Workspace</prefix>
+    <popupTime>550</popupTime>
+  </desktops>
   <keyboard>
     <default />
+    <!-- Physical keyboard fallback for the same non-wrapping workspace model
+         used by the touchscreen edge gesture. -->
+    <keybind key="W-Left">
+      <action name="GoToDesktop" to="left" wrap="no" />
+    </keybind>
+    <keybind key="W-Right">
+      <action name="GoToDesktop" to="right" wrap="no" />
+    </keybind>
+    <keybind key="W-S-Left">
+      <action name="SendToDesktop" to="left" follow="no" wrap="no" />
+    </keybind>
+    <keybind key="W-S-Right">
+      <action name="SendToDesktop" to="right" follow="no" wrap="no" />
+    </keybind>
+    <keybind key="W-1">
+      <action name="GoToDesktop" to="1" wrap="no" />
+    </keybind>
+    <keybind key="W-2">
+      <action name="GoToDesktop" to="2" wrap="no" />
+    </keybind>
+    <keybind key="W-3">
+      <action name="GoToDesktop" to="3" wrap="no" />
+    </keybind>
+    <keybind key="W-4">
+      <action name="GoToDesktop" to="4" wrap="no" />
+    </keybind>
     <keybind key="W-Return">
       <action name="Execute" command="foot" />
     </keybind>

@@ -540,6 +540,10 @@ require_rootfs_content '/usr/local/bin/tdvp-terminal' 'PATH=/usr/local/sbin:/usr
 reject_fs_path "${ROOTFS}" '/usr/lib/systemd/system/tdvp-opkg-trust.service'
 reject_fs_path "${ROOTFS}" '/etc/systemd/system/multi-user.target.wants/tdvp-opkg-trust.service'
 require_fs_path "${ROOTFS}" '/usr/bin/labwc'
+# The desktop configuration alone is insufficient: the compositor binary must
+# contain the TDVP edge-swipe path which owns the gesture before it reaches a
+# client. This debug string is compiled from the successful switch path.
+require_rootfs_content '/usr/bin/labwc' 'tdvp workspace edge swipe:'
 require_fs_path "${ROOTFS}" '/usr/bin/swaylock'
 require_fs_path "${ROOTFS}" '/usr/bin/tdvp-quick-settings'
 require_fs_path "${ROOTFS}" '/usr/bin/wf-panel-pi'
@@ -743,6 +747,14 @@ require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Name>Games</Nam
 require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Category>Game</Category>'
 require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Menuname>Games</Menuname>'
 require_rootfs_content '/etc/xdg/labwc/rc.xml' '<default />'
+require_rootfs_content '/etc/xdg/labwc/rc.xml' '<number>4</number>'
+require_rootfs_content '/etc/xdg/labwc/rc.xml' '<prefix>Workspace</prefix>'
+require_rootfs_content '/etc/xdg/labwc/rc.xml' '<popupTime>550</popupTime>'
+require_rootfs_content '/etc/xdg/labwc/rc.xml' 'name="GoToDesktop" to="left" wrap="no"'
+require_rootfs_content '/etc/xdg/labwc/rc.xml' 'name="GoToDesktop" to="right" wrap="no"'
+require_rootfs_content '/etc/xdg/labwc/rc.xml' 'name="SendToDesktop" to="left" follow="no" wrap="no"'
+require_rootfs_content '/etc/xdg/labwc/rc.xml' 'name="SendToDesktop" to="right" follow="no" wrap="no"'
+require_rootfs_content '/etc/xdg/labwc/rc.xml' 'key="W-4"'
 require_rootfs_content '/usr/local/bin/tdvp-panel-menu' 'exec /bin/wfpanelctl smenu menu'
 require_rootfs_content '/usr/local/bin/tdvp-panel-menu' 'DBUS_SESSION_BUS_ADDRESS%%,guid=*'
 require_rootfs_content '/usr/lib/wf-panel-pi/libnetman.so' '/usr/bin/lp-connection-editor'

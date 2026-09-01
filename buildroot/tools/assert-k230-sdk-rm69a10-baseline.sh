@@ -173,6 +173,7 @@ GREETER_SOURCE="${PROJECT_DIR}/user-space/tdvp-greeter/src"
 GTK_GREET_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-gtkgreet/0001-tdvp-fixed-session-layout.patch"
 LABWC_LONG_PRESS_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/labwc/0001-tdvp-touch-long-press-emulates-right-click.patch"
 LABWC_MOUSE_EMULATION_POINTER_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/labwc/0002-tdvp-advertise-pointer-for-mouse-emulated-touch.patch"
+LABWC_WORKSPACE_EDGE_SWIPE_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/labwc/0003-tdvp-workspace-edge-swipe.patch"
 LIBGTK3_WAYLAND_TRANSFORM_PATCH="${PROJECT_DIR}/buildroot/patches/buildroot/0006-libgtk3-wayland-honor-output-transform.patch"
 NM_CONNECTION_EDITOR_WAYLAND_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/nm-connection-editor/0002-tdvp-wayland-drop-unused-gdkx-header.patch"
 EXTERNAL_I2S_DTS_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/linux/0051-tdvp-riscv-dts-canaan-add-external-i2s-amp.patch"
@@ -299,6 +300,10 @@ require_content "${LABWC_LONG_PRESS_PATCH}" 'cursor_emulate_button(touch_point->
 require_file "${LABWC_MOUSE_EMULATION_POINTER_PATCH}"
 require_content "${LABWC_MOUSE_EMULATION_POINTER_PATCH}" 'touch_uses_mouse_emulation(const struct input *input)'
 require_content "${LABWC_MOUSE_EMULATION_POINTER_PATCH}" 'caps |= WL_SEAT_CAPABILITY_POINTER;'
+require_file "${LABWC_WORKSPACE_EDGE_SWIPE_PATCH}"
+require_content "${LABWC_WORKSPACE_EDGE_SWIPE_PATCH}" '#define TDVP_WORKSPACE_SWIPE_EDGE_PX 72.0'
+require_content "${LABWC_WORKSPACE_EDGE_SWIPE_PATCH}" '#define TDVP_WORKSPACE_SWIPE_DISTANCE_RATIO 0.12'
+require_content "${LABWC_WORKSPACE_EDGE_SWIPE_PATCH}" 'workspaces_switch_to(target, /* update_focus */ true);'
 require_file "${LIBGTK3_WAYLAND_TRANSFORM_PATCH}"
 require_content "${LIBGTK3_WAYLAND_TRANSFORM_PATCH}" 'monitor->output_transform = transform;'
 require_content "${LIBGTK3_WAYLAND_TRANSFORM_PATCH}" 'case WL_OUTPUT_TRANSFORM_FLIPPED_270:'
@@ -428,6 +433,9 @@ if [ "${PATCH_ONLY}" = "1" ]; then
 	require_content "${STAGED_OVERLAY}/package/labwc/0001-tdvp-touch-long-press-emulates-right-click.patch" 'cursor_emulate_button(touch_point->seat, BTN_RIGHT,'
 	require_file "${STAGED_OVERLAY}/package/labwc/0002-tdvp-advertise-pointer-for-mouse-emulated-touch.patch"
 	require_content "${STAGED_OVERLAY}/package/labwc/0002-tdvp-advertise-pointer-for-mouse-emulated-touch.patch" 'caps |= WL_SEAT_CAPABILITY_POINTER;'
+	require_file "${STAGED_OVERLAY}/package/labwc/0003-tdvp-workspace-edge-swipe.patch"
+	require_content "${STAGED_OVERLAY}/package/labwc/0003-tdvp-workspace-edge-swipe.patch" '#define TDVP_WORKSPACE_SWIPE_EDGE_PX 72.0'
+	require_content "${STAGED_OVERLAY}/package/labwc/0003-tdvp-workspace-edge-swipe.patch" 'workspaces_switch_to(target, /* update_focus */ true);'
 	if grep -Fq '<mapToOutput>' "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/rc.xml"; then
 		fail 'staged desktop Labwc touch configuration must not remap the output'
 	fi

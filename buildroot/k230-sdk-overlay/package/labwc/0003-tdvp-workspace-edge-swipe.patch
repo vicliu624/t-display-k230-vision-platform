@@ -1,0 +1,285 @@
+From 683a9a0fd388f66948c0e75723ba2cd4a20fff7a Mon Sep 17 00:00:00 2001
+From: TDVP <tdvp@example.invalid>
+Date: Tue, 1 Sep 2026 15:15:37 +0800
+Subject: [PATCH] input: reserve touch edge swipes for virtual workspaces
+
+The T-Display K230 is a single-output touchscreen device. Its Labwc
+configuration deliberately enables mouseEmulation so regular desktop programs
+receive pointer events. A workspace gesture therefore has to be claimed by the
+compositor at touch-down: once a pointer press has reached a client, Wayland
+cannot safely retract that click or drag.
+
+Reserve one-finger contacts starting inside the left or right 72 logical
+pixels of a mouse-emulated touch output. The reserved sequence never produces
+touch or pointer events. A horizontal swipe switches through Labwc's native
+workspace state at release:
+
+  * left edge, move right: previous workspace
+  * right edge, move left: next workspace
+
+The gesture does not wrap at workspace boundaries. It is cancelled by a second
+contact, enough vertical travel, session lock, a wrong direction, or an
+insufficient distance/velocity. All non-reserved contacts preserve the
+existing mouse-emulation and long-press right-click paths.
+
+The thresholds are expressed in compositor layout pixels after Libinput
+calibration and wlroots output transforms. This keeps the gesture correct for
+the K230's rotated RM69A10 output without using raw touchscreen coordinates.
+
+---
+ src/input/touch.c | 186 ++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 182 insertions(+), 4 deletions(-)
+
+diff --git a/src/input/touch.c b/src/input/touch.c
+index 0627e14..81bc7bf 100644
+--- a/src/input/touch.c
++++ b/src/input/touch.c
+@@ -10,6 +10,7 @@
+ #include "labwc.h"
+ #include "config/mousebind.h"
+ #include "action.h"
++#include "workspaces.h"
+
+ /*
+  * Keep ordinary touch input responsive while providing the conventional
+@@ -20,6 +21,23 @@
+ #define TOUCH_LONG_PRESS_TIMEOUT_MS 650
+ #define TOUCH_LONG_PRESS_SLOP_PX 18.0
+
++/*
++ * The K230 has a single 1232x568 logical output. Keep this gesture in
++ * compositor space so neither a native touch client nor mouseEmulation sees
++ * a half-delivered click or drag.
++ */
++#define TDVP_WORKSPACE_SWIPE_EDGE_PX 72.0
++#define TDVP_WORKSPACE_SWIPE_VERTICAL_SLOP_PX 96.0
++#define TDVP_WORKSPACE_SWIPE_DISTANCE_RATIO 0.12
++#define TDVP_WORKSPACE_SWIPE_FLICK_DISTANCE_RATIO 0.05
++#define TDVP_WORKSPACE_SWIPE_FLICK_SPEED_PX_PER_SEC 600.0
++
++enum tdvp_workspace_swipe_edge {
++	TDVP_WORKSPACE_SWIPE_NONE,
++	TDVP_WORKSPACE_SWIPE_LEFT,
++	TDVP_WORKSPACE_SWIPE_RIGHT,
++};
++
+ /* Holds layout -> surface offsets to report motion events in relative coords */
+ struct touch_point {
+ 	int32_t touch_id;
+@@ -33,6 +51,15 @@ struct touch_point {
+ 	uint32_t long_press_time_msec;
+ 	double initial_lx;
+ 	double initial_ly;
++	bool workspace_swipe_reserved;
++	bool workspace_swipe_eligible;
++	enum tdvp_workspace_swipe_edge workspace_swipe_edge;
++	uint32_t workspace_swipe_start_time_msec;
++	double workspace_swipe_start_x;
++	double workspace_swipe_start_y;
++	double workspace_swipe_last_x;
++	double workspace_swipe_last_y;
++	double workspace_swipe_output_width;
+ 	struct wl_list link; /* seat.touch_points */
+ };
+
+@@ -78,6 +105,131 @@ handle_touch_long_press(void *data)
+ 	return 0;
+ }
+
++static bool
++touch_begin_workspace_swipe(struct seat *seat, struct touch_point *touch_point,
++		struct wlr_touch *touch, uint32_t time_msec, double x, double y)
++{
++	/*
++	 * Do not take a sequence which an application has already begun to
++	 * receive. An edge gesture is reserved from its down event onwards.
++	 */
++	if (!touch_point->force_mouse_emulation
++			|| !wl_list_empty(&seat->touch_points)
++			|| (seat->server->session_lock_manager
++				&& seat->server->session_lock_manager->locked)) {
++		return false;
++	}
++
++	double lx, ly;
++	wlr_cursor_absolute_to_layout_coords(seat->cursor, &touch->base,
++		x, y, &lx, &ly);
++
++	struct output *output = output_nearest_to(seat->server, lx, ly);
++	if (!output || !output->wlr_output) {
++		return false;
++	}
++
++	struct wlr_box output_box;
++	wlr_output_layout_get_box(seat->server->output_layout,
++		output->wlr_output, &output_box);
++	if (output_box.width <= 2 * TDVP_WORKSPACE_SWIPE_EDGE_PX) {
++		return false;
++	}
++
++	if (lx <= output_box.x + TDVP_WORKSPACE_SWIPE_EDGE_PX) {
++		touch_point->workspace_swipe_edge = TDVP_WORKSPACE_SWIPE_LEFT;
++	} else if (lx >= output_box.x + output_box.width
++			- TDVP_WORKSPACE_SWIPE_EDGE_PX) {
++		touch_point->workspace_swipe_edge = TDVP_WORKSPACE_SWIPE_RIGHT;
++	} else {
++		return false;
++	}
++
++	touch_point->workspace_swipe_reserved = true;
++	touch_point->workspace_swipe_eligible = true;
++	touch_point->workspace_swipe_start_time_msec = time_msec;
++	touch_point->workspace_swipe_start_x = lx;
++	touch_point->workspace_swipe_start_y = ly;
++	touch_point->workspace_swipe_last_x = lx;
++	touch_point->workspace_swipe_last_y = ly;
++	touch_point->workspace_swipe_output_width = output_box.width;
++	return true;
++}
++
++static void
++touch_cancel_workspace_swipes(struct seat *seat)
++{
++	struct touch_point *touch_point;
++	wl_list_for_each(touch_point, &seat->touch_points, link) {
++		if (touch_point->workspace_swipe_reserved) {
++			touch_point->workspace_swipe_eligible = false;
++		}
++	}
++}
++
++static struct workspace *
++touch_workspace_swipe_target(struct seat *seat,
++		enum tdvp_workspace_swipe_edge edge)
++{
++	struct workspace *current = seat->server->workspaces.current;
++	struct wl_list *target_link = edge == TDVP_WORKSPACE_SWIPE_LEFT
++		? current->link.prev : current->link.next;
++
++	/* Edge swipes deliberately do not wrap at either end. */
++	if (target_link == &seat->server->workspaces.all) {
++		return NULL;
++	}
++	return wl_container_of(target_link, current, link);
++}
++
++static void
++touch_finish_workspace_swipe(struct seat *seat,
++		struct touch_point *touch_point, uint32_t time_msec)
++{
++	if (!touch_point->workspace_swipe_reserved
++			|| !touch_point->workspace_swipe_eligible) {
++		return;
++	}
++
++	double dx = touch_point->workspace_swipe_last_x
++		- touch_point->workspace_swipe_start_x;
++	double dy = touch_point->workspace_swipe_last_y
++		- touch_point->workspace_swipe_start_y;
++	double abs_dx = dx < 0.0 ? -dx : dx;
++	double elapsed_msec = time_msec
++		- touch_point->workspace_swipe_start_time_msec;
++	double speed = abs_dx * 1000.0 / MAX(elapsed_msec, 1.0);
++	double distance = touch_point->workspace_swipe_output_width
++		* TDVP_WORKSPACE_SWIPE_DISTANCE_RATIO;
++	double flick_distance = touch_point->workspace_swipe_output_width
++		* TDVP_WORKSPACE_SWIPE_FLICK_DISTANCE_RATIO;
++	bool correct_direction =
++		(touch_point->workspace_swipe_edge == TDVP_WORKSPACE_SWIPE_LEFT
++			&& dx > 0.0)
++		|| (touch_point->workspace_swipe_edge == TDVP_WORKSPACE_SWIPE_RIGHT
++			&& dx < 0.0);
++	bool completed = abs_dx >= distance
++		|| (abs_dx >= flick_distance
++			&& speed >= TDVP_WORKSPACE_SWIPE_FLICK_SPEED_PX_PER_SEC);
++
++	if (!correct_direction || !completed
++			|| (dy > TDVP_WORKSPACE_SWIPE_VERTICAL_SLOP_PX)
++			|| (dy < -TDVP_WORKSPACE_SWIPE_VERTICAL_SLOP_PX)) {
++		return;
++	}
++
++	struct workspace *target = touch_workspace_swipe_target(seat,
++		touch_point->workspace_swipe_edge);
++	if (!target) {
++		wlr_log(WLR_DEBUG, "tdvp workspace swipe reached the workspace boundary");
++		return;
++	}
++
++	wlr_log(WLR_DEBUG, "tdvp workspace edge swipe: %s -> %s",
++		seat->server->workspaces.current->name, target->name);
++	workspaces_switch_to(target, /* update_focus */ true);
++}
++
+ static struct wlr_surface*
+ touch_get_coords(struct seat *seat, struct wlr_touch *touch, double x, double y,
+ 		double *x_offset, double *y_offset, bool force_mouse_emulation)
+@@ -126,6 +278,21 @@ handle_touch_motion(struct wl_listener *listener, void *data)
+ 	struct touch_point *touch_point;
+ 	wl_list_for_each(touch_point, &seat->touch_points, link) {
+ 		if (touch_point->touch_id == event->touch_id) {
++			if (touch_point->workspace_swipe_reserved) {
++				double lx, ly;
++				wlr_cursor_absolute_to_layout_coords(seat->cursor,
++					&event->touch->base, event->x, event->y, &lx, &ly);
++				touch_point->workspace_swipe_last_x = lx;
++				touch_point->workspace_swipe_last_y = ly;
++				if ((ly - touch_point->workspace_swipe_start_y
++						> TDVP_WORKSPACE_SWIPE_VERTICAL_SLOP_PX)
++						|| (touch_point->workspace_swipe_start_y - ly
++							> TDVP_WORKSPACE_SWIPE_VERTICAL_SLOP_PX)) {
++					touch_point->workspace_swipe_eligible = false;
++				}
++				return;
++			}
++
+ 			if (touch_point->surface) {
+ 				/* Convert coordinates: first [0, 1] => layout */
+ 				double lx, ly;
+@@ -187,9 +354,12 @@ handle_touch_down(struct wl_listener *listener, void *data)
+ 	touch_point->seat = seat;
+ 	touch_point->force_mouse_emulation =
+ 		touch_force_mouse_emulation(event->touch);
+-	touch_point->surface = touch_get_coords(seat, event->touch,
+-			event->x, event->y, &x_offset, &y_offset,
+-			touch_point->force_mouse_emulation);
++	if (!touch_begin_workspace_swipe(seat, touch_point, event->touch,
++			event->time_msec, event->x, event->y)) {
++		touch_point->surface = touch_get_coords(seat, event->touch,
++				event->x, event->y, &x_offset, &y_offset,
++				touch_point->force_mouse_emulation);
++	}
+ 	touch_point->touch_id = event->touch_id;
+ 	touch_point->x_offset = x_offset;
+ 	touch_point->y_offset = y_offset;
+@@ -201,11 +371,16 @@ handle_touch_down(struct wl_listener *listener, void *data)
+ 		wl_list_for_each(point, &seat->touch_points, link) {
+ 			touch_cancel_long_press(point);
+ 		}
++		touch_cancel_workspace_swipes(seat);
+ 	}
+
+ 	/* hide the cursor when starting touch input */
+ 	cursor_set_visible(seat, /* visible */ false);
+
++	if (touch_point->workspace_swipe_reserved) {
++		return;
++	}
++
+ 	if (touch_point->surface) {
+ 		seat_pointer_end_grab(seat, touch_point->surface);
+ 		/* Clear focus to not interfere with touch input */
+@@ -273,7 +448,10 @@ handle_touch_up(struct wl_listener *listener, void *data)
+ 	struct touch_point *touch_point, *tmp;
+ 	wl_list_for_each_safe(touch_point, tmp, &seat->touch_points, link) {
+ 		if (touch_point->touch_id == event->touch_id) {
+-			if (touch_point->surface) {
++			if (touch_point->workspace_swipe_reserved) {
++				touch_finish_workspace_swipe(seat, touch_point,
++					event->time_msec);
++			} else if (touch_point->surface) {
+ 				wlr_seat_touch_notify_up(seat->seat, event->time_msec,
+ 					event->touch_id);
+ 			} else {
+--
+2.47.3

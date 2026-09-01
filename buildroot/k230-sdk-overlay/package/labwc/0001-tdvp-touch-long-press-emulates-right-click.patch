@@ -19,7 +19,6 @@ the slop window cancels the pending long press.
 This does not affect native touch clients or devices that have not opted into
 mouseEmulation.
 
----
 diff --git a/src/input/touch.c b/src/input/touch.c
 index 4c6bd7f..b09d608 100644
 --- a/src/input/touch.c
@@ -189,4 +188,3 @@ index 4c6bd7f..b09d608 100644
  					WL_POINTER_BUTTON_STATE_RELEASED, event->time_msec);
  			}
  			wl_list_remove(&touch_point->link);
-
