@@ -7,7 +7,7 @@
 # Keep this version in lockstep with the immutable tag in the independent
 # tdvp-quick-settings repository. The firmware owns only this Buildroot bridge;
 # application source remains outside this repository.
-TDVP_QUICK_SETTINGS_VERSION = 0.1.3
+TDVP_QUICK_SETTINGS_VERSION = 0.1.4
 TDVP_QUICK_SETTINGS_SITE = $(call github,vicliu624,tdvp-quick-settings,v$(TDVP_QUICK_SETTINGS_VERSION))
 TDVP_QUICK_SETTINGS_LICENSE = MIT
 TDVP_QUICK_SETTINGS_LICENSE_FILES = LICENSE
