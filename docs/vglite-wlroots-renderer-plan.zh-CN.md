@@ -61,6 +61,31 @@ Gate 0 的通过条件是：普通 `tdvp` 用户返回 `PASS`，桌面未退出�
 probe 输出包含成功的 DMA-BUF 映射、`finish`、非空且包含至少三种绘制
 结果的校验信息。若不通过，保持 Pixman，不修改 Labwc 的 renderer。
 
+### 已确认的 K230 运行时约束
+
+2026-09-01 在 RM69A10 实机上，Gate 0 连续运行通过：VGLite 识别为
+`GCNanoUltraV`（chip `0x265`），K230 DRM dumb buffer 导出的 PRIME DMA-BUF
+可映射为 VGLite render target。256 x 128 的 clear、blit、path 和同步
+`finish()` 约为 67--69 ms；每个短暂 probe 的 `VmPeak` 约为 35.6 MiB，且
+Labwc 的 PID 在所有探针前后保持不变。
+
+同一块板还确认了一个必须体现在 renderer 中的限制：
+
+```text
+VG_LITE_MAP_USER_MEMORY(普通 Wayland SHM 映射) -> VG_LITE_OUT_OF_RESOURCES
+```
+
+所以首版不能把任意 `wl_shm` 内存宣称为 VGLite 的零拷贝 texture。它将为
+每个可见 SHM surface 保留一个 VGLite 分配的 texture，只把客户端 damage
+区域以 CPU `memcpy` 上传到该 texture，再由 GPU 完成缩放、alpha、旋转和
+所有场景合成。该 CPU copy 是输入上传，不是 Pixman 合成 fallback。对应
+probe 也会验证“CPU 写入 VGLite 分配的 source -> GPU blit -> DRM DMA-BUF
+target”的完整路径。
+
+未经单独实机验收前，renderer 不向 Wayland 客户端声明任意 DMA-BUF texture
+导入能力；DRM DMA-BUF render target 与 client DMA-BUF import 是两个不同的
+合同，不能由前者替代后者。
+
 ## Gate 1：受控 wlroots fork
 
 Gate 0 通过后，以当前锁定的 `wlroots 0.18.2` 为基线建立一个单独的
@@ -72,7 +97,7 @@ fork 的初始改动分为四个明确边界：
 | 层 | 新增职责 | 初版限制 |
 |---|---|---|
 | `render/vglite` | `wlr_renderer` 和 `wlr_render_pass` 的 clear / texture / rect / transform 实现 | 同步 render pass；无隐式 Pixman fallback |
-| `render/vglite/texture` | 从 Wayland SHM 上传，或从 DMA-BUF 以 `VG_LITE_MAP_DMABUF` 导入纹理 | 只接受 XR24、AR24、modifier 0 |
+| `render/vglite/texture` | 将 Wayland SHM damage 上传到 VGLite-owned texture | 首版不声明 client DMA-BUF import；只接受 XR24、AR24、modifier 0 |
 | `render/vglite/allocator` | 创建 K230 DRM-GEM/PRIME 支持的 scan-out target | 初期不使用压缩/非线性 modifier |
 | DRM backend output | 以物理 panel 尺寸提交已完成的 target | renderer 调用 `vg_lite_finish()` 后才允许 output commit |
 

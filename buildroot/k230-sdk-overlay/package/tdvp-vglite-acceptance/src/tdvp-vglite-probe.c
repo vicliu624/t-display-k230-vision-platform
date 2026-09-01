@@ -318,6 +318,7 @@ int main(int argc, char **argv)
 	int height = default_height;
 	int target_mapped = 0;
 	int source_allocated = 0;
+	size_t source_index;
 	int vglite_initialized = 0;
 	int index;
 	int result = EXIT_FAILURE;
@@ -393,18 +394,32 @@ int main(int argc, char **argv)
 	memset(&source, 0, sizeof(source));
 	source.width = 64;
 	source.height = 48;
+	source.stride = source.width * (vg_lite_int32_t)sizeof(uint32_t);
 	source.format = VG_LITE_BGRA8888;
+	/*
+	 * The K230 kernel rejects VG_LITE_MAP_USER_MEMORY for arbitrary userspace
+	 * mappings.  wlroots must consequently upload Wayland SHM damage into a
+	 * VGLite-owned texture.  Verify that the allocation is CPU writable before
+	 * it becomes a GPU source, rather than only exercising GPU-generated source
+	 * pixels.
+	 */
 	error = vg_lite_allocate(&source);
 	if (error != VG_LITE_SUCCESS) {
-		fprintf(stderr, "vg_lite_allocate(source) failed: %d\n", error);
+		fprintf(stderr, "vg_lite_allocate(cpu-upload source) failed: %d\n", error);
 		goto cleanup;
 	}
 	source_allocated = 1;
-
-	error = vg_lite_clear(&source, NULL, blit_color);
-	if (error != VG_LITE_SUCCESS) {
-		fprintf(stderr, "vg_lite_clear(source) failed: %d\n", error);
+	if (source.memory == NULL) {
+		fputs("vg_lite_allocate returned no CPU mapping for source\n", stderr);
 		goto cleanup;
+	}
+
+	/* Keep every CPU-written source pixel in the same BGRA byte order as the
+	 * vendor VGLite target used below. */
+	for (source_index = 0;
+	     source_index < (size_t)source.width * (size_t)source.height;
+	     ++source_index) {
+		((uint32_t *)source.memory)[source_index] = blit_color;
 	}
 	error = vg_lite_clear(&target, NULL, background);
 	if (error != VG_LITE_SUCCESS) {
@@ -447,7 +462,7 @@ int main(int argc, char **argv)
 	blit_pixel = pixel_at(&dumb, 20, 20);
 	path_pixel = pixel_at(&dumb, width / 2 + 8, height / 4 + 8);
 	distinct_pixels = count_distinct_pixels(&dumb, width, height);
-	printf("render: target=VG_LITE_BGRA8888 clear=ok blit=ok path=ok finish=ok "
+	printf("render: target=VG_LITE_BGRA8888 source=vg-allocated-cpu-upload clear=ok blit=ok path=ok finish=ok "
 	       "checksum-empty=%016" PRIx64 " checksum-final=%016" PRIx64
 	       " distinct-pixels>=%zu\n", empty_checksum, final_checksum, distinct_pixels);
 	printf("samples: background=0x%08" PRIx32 " blit=0x%08" PRIx32
