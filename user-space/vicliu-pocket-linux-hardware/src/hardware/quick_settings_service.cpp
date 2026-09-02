@@ -224,13 +224,6 @@ void QuickSettingsService::refresh(State *state)
 {
     if (state == nullptr)
         return;
-    update_lte_detection(*state);
-    update_gnss_startup();
-    (*state)["dock_nrf9151_sku_state"] = lte_sku_state_;
-
-    const bool lora_available = is_keyboard_attached(*state) && lora_control_available();
-    const bool lora_enabled = lora_available && lora_is_enabled();
-    (*state)["lora_available"] = lora_available ? "1" : "0";
     // bluetoothd is demand-started only when a physical hci* transport is
     // present.  Bare K230 units therefore do not keep an extra radio daemon
     // resident, while a USB adapter becomes actionable as soon as the drawer
@@ -238,6 +231,13 @@ void QuickSettingsService::refresh(State *state)
     if (bluetooth_hci_present() && (*state)["bluetooth_control_available"] != "1")
         (void)ensure_bluetooth_service();
     append_bluetooth_state(state);
+    update_lte_detection(*state);
+    update_gnss_startup();
+    (*state)["dock_nrf9151_sku_state"] = lte_sku_state_;
+
+    const bool lora_available = is_keyboard_attached(*state) && lora_control_available();
+    const bool lora_enabled = lora_available && lora_is_enabled();
+    (*state)["lora_available"] = lora_available ? "1" : "0";
     (*state)["lora_control_available"] = lora_available ? "1" : "0";
     (*state)["lora_enabled"] = lora_enabled ? "1" : "0";
     (*state)["lora_requested"] = lora_enabled ? "1" : "0";
@@ -372,6 +372,10 @@ bool QuickSettingsService::handle_request(const std::string &raw_request, State 
             ok = paths::run_quietly({"/usr/local/bin/tdvp-audio-route", value}) == 0;
             if (!ok)
                 *error = "audio route change failed";
+        } else if (key == "bluetooth-power" && (value == "on" || value == "off")) {
+            ok = set_bluetooth_power(value == "on");
+            if (!ok)
+                *error = "Bluetooth adapter or BlueZ service is unavailable";
         } else if (key == "radio-profile") {
             ok = select_radio_profile(value, error);
         } else if (key == "lora-power" && (value == "on" || value == "off")) {
@@ -379,10 +383,6 @@ bool QuickSettingsService::handle_request(const std::string &raw_request, State 
         } else if (key == "gnss-power" && (value == "on" || value == "off")) {
             ok = set_gnss_power(value == "on", error);
         } else {
-        } else if (key == "bluetooth-power" && (value == "on" || value == "off")) {
-            ok = set_bluetooth_power(value == "on");
-            if (!ok)
-                *error = "Bluetooth adapter or BlueZ service is unavailable";
             *error = "unsupported quick-settings control";
             return false;
         }
