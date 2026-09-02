@@ -10,7 +10,7 @@ index e37c0d2..a522247 100644
  #include "k230.dtsi"
  #include "display-rm69a10-568x1232.dtsi"
  / {
-@@ -32,6 +33,27 @@
+@@ -32,6 +33,22 @@
  
  &uart0 { status = "okay"; };
  &uart3 { status = "okay"; };
