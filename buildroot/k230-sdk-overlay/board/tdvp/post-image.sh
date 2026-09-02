@@ -10,7 +10,11 @@ IMAGE_GUARD="${SCRIPT_DIR}/verify-sdcard-image.sh"
 SDK_STAGE_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 SDK_STAGE_MANIFEST="${SDK_STAGE_DIR}/.tdvp/sdk-baseline-manifest"
 CPU1_BUILDER="${SCRIPT_DIR}/cpu1/build-rtsmart.sh"
-CPU1_ABI_HEADER="${SDK_STAGE_DIR}/package/vicliu-pocket-linux-hardware/src/tdvp_cpu1_abi.h"
+# The staged user-space package installs this ABI header before Buildroot
+# invokes post-image.  The board hook itself is copied below output/, so
+# deriving a source-tree path from its location incorrectly points at
+# output/package rather than buildroot-overlay/package.
+CPU1_ABI_HEADER="${TARGET_DIR}/usr/include/tdvp_cpu1_abi.h"
 
 # Buildroot creates rootfs.ext2 before this hook with deterministic ext4
 # settings from the defconfig. This hook supplies deterministic boot ext4 and
