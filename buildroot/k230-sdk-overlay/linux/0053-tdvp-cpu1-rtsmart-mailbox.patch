@@ -16,8 +16,8 @@ the rest of CPU1 RAM to Linux processes.
  arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts | 15 +++
  drivers/misc/Kconfig                                  |  9 ++
  drivers/misc/Makefile                                 |  1 +
- drivers/misc/tdvp_cpu1_mailbox.c                      | 114 +++++++++++++++++
- 4 files changed, 139 insertions(+)
+ drivers/misc/tdvp_cpu1_mailbox.c                      | 123 ++++++++++++++++++
+ 4 files changed, 148 insertions(+)
 
 diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
 --- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
@@ -64,7 +64,7 @@ diff --git a/drivers/misc/tdvp_cpu1_mailbox.c b/drivers/misc/tdvp_cpu1_mailbox.c
 new file mode 100644
 --- /dev/null
 +++ b/drivers/misc/tdvp_cpu1_mailbox.c
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,123 @@
 +// SPDX-License-Identifier: GPL-2.0
 +
 +#include <linux/fs.h>
@@ -106,7 +106,7 @@ new file mode 100644
 +	if (size > mailbox->size)
 +		return -EINVAL;
 +
-+	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP | VM_IO;
++	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP | VM_IO);
 +	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 +	ret = remap_pfn_range(vma, vma->vm_start, mailbox->physical >> PAGE_SHIFT,
 +			      size, vma->vm_page_prot);
@@ -152,12 +152,20 @@ new file mode 100644
 +	mailbox->miscdev.parent = &pdev->dev;
 +	mailbox->miscdev.mode = 0666;
 +
-+	ret = devm_misc_register(&pdev->dev, &mailbox->miscdev);
++	ret = misc_register(&mailbox->miscdev);
 +	if (ret)
 +		return ret;
 +
 +	platform_set_drvdata(pdev, mailbox);
 +	dev_info(&pdev->dev, "CPU1 RT-Smart mailbox registered\n");
++	return 0;
++}
++
++static int tdvp_cpu1_mailbox_remove(struct platform_device *pdev)
++{
++	struct tdvp_cpu1_mailbox *mailbox = platform_get_drvdata(pdev);
++
++	misc_deregister(&mailbox->miscdev);
 +	return 0;
 +}
 +
@@ -169,6 +177,7 @@ new file mode 100644
 +
 +static struct platform_driver tdvp_cpu1_mailbox_driver = {
 +	.probe = tdvp_cpu1_mailbox_probe,
++	.remove = tdvp_cpu1_mailbox_remove,
 +	.driver = {
 +		.name = "tdvp-cpu1-mailbox",
 +		.of_match_table = tdvp_cpu1_mailbox_of_match,
