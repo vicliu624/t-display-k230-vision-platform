@@ -113,6 +113,8 @@ required_config=(
 	BR2_PACKAGE_NETWORK_MANAGER
 	BR2_PACKAGE_NETWORK_MANAGER_CLI
 	BR2_PACKAGE_NM_CONNECTION_EDITOR
+	BR2_PACKAGE_BLUEZ5_UTILS
+	BR2_PACKAGE_BLUEZ5_UTILS_CLIENT
 	BR2_PACKAGE_WIRELESS_REGDB
 	BR2_PACKAGE_PROCPS_NG
 	BR2_PACKAGE_UTIL_LINUX
@@ -224,7 +226,7 @@ require_file "${DESKTOP_SOURCE}/tdvp-session-lock"
 require_file "${DESKTOP_SOURCE}/tdvp-session-powerctl"
 require_file "${DESKTOP_SOURCE}/tdvp-session-idle"
 require_content "${DESKTOP_SOURCE}/autostart" 'tdvp-session-idle'
-require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'TDVP_QUICK_SETTINGS_VERSION = 0.2.1'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'TDVP_QUICK_SETTINGS_VERSION = 0.2.2'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'vicliu624,tdvp-quick-settings'
 require_content "${DESKTOP_SOURCE}/tdvp-gdk-committed-compat.c" 'g_signal_handler_disconnect'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '-lglib-2.0'
@@ -251,6 +253,10 @@ require_content "${DESKTOP_SOURCE}/tdvp-pcmanfm-desktop-session" 'export GDK_BAC
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" 'BR2_PACKAGE_UTF8PROC=y'
 require_content "${DESKTOP_SOURCE}/tdvp-pcmanfm-desktop-session" '/usr/bin/pcmanfm --desktop'
 if grep -Eq -- '(^|[[:space:]])--one-screen([[:space:]]|$)' "${DESKTOP_SOURCE}/tdvp-pcmanfm-desktop-session"; then
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" 'BR2_PACKAGE_BLUEZ5_UTILS=y'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" 'BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/fragment/linux.hardware" 'CONFIG_BT_HCIBTUSB=m'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/fragment/linux.hardware" 'CONFIG_BT_HCIBTUSB_RTL=y'
 	fail 'PCManFM desktop mode must not disable monitor 0 with --one-screen'
 fi
 require_content "${DESKTOP_SOURCE}/autostart" '/usr/local/bin/tdvp-pcmanfm-desktop-session &'
@@ -343,6 +349,12 @@ require_content "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/tdvp
 require_content "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/tdvp-rootfs-expand.service" 'Before=greetd.service'
 require_content "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/hardware/network.cpp" 'NetworkManager.service'
 [ ! -e "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/tdvp-provision-data" ] || fail 'obsolete /data provisioner must not be present'
+require_file "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/hardware/bluetooth.cpp"
+require_file "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/hardware/bluetooth.hpp"
+require_content "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/CMakeLists.txt" 'hardware/bluetooth.cpp'
+require_content "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/CMakeLists.txt" 'pkg_check_modules(DBUS REQUIRED IMPORTED_TARGET dbus-1)'
+require_content "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/hardware/status.cpp" 'append_bluetooth_state(&state)'
+require_content "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/hardware/quick_settings_service.cpp" 'key == "bluetooth-power"'
 [ ! -e "${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src/tdvp-data-storage.service" ] || fail 'obsolete /data service must not be present'
 	require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/vicliu-pocket-linux-desktop/src/bin/vpl-package-manager"
 	require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/vicliu-pocket-linux-desktop/src/bin/vpl-package-manager" 'exec /usr/local/bin/tdvp-terminal'
@@ -485,6 +497,10 @@ require_content "${STAGED_OVERLAY}/package/vicliu-pocket-linux-desktop/vicliu-po
 	printf '%s\n' 'TDVP desktop patch-input assertion: PASS'
 	exit 0
 fi
+	require_file "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/hardware/bluetooth.cpp"
+	require_file "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/hardware/bluetooth.hpp"
+	require_content "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/CMakeLists.txt" 'hardware/bluetooth.cpp'
+	require_content "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/hardware/quick_settings_service.cpp" 'key == "bluetooth-power"'
 
 require_file "${CONFIG}"
 require_file "${ROOTFS}"

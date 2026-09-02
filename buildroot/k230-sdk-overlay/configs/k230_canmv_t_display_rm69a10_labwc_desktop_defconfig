@@ -176,6 +176,8 @@ BR2_PACKAGE_NETWORK_MANAGER=y
 BR2_PACKAGE_NETWORK_MANAGER_CLI=y
 BR2_PACKAGE_NM_CONNECTION_EDITOR=y
 BR2_PACKAGE_WIRELESS_REGDB=y
+BR2_PACKAGE_BLUEZ5_UTILS=y
+BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y
 # A desktop image needs the standard process-management utilities rather than
 # forcing every integration script to reimplement pgrep/pkill using ps output.
 BR2_PACKAGE_PROCPS_NG=y

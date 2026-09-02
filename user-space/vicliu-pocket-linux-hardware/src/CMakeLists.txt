@@ -3,11 +3,14 @@ cmake_minimum_required(VERSION 3.10)
 project(vicliu-pocket-linux-hardware VERSION 0.1.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(DBUS REQUIRED IMPORTED_TARGET dbus-1)
 
 set(VPL_WARNING_FLAGS -Wall -Wextra -Werror)
 
 add_library(vpl-hardware-core STATIC
     hardware/battery.cpp
+    hardware/bluetooth.cpp
     hardware/controls.cpp
     hardware/daemon.cpp
     hardware/dock.cpp
@@ -21,6 +24,7 @@ add_library(vpl-hardware-core STATIC
 target_compile_features(vpl-hardware-core PUBLIC cxx_std_17)
 target_compile_options(vpl-hardware-core PRIVATE ${VPL_WARNING_FLAGS})
 target_include_directories(vpl-hardware-core PUBLIC hardware)
+target_link_libraries(vpl-hardware-core PUBLIC PkgConfig::DBUS)
 
 add_executable(vpl-hwctl main.cpp)
 target_compile_features(vpl-hwctl PRIVATE cxx_std_17)

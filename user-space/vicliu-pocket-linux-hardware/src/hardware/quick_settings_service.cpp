@@ -1,5 +1,6 @@
 #include "quick_settings_service.hpp"
 
+#include "bluetooth.hpp"
 #include "nrf9151.hpp"
 #include "paths.hpp"
 
@@ -230,6 +231,13 @@ void QuickSettingsService::refresh(State *state)
     const bool lora_available = is_keyboard_attached(*state) && lora_control_available();
     const bool lora_enabled = lora_available && lora_is_enabled();
     (*state)["lora_available"] = lora_available ? "1" : "0";
+    // bluetoothd is demand-started only when a physical hci* transport is
+    // present.  Bare K230 units therefore do not keep an extra radio daemon
+    // resident, while a USB adapter becomes actionable as soon as the drawer
+    // requests its state.
+    if (bluetooth_hci_present() && (*state)["bluetooth_control_available"] != "1")
+        (void)ensure_bluetooth_service();
+    append_bluetooth_state(state);
     (*state)["lora_control_available"] = lora_available ? "1" : "0";
     (*state)["lora_enabled"] = lora_enabled ? "1" : "0";
     (*state)["lora_requested"] = lora_enabled ? "1" : "0";
@@ -371,6 +379,10 @@ bool QuickSettingsService::handle_request(const std::string &raw_request, State 
         } else if (key == "gnss-power" && (value == "on" || value == "off")) {
             ok = set_gnss_power(value == "on", error);
         } else {
+        } else if (key == "bluetooth-power" && (value == "on" || value == "off")) {
+            ok = set_bluetooth_power(value == "on");
+            if (!ok)
+                *error = "Bluetooth adapter or BlueZ service is unavailable";
             *error = "unsupported quick-settings control";
             return false;
         }

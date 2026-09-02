@@ -1,6 +1,7 @@
 #include "contract.hpp"
 
 #include "battery.hpp"
+#include "bluetooth.hpp"
 #include "dock.hpp"
 #include "network.hpp"
 #include "paths.hpp"
@@ -219,9 +220,7 @@ State collect_state()
     state["radio_resource_owner"] = "no-active-linux-profile";
     state["audio_fuel_gauge_resource_owner"] = "no-active-linux-profile";
 
-    transport(&state, "bluetooth", false, false, false);
-    put(&state, "bluetooth_requested", false);
-    put(&state, "bluetooth_control_available", false);
+    append_bluetooth_state(&state);
 
     transport(&state, "gnss", false, false, false);
     const bool cellular_profile = paths::exists("/sys/devices/platform/radio-mux/profile");
