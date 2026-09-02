@@ -361,11 +361,21 @@ State collect_state()
     state["cpu_count"] = state["linux_schedulable_cpu_count"];
     put(&state, "cpu0_linux_online", !online.empty() && cpu_is_online(online, 0));
     put(&state, "cpu1_physical_present", true);
-    state["cpu1_execution_model"] = "unprovisioned";
+    const bool cpu1_mailbox = paths::exists("/dev/tdvp-cpu1");
+    int cpu1_status_exit = 127;
+    const std::string cpu1_status = cpu1_mailbox && paths::executable("/usr/local/bin/tdvp-cpu1ctl")
+        ? paths::run_capture({"/usr/local/bin/tdvp-cpu1ctl", "status"}, &cpu1_status_exit)
+        : std::string {};
+    const bool cpu1_ready = cpu1_status_exit == 0 &&
+        cpu1_status.find("state=ready") != std::string::npos;
+    state["cpu1_execution_model"] = cpu1_ready ? "rtsmart-coprocessor" :
+        (cpu1_mailbox ? "rtsmart-startup-pending" : "unprovisioned");
     state["secondary_cpu_linux_managed"] = "0";
-    put(&state, "cpu1_firmware_lifecycle_available", false);
-    put(&state, "cpu1_coprocessor_available", false);
-    put(&state, "cpu1_coprocessor_active", false);
+    put(&state, "cpu1_firmware_lifecycle_available", cpu1_mailbox);
+    put(&state, "cpu1_coprocessor_available", cpu1_ready);
+    put(&state, "cpu1_coprocessor_active", cpu1_ready);
+    state["cpu1_coprocessor_state"] = cpu1_ready ? "ready" :
+        (cpu1_mailbox ? "not-ready" : "unavailable");
     put(&state, "cpu1_asr_offload_available", false);
     return state;
 }

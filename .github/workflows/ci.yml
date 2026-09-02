@@ -23,6 +23,8 @@ jobs:
       contents: write
     env:
       TDVP_CACHE_ROOT: ${{ github.workspace }}/.ci-cache
+      TDVP_CPU1_CACHE_ROOT: ${{ github.workspace }}/.ci-cache/cpu1
+      TDVP_CPU1_TOOLCHAIN_DIR: ${{ github.workspace }}/.ci-cache/cpu1/toolchain
       TDVP_K230_RELEASE_NAME: tdvp-k230-labwc-desktop-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
     steps:
       - name: Check out platform sources
@@ -40,6 +42,7 @@ jobs:
           path: |
             .ci-cache/dl
             .ci-cache/toolchain
+            .ci-cache/cpu1
           key: tdvp-k230-sdk-${{ runner.os }}-${{ hashFiles('buildroot/sdk-sources.lock') }}
           restore-keys: |
             tdvp-k230-sdk-${{ runner.os }}-

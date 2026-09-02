@@ -18,6 +18,8 @@ SDK 0001..0024
   -> TDVP 0047: LR2021 pin and power profile, with an optional K256-04 nRF9151 selector
   -> TDVP 0048..0049: LR2021 SPI0 transport, reset sequencing and bounded IRQ enumeration
   -> TDVP 0050: AHT20 hwmon binding
+  -> TDVP 0051..0052: managed external I2S amplifier route
+  -> TDVP 0053: CPU1 RT-Smart reserved memory and bounded mailbox
 ```
 
 The Buildroot `linux/` package directory is the sole patch input. Buildroot
@@ -43,6 +45,7 @@ source; it is the gate for patch applicability.
 | Dock GPIO and fuel gauge | TDVP `0045`, `0046`; existing `i2c_gpio_keyboard` node | The XL9555 at `0x20` is a standard `pca953x` GPIO provider. The BQ27220 at `0x55` uses its own standard-command register profile: instantaneous current is `0x0c`, remaining capacity is `0x10`, and no data-memory programming path is available. The static nodes share the accepted keyboard I2C bus without modifying the TCA8418 transport. | On the fitted dock, verify the full keyboard regression, `gpioinfo` reports the XL9555 chip, and BQ27220 `/sys/class/power_supply` values match independent I2C reads during charge and discharge. |
 | Dock environment sensor | TDVP `0050`; existing `i2c_gpio_keyboard` node | AHT20 at `0x38` uses the in-kernel `aosong,aht20` hwmon binding. The driver verifies the AHT20 CRC and publishes standard temperature and humidity attributes. | Compare `temp1_input` and `humidity1_input` with a direct CRC-checked I2C frame at two environmental conditions. |
 | LoRa and optional nRF9151 serial path | TDVP `0047` and `0048`; UART2, SPI0, K230 pinctrl and GPIO descriptors | The LR2021 reset input and the K256-04 nRF9151 UART2 TX path share IO5. `tdvp-radio-mux` owns the relevant pin and power states; the K256-04-A baseline stays in `lora` and keeps the optional modem unselected. SPI0 owns IO14 through IO17 for the LR2021 transport. | K256-04-A: run `vpl-lora-probe` and require a nonzero, non-`0xff` LR2021 firmware version. K256-04: additionally switch to `nrf9151`, confirm `/dev/ttyS2` exchanges AT commands with the fitted modem, then return to `lora` and repeat the LR2021 probe. |
+| CPU1 RT-Smart coprocessor | TDVP `0053`; U-Boot raw 10--30 MiB payload; post-image RT-Smart builder | Linux has exactly `cpu@0`. `0053` reserves CPU1 RAM at `0x10000000..0x13ffffff`; the only Linux-visible CPU1 address is a non-cacheable 64 KiB mailbox at `0x13ff0000`. U-Boot resets CPU1 into the signed OpenSBI/RT-Smart image before booting Linux. | Verify raw payload bytes at 10 MiB, U-Boot `bootcmd_cpu1`, final DTB reservation and compatible, `/dev/tdvp-cpu1`, then `tdvp-cpu1ctl status`, `ping`, and `crc32` after a cold boot. |
 
 ## Explicit Scope Boundaries
 

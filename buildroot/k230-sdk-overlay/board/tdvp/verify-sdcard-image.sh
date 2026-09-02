@@ -29,6 +29,8 @@ BOOTFS="${BINARIES_DIR}/boot.ext4"
 # named rootfs.ext2, and the packaging flow uses an ext4 filesystem image.
 ROOTFS="${BINARIES_DIR}/rootfs.ext2"
 SELECTED_DTB="${BINARIES_DIR}/k230-canmv-rm69a10.dtb"
+CPU1_FIRMWARE="${BINARIES_DIR}/tdvp-cpu1-rtsmart.bin"
+CPU1_MANIFEST="${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest"
 BUILDROOT_HOST_DIR="${HOST_DIR:-$(dirname "${BINARIES_DIR}")/host}"
 if [ -x "${BUILDROOT_HOST_DIR}/sbin/e2fsck" ]; then
 	E2FSCK="${BUILDROOT_HOST_DIR}/sbin/e2fsck"
@@ -51,7 +53,7 @@ GPT_DISK_UUID="FBB0B6A4-C36F-5F5C-8C42-077FFBA1377E"
 GPT_BOOT_UUID="900E1751-E943-5DAA-A4EF-68831D3ED855"
 GPT_ROOTFS_UUID="C9CC7F55-7FD2-5D64-AE97-0715ADF47FDE"
 ROOTFS_BOOTARG="root=PARTUUID=${GPT_ROOTFS_UUID} loglevel=8 rw rootdelay=4 rootfstype=ext4 console=ttyS0,115200 earlycon=sbi"
-for file in "${SYSIMAGE}" "${SPL}" "${UBOOT_ENV}" "${UBOOT}" "${BOOTFS}" "${ROOTFS}" "${SELECTED_DTB}"; do
+for file in "${SYSIMAGE}" "${SPL}" "${UBOOT_ENV}" "${UBOOT}" "${BOOTFS}" "${ROOTFS}" "${SELECTED_DTB}" "${CPU1_FIRMWARE}" "${CPU1_MANIFEST}"; do
 	if [ ! -s "${file}" ]; then
 		printf 'TDVP image guard: missing required artifact: %s\n' "${file}" >&2
 		exit 1
@@ -65,6 +67,18 @@ if ! grep -aFq "${ROOTFS_BOOTARG}" "${UBOOT_ENV}"; then
 	printf '%s\n' 'TDVP image guard: U-Boot environment does not use the rootfs PARTUUID boot argument' >&2
 	exit 1
 fi
+for required_env in \
+	'bootcmd=run bootcmd_cpu1; run blinux;' \
+	'cpu1_firmware_load=10000000' \
+	'cpu1_firmware_block=5000' \
+	'cpu1_firmware_blocks=a000' \
+	'bootcmd_cpu1=mmc dev ${mmc_boot_dev_num} && mmc read ${cpu1_firmware_load} ${cpu1_firmware_block} ${cpu1_firmware_blocks} && boot_baremetal 1 ${cpu1_firmware_load} 1400000;'; do
+	if ! grep -aFq "${required_env}" "${UBOOT_ENV}"; then
+		printf 'TDVP image guard: U-Boot environment is missing CPU1 launch contract: %s\n' \
+			"${required_env}" >&2
+		exit 1
+	fi
+done
 
 compare_at() {
 	local label="$1"
@@ -376,6 +390,7 @@ compare_at 'SPL copy 2' 0x180000 "${SPL}"
 compare_at 'U-Boot environment copy 1' 0x1e0000 "${UBOOT_ENV}"
 compare_at 'U-Boot image' 0x200000 "${UBOOT}"
 compare_at 'U-Boot environment copy 2' 0x380000 "${UBOOT_ENV}"
+compare_at 'CPU1 RT-Smart raw payload' $((10 * 1024 * 1024)) "${CPU1_FIRMWARE}"
 compare_at 'boot ext4 partition' $((30 * 1024 * 1024)) "${BOOTFS}"
 compare_large_partition_at 'rootfs filesystem partition' $((128 * 1024 * 1024)) "${ROOTFS}"
 
@@ -389,7 +404,9 @@ for required_dtb_string in \
 	'canaan,external-i2s-output-default' \
 	'amp-shutdown-gpios' \
 	'tdvp-amp-i2s-pins' \
-	'tdvp-amp-shutdown-pin'; do
+	'tdvp-amp-shutdown-pin' \
+	'tdvp,k230-cpu1-mailbox' \
+	'cpu1-runtime@10000000'; do
 	if ! grep -aFq "${required_dtb_string}" "${SELECTED_DTB}"; then
 		printf 'TDVP image guard: RM69A10 DTB is missing external speaker contract: %s\n' \
 			"${required_dtb_string}" >&2
@@ -589,6 +606,8 @@ require_rootfs_content '/usr/local/bin/tdvp-session-idle' 'wlopm --off'
 require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-greeter-labwc'
 require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-labwc-session'
 require_fs_path "${ROOTFS}" '/usr/libexec/vicliu-pocket-linux-hardware/vpl-hardwared'
+require_fs_regular_file "${ROOTFS}" '/usr/local/bin/tdvp-cpu1ctl'
+require_fs_path "${ROOTFS}" '/usr/lib/libtdvp_cpu1.so.1'
 reject_fs_path "${ROOTFS}" '/usr/local/libexec/vicliu-pocket-linux-hardware/vpl-hardwared'
 require_fs_path "${ROOTFS}" '/etc/tdvp/labwc/environment'
 require_fs_path "${ROOTFS}" '/etc/xdg/labwc/autostart'

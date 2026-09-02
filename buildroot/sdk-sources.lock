@@ -18,6 +18,15 @@ version = 6.6.36
 defconfig = k230
 dts = canaan/k230-canmv-rm69a10 canaan/k230-canmv-v3
 
+[cpu1_rtsmart]
+source = https://github.com/Xinyuan-LilyGO/T-Display-K230_canmv_rt.git
+commit = abb07090ad8a666ed7a5e097b3c714b918731645
+toolchain = riscv64-unknown-linux-musl-rv64imafdcv-lp64d-20230420.tar.bz2
+toolchain_url = https://github.com/kendryte/canmv_k230/releases/download/v1.1/
+runtime_base = 0x10000000
+runtime_size = 0x04000000
+mailbox_physical = 0x13ff0000
+
 [lewis_rm69a10]
 source = https://github.com/lewisxhe/k230-t-display-linux-patches.git
 commit = cef00a992975ea4ed687bf44f04f633dad5087e6

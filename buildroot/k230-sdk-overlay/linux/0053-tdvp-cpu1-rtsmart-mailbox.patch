@@ -1,0 +1,194 @@
+From 50afde5dbf0816ae07c7222d6b26a04541fa394e Mon Sep 17 00:00:00 2001
+From: Vicliu Pocket Linux <maintainers@vicliu.i234.me>
+Date: Tue, 2 Sep 2026 23:30:00 +0800
+Subject: [PATCH] riscv: k230: reserve and expose the CPU1 RT-Smart mailbox
+
+K230 Linux runs on CPU0 only.  Reserve a non-Linux-owned 64 MiB CPU1
+runtime window and publish its final 64 KiB as a deliberately narrow,
+non-cacheable misc-device mapping.  RT-Smart/OpenSBI starts CPU1 before
+Linux; this driver never starts, stops, or schedules that CPU.
+
+Userspace receives only the mailbox mapping at /dev/tdvp-cpu1.  The ABI is
+versioned by the paired RT-Smart image and begins with bounded ping/CRC32
+commands, making it possible to add accelerator services without exposing
+the rest of CPU1 RAM to Linux processes.
+---
+ arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts | 15 +++
+ drivers/misc/Kconfig                                  |  9 ++
+ drivers/misc/Makefile                                 |  1 +
+ drivers/misc/tdvp_cpu1_mailbox.c                      | 114 +++++++++++++++++
+ 4 files changed, 139 insertions(+)
+
+diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+--- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
++++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+@@ -21,5 +21,21 @@
+ 	ddr: memory@0 {
+ 		device_type = "memory";
+ 		reg = <0x0 0x0 0x0 0x20000000>;
+ 	};
+ };
++/ {
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		tdvp_cpu1_runtime: cpu1-runtime@10000000 {
++			reg = <0x0 0x10000000 0x0 0x04000000>;
++			no-map;
++		};
++	};
++	cpu1_mailbox: cpu1-mailbox@13ff0000 {
++		compatible = "tdvp,k230-cpu1-mailbox";
++		reg = <0x0 0x13ff0000 0x0 0x00010000>;
++		status = "okay";
++	};
++};
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -530,5 +530,15 @@ source "drivers/misc/uacce/Kconfig"
+ source "drivers/misc/uacce/Kconfig"
+ source "drivers/misc/pvpanic/Kconfig"
+ source "drivers/misc/mchp_pci1xxxx/Kconfig"
++
++config TDVP_CPU1_MAILBOX
++	bool "TDVP K230 CPU1 RT-Smart mailbox"
++	depends on OF && HAS_IOMEM
++	help
++	  Expose only the reserved CPU1 RT-Smart mailbox through /dev/tdvp-cpu1.
++	  CPU1 is booted by U-Boot and is not managed by the Linux scheduler.
++	  The mapping is non-cacheable so both independent K230 cores can use a
++	  versioned shared-memory command ABI safely.
++
+ source "drivers/misc/canaan/Kconfig"
+ endmenu
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -64,5 +64,6 @@ obj-$(CONFIG_TMR_MANAGER)      += xilinx_tmr_manager.o
+ obj-$(CONFIG_TMR_MANAGER)      += xilinx_tmr_manager.o
+ obj-$(CONFIG_TMR_INJECT)	+= xilinx_tmr_inject.o
+ obj-$(CONFIG_TPS6594_ESM)	+= tps6594-esm.o
+ obj-$(CONFIG_TPS6594_PFSM)	+= tps6594-pfsm.o
++obj-$(CONFIG_TDVP_CPU1_MAILBOX) += tdvp_cpu1_mailbox.o
+ obj-y				+= canaan/
+diff --git a/drivers/misc/tdvp_cpu1_mailbox.c b/drivers/misc/tdvp_cpu1_mailbox.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/misc/tdvp_cpu1_mailbox.c
+@@ -0,0 +1,114 @@
++// SPDX-License-Identifier: GPL-2.0
++
++#include <linux/fs.h>
++#include <linux/io.h>
++#include <linux/kernel.h>
++#include <linux/miscdevice.h>
++#include <linux/mm.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/sizes.h>
++
++#define TDVP_CPU1_MAILBOX_MINIMUM_SIZE SZ_64K
++
++struct tdvp_cpu1_mailbox {
++	struct miscdevice miscdev;
++	phys_addr_t physical;
++	resource_size_t size;
++};
++
++static int tdvp_cpu1_mailbox_open(struct inode *inode, struct file *file)
++{
++	struct miscdevice *miscdev = file->private_data;
++
++	file->private_data = container_of(miscdev, struct tdvp_cpu1_mailbox,
++					  miscdev);
++	return 0;
++}
++
++static int tdvp_cpu1_mailbox_mmap(struct file *file,
++				  struct vm_area_struct *vma)
++{
++	struct tdvp_cpu1_mailbox *mailbox = file->private_data;
++	unsigned long size = vma->vm_end - vma->vm_start;
++	int ret;
++
++	if (vma->vm_pgoff)
++		return -EINVAL;
++	if (size > mailbox->size)
++		return -EINVAL;
++
++	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP | VM_IO;
++	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
++	ret = remap_pfn_range(vma, vma->vm_start, mailbox->physical >> PAGE_SHIFT,
++			      size, vma->vm_page_prot);
++	if (ret)
++		return ret;
++	return 0;
++}
++
++static const struct file_operations tdvp_cpu1_mailbox_fops = {
++	.owner = THIS_MODULE,
++	.open = tdvp_cpu1_mailbox_open,
++	.mmap = tdvp_cpu1_mailbox_mmap,
++	.llseek = no_llseek,
++};
++
++static int tdvp_cpu1_mailbox_probe(struct platform_device *pdev)
++{
++	struct resource *resource;
++	struct tdvp_cpu1_mailbox *mailbox;
++	void __iomem *base;
++	int ret;
++
++	resource = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!resource)
++		return dev_err_probe(&pdev->dev, -EINVAL, "missing mailbox resource\n");
++	if (resource_size(resource) < TDVP_CPU1_MAILBOX_MINIMUM_SIZE)
++		return dev_err_probe(&pdev->dev, -EINVAL, "mailbox is smaller than 64 KiB\n");
++
++	base = devm_ioremap_resource(&pdev->dev, resource);
++	if (IS_ERR(base))
++		return PTR_ERR(base);
++	(void)base;
++
++	mailbox = devm_kzalloc(&pdev->dev, sizeof(*mailbox), GFP_KERNEL);
++	if (!mailbox)
++		return -ENOMEM;
++
++	mailbox->physical = resource->start;
++	mailbox->size = resource_size(resource);
++	mailbox->miscdev.minor = MISC_DYNAMIC_MINOR;
++	mailbox->miscdev.name = "tdvp-cpu1";
++	mailbox->miscdev.fops = &tdvp_cpu1_mailbox_fops;
++	mailbox->miscdev.parent = &pdev->dev;
++	mailbox->miscdev.mode = 0666;
++
++	ret = devm_misc_register(&pdev->dev, &mailbox->miscdev);
++	if (ret)
++		return ret;
++
++	platform_set_drvdata(pdev, mailbox);
++	dev_info(&pdev->dev, "CPU1 RT-Smart mailbox registered\n");
++	return 0;
++}
++
++static const struct of_device_id tdvp_cpu1_mailbox_of_match[] = {
++	{ .compatible = "tdvp,k230-cpu1-mailbox" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, tdvp_cpu1_mailbox_of_match);
++
++static struct platform_driver tdvp_cpu1_mailbox_driver = {
++	.probe = tdvp_cpu1_mailbox_probe,
++	.driver = {
++		.name = "tdvp-cpu1-mailbox",
++		.of_match_table = tdvp_cpu1_mailbox_of_match,
++	},
++};
++module_platform_driver(tdvp_cpu1_mailbox_driver);
++
++MODULE_AUTHOR("Vicliu Pocket Linux");
++MODULE_DESCRIPTION("K230 CPU1 RT-Smart shared mailbox");
++MODULE_LICENSE("GPL");

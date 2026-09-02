@@ -33,9 +33,26 @@ ordering constraints and validation gates for this queue.
 | `0048-tdvp-radio-lr2021-spi-transport.patch` | TDVP | Enables SPI0 with an LR2021 spidev transport and adds power/reset control to the radio profile selector. |
 | `0049-tdvp-k230-spi-bound-irq-enumeration.patch` | TDVP | Enumerates only the interrupt resources declared by K230 SPI0. |
 | `0050-tdvp-hwmon-aht20-standard-binding.patch` | TDVP | Adds the dock AHT20 at `0x38` and its standard `aosong,aht20` hwmon binding. |
+| `0051` through `0052` | TDVP | Route the accepted external I2S amplifier through the existing K230 sound card and its managed ALSA switch. |
+| `0053-tdvp-cpu1-rtsmart-mailbox.patch` | TDVP | Reserves CPU1's RT-Smart RAM, exposes only a non-cacheable 64 KiB mailbox at `/dev/tdvp-cpu1`, and deliberately leaves CPU1 outside Linux SMP. |
 
 The numbering follows the imported display queue. The lexical ordering is a
 build input and is checked by the baseline assertion.
+
+## CPU1 Coprocessor Contract
+
+The K230 Linux device tree intentionally declares only `cpu@0`.  `0053`
+reserves `0x10000000..0x13ffffff` for the CPU1 OpenSBI/RT-Smart runtime and
+uses the last 64 KiB (`0x13ff0000`) for a versioned shared-memory mailbox.
+Linux maps only that mailbox through `/dev/tdvp-cpu1` with non-cacheable page
+attributes; it neither starts CPU1 nor makes it a schedulable Linux core.
+
+The image post-processing stage compiles the pinned LilyGO RT-Smart source,
+places the firmware in the raw SD-card 10--30 MiB slot, and changes U-Boot to
+launch CPU1 before `blinux`.  The bounded first ABI services are `ping` and
+`crc32`, available through `tdvp-cpu1ctl` and `libtdvp_cpu1.so.1`.  Future
+CPU1 jobs must extend this versioned ABI, keep cache maintenance on both cores,
+and must not expose the remainder of the reserved RAM to Linux userspace.
 
 ## AI Power and Clock Contract
 

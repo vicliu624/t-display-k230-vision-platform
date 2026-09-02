@@ -32,8 +32,22 @@
 | `0048-tdvp-radio-lr2021-spi-transport.patch` | TDVP | 启用 SPI0 的 LR2021 spidev 传输路径，并为 radio profile selector 增加电源和复位控制。 |
 | `0049-tdvp-k230-spi-bound-irq-enumeration.patch` | TDVP | 仅枚举 K230 SPI0 在设备树中声明的 interrupt resource。 |
 | `0050-tdvp-hwmon-aht20-standard-binding.patch` | TDVP | 加入扩展坞 `0x38` AHT20 与标准 `aosong,aht20` hwmon binding。 |
+| `0051` 到 `0052` | TDVP | 通过现有 K230 sound card 及其受控 ALSA switch 路由已验收的 external I2S amplifier。 |
+| `0053-tdvp-cpu1-rtsmart-mailbox.patch` | TDVP | 保留 CPU1 的 RT-Smart RAM，仅将非缓存的 64 KiB mailbox 暴露为 `/dev/tdvp-cpu1`，并明确不把 CPU1 纳入 Linux SMP。 |
 
 编号遵循导入的 display queue。词法顺序是 build input，并由 baseline assertion 检查。
+
+## CPU1 协处理器约定
+
+K230 Linux 设备树刻意只声明 `cpu@0`。`0053` 保留
+`0x10000000..0x13ffffff` 给 CPU1 的 OpenSBI/RT-Smart runtime，其中最后 64 KiB
+（`0x13ff0000`）是带版本的共享 mailbox。Linux 仅通过 `/dev/tdvp-cpu1` 以非缓存
+页属性映射该 mailbox：它既不启动 CPU1，也不把 CPU1 变成可调度的 Linux CPU。
+
+镜像后处理会编译已固定 commit 的 LilyGO RT-Smart 源码，将固件放入 SD 卡原始
+10--30 MiB slot，并让 U-Boot 在 `blinux` 前启动 CPU1。第一版受限 ABI 提供 `ping`
+和 `crc32`，由 `tdvp-cpu1ctl` 与 `libtdvp_cpu1.so.1` 暴露。后续 CPU1 service 必须
+扩展这个带版本 ABI、维持两侧 cache maintenance，且不得把其余保留 RAM 暴露给 Linux 用户态。
 
 ## AI 电源与时钟约定
 

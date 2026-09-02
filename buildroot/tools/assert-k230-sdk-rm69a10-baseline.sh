@@ -184,6 +184,7 @@ LIBGTK3_WAYLAND_TRANSFORM_PATCH="${PROJECT_DIR}/buildroot/patches/buildroot/0006
 NM_CONNECTION_EDITOR_WAYLAND_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/nm-connection-editor/0002-tdvp-wayland-drop-unused-gdkx-header.patch"
 EXTERNAL_I2S_DTS_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/linux/0051-tdvp-riscv-dts-canaan-add-external-i2s-amp.patch"
 EXTERNAL_I2S_ASOC_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/linux/0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch"
+CPU1_MAILBOX_PATCH="${PROJECT_DIR}/buildroot/k230-sdk-overlay/linux/0053-tdvp-cpu1-rtsmart-mailbox.patch"
 HARDWARE_SOURCE="${PROJECT_DIR}/user-space/vicliu-pocket-linux-hardware/src"
 VENDOR_VG_LITE_PACKAGE="${PROJECT_DIR}/vendor/k230_linux_sdk/buildroot-overlay/package/vg_lite"
 require_file "${VENDOR_VG_LITE_PACKAGE}/Config.in"
@@ -200,6 +201,23 @@ require_content "${EXTERNAL_I2S_ASOC_PATCH}" 'External I2S Output Switch'
 require_content "${EXTERNAL_I2S_ASOC_PATCH}" 'devm_gpiod_get_optional'
 require_content "${EXTERNAL_I2S_ASOC_PATCH}" 'audio_i2s_enable_audio_codec(!priv->external_i2s_output);'
 require_content "${EXTERNAL_I2S_ASOC_PATCH}" 'gpiod_set_value_cansleep'
+require_file "${CPU1_MAILBOX_PATCH}"
+require_content "${CPU1_MAILBOX_PATCH}" 'cpu1-runtime@10000000'
+require_content "${CPU1_MAILBOX_PATCH}" 'tdvp,k230-cpu1-mailbox'
+require_content "${CPU1_MAILBOX_PATCH}" 'TDVP_CPU1_MAILBOX'
+require_content "${CPU1_MAILBOX_PATCH}" 'pgprot_noncached'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/fragment/linux.hardware" 'CONFIG_TDVP_CPU1_MAILBOX=y'
+require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/build-rtsmart.sh"
+require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c"
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c" 'INIT_APP_EXPORT(tdvp_cpu1_service_init);'
+require_file "${HARDWARE_SOURCE}/tdvp_cpu1_abi.h"
+require_file "${HARDWARE_SOURCE}/tdvp_cpu1.h"
+require_file "${HARDWARE_SOURCE}/tdvp_cpu1.c"
+require_file "${HARDWARE_SOURCE}/tdvp-cpu1ctl.c"
+require_content "${HARDWARE_SOURCE}/tdvp_cpu1_abi.h" 'TDVP_CPU1_MAILBOX_PHYS 0x13ff0000UL'
+require_content "${HARDWARE_SOURCE}/tdvp-cpu1ctl.c" 'crc32 <text>'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-image.sh" 'bootcmd_cpu1'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-image.sh" 'tdvp-cpu1-rtsmart.bin'
 require_file "${HARDWARE_SOURCE}/tdvp-audio-route"
 require_file "${HARDWARE_SOURCE}/tdvp-speaker-acceptance"
 require_content "${HARDWARE_SOURCE}/tdvp-audio-route" "readonly CONTROL='External I2S Output Switch'"
@@ -484,6 +502,12 @@ require_content "${STAGED_OVERLAY}/package/vicliu-pocket-linux-desktop/vicliu-po
 	require_content "${STAGED_OVERLAY}/linux/0051-tdvp-riscv-dts-canaan-add-external-i2s-amp.patch" 'K230_IO35_IIS_D_OUT0_PDM_IN1'
 	require_file "${STAGED_OVERLAY}/linux/0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch"
 	require_content "${STAGED_OVERLAY}/linux/0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch" 'External I2S Output Switch'
+	require_file "${STAGED_OVERLAY}/linux/0053-tdvp-cpu1-rtsmart-mailbox.patch"
+	require_content "${STAGED_OVERLAY}/linux/0053-tdvp-cpu1-rtsmart-mailbox.patch" 'tdvp,k230-cpu1-mailbox'
+	require_file "${STAGED_OVERLAY}/board/tdvp/cpu1/build-rtsmart.sh"
+	require_file "${STAGED_OVERLAY}/board/tdvp/cpu1/tdvp_cpu1_service.c"
+	require_file "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/tdvp_cpu1_abi.h"
+	require_file "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/tdvp-cpu1ctl.c"
 	require_file "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/tdvp-expand-rootfs"
 	require_file "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/tdvp-rootfs-expand.service"
 	require_file "${STAGED_OVERLAY}/package/vicliu-pocket-linux-hardware/src/tdvp-audio-route"
@@ -506,6 +530,8 @@ require_file "${CONFIG}"
 require_file "${ROOTFS}"
 require_file "${IMAGES}/sysimage-sdcard.img"
 require_file "${IMAGES}/tdvp-image-manifest"
+require_file "${IMAGES}/tdvp-cpu1-rtsmart.bin"
+require_file "${IMAGES}/tdvp-cpu1-rtsmart.manifest"
 for symbol in "${required_config[@]}"; do
 	require_line "${CONFIG}" "${symbol}=y"
 done
@@ -519,4 +545,6 @@ require_content "${IMAGES}/tdvp-image-manifest" 'terminal=foot'
 require_content "${IMAGES}/tdvp-image-manifest" 'display_manager=greetd'
 require_content "${IMAGES}/tdvp-image-manifest" 'greeter=gtkgreet'
 require_content "${IMAGES}/tdvp-image-manifest" 'session=tdvp-labwc-session'
+require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_execution_model=linux-cpu0+rtsmart-cpu1'
+require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_mailbox_physical=0x13ff0000'
 printf '%s\n' 'TDVP desktop assertion: PASS'

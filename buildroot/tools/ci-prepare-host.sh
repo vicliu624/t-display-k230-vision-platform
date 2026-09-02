@@ -18,7 +18,7 @@ FALLBACK_URI="https://download.kendryte.com/k230/downloads/dl/gcc/${TOOLCHAIN_AR
 sudo apt-get update
 sudo apt-get install -y \
     bc binutils bison build-essential bzip2 cpio curl diffutils e2fsprogs file flex gawk git \
-    libncurses-dev libssl-dev make parted patch perl python3-pcpp rsync \
+	libncurses-dev libssl-dev make parted patch perl python3-pcpp rsync scons \
     unzip wget xz-utils
 
 mkdir -p "${CACHE_ROOT}/toolchain"
