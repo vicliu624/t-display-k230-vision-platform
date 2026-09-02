@@ -22,12 +22,7 @@ the rest of CPU1 RAM to Linux processes.
 diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
 --- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
 +++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
-@@ -21,5 +21,21 @@
- 	ddr: memory@0 {
- 		device_type = "memory";
- 		reg = <0x0 0x0 0x0 0x20000000>;
- 	};
- };
+@@ -40,1 +40,17 @@
 +/ {
 +	reserved-memory {
 +		#address-cells = <2>;
@@ -44,14 +39,11 @@ diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot
 +		status = "okay";
 +	};
 +};
+ &uart0 { status = "okay"; };
 diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
 --- a/drivers/misc/Kconfig
 +++ b/drivers/misc/Kconfig
-@@ -530,5 +530,15 @@ source "drivers/misc/uacce/Kconfig"
- source "drivers/misc/uacce/Kconfig"
- source "drivers/misc/pvpanic/Kconfig"
- source "drivers/misc/mchp_pci1xxxx/Kconfig"
-+
+@@ -584,1 +584,10 @@
 +config TDVP_CPU1_MAILBOX
 +	bool "TDVP K230 CPU1 RT-Smart mailbox"
 +	depends on OF && HAS_IOMEM
@@ -61,18 +53,13 @@ diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
 +	  The mapping is non-cacheable so both independent K230 cores can use a
 +	  versioned shared-memory command ABI safely.
 +
- source "drivers/misc/canaan/Kconfig"
- endmenu
+ config TDVP_RADIO_MUX
 diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
 --- a/drivers/misc/Makefile
 +++ b/drivers/misc/Makefile
-@@ -64,5 +64,6 @@ obj-$(CONFIG_TMR_MANAGER)      += xilinx_tmr_manager.o
- obj-$(CONFIG_TMR_MANAGER)      += xilinx_tmr_manager.o
- obj-$(CONFIG_TMR_INJECT)	+= xilinx_tmr_inject.o
- obj-$(CONFIG_TPS6594_ESM)	+= tps6594-esm.o
- obj-$(CONFIG_TPS6594_PFSM)	+= tps6594-pfsm.o
+@@ -70,1 +70,2 @@
+ obj-$(CONFIG_TDVP_RADIO_MUX)	+= tdvp-radio-mux.o
 +obj-$(CONFIG_TDVP_CPU1_MAILBOX) += tdvp_cpu1_mailbox.o
- obj-y				+= canaan/
 diff --git a/drivers/misc/tdvp_cpu1_mailbox.c b/drivers/misc/tdvp_cpu1_mailbox.c
 new file mode 100644
 --- /dev/null
