@@ -226,7 +226,7 @@ require_file "${DESKTOP_SOURCE}/tdvp-session-lock"
 require_file "${DESKTOP_SOURCE}/tdvp-session-powerctl"
 require_file "${DESKTOP_SOURCE}/tdvp-session-idle"
 require_content "${DESKTOP_SOURCE}/autostart" 'tdvp-session-idle'
-require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'TDVP_QUICK_SETTINGS_VERSION = 0.2.2'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'TDVP_QUICK_SETTINGS_VERSION = 0.2.3'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'vicliu624,tdvp-quick-settings'
 require_content "${DESKTOP_SOURCE}/tdvp-gdk-committed-compat.c" 'g_signal_handler_disconnect'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '-lglib-2.0'
