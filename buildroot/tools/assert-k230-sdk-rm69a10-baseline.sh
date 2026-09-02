@@ -373,7 +373,7 @@ require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'option signature_type gpg-asc'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'option gpg_dir /etc/opkg/gpg'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'option gpg_trust_level TrustAny'
-require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'src/gz tdvp_apps_r6 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r6/riscv64'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-build.sh" 'src/gz tdvp_apps https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/stable/riscv64'
 require_file "${PROJECT_DIR}/buildroot/tools/assert-tdvp-opkg-feed-release.sh"
 require_content "${PROJECT_DIR}/buildroot/tools/assert-tdvp-opkg-feed-release.sh" "download 'Packages.asc' 'Packages.asc'"
 require_content "${PROJECT_DIR}/buildroot/tools/assert-tdvp-opkg-feed-release.sh" 'gpgv --keyring'
