@@ -1,0 +1,16 @@
+config BR2_PACKAGE_SWAYIDLE
+	bool "swayidle"
+	depends on BR2_USE_MMU
+	depends on BR2_INIT_SYSTEMD
+	select BR2_PACKAGE_WAYLAND
+	select BR2_PACKAGE_WAYLAND_PROTOCOLS
+	help
+	  Idle-management client for Wayland compositors implementing
+	  ext-idle-notify. TDVP starts it only inside the authenticated Labwc
+	  session, where it locks before it powers down an output and locks again
+	  before a logind sleep transition.
+
+	  https://github.com/swaywm/swayidle
+
+comment "swayidle needs an MMU and systemd/logind"
+	depends on !BR2_USE_MMU || !BR2_INIT_SYSTEMD

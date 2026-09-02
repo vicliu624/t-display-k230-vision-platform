@@ -1,0 +1,141 @@
+#!/bin/sh
+# Persistent, user-scoped policy for TDVP's Wayland idle session. This is a
+# policy adapter around swayidle, swaylock and wlopm; it never takes ownership
+# of the compositor, PAM, display mode or privileged backlight controls.
+set -eu
+
+readonly DEFAULT_LOCK_AFTER_SECONDS=300
+readonly DEFAULT_BLANK_AFTER_SECONDS=30
+readonly SESSION_IDLE=/usr/local/bin/tdvp-session-idle
+
+: "${HOME:?tdvp-session-powerctl needs HOME}"
+: "${XDG_RUNTIME_DIR:?tdvp-session-powerctl needs XDG_RUNTIME_DIR}"
+
+readonly CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
+readonly CONFIG_DIRECTORY="${CONFIG_HOME}/tdvp"
+readonly CONFIG_FILE="${CONFIG_DIRECTORY}/session-power.conf"
+readonly RUNTIME_DIRECTORY="${XDG_RUNTIME_DIR}/tdvp-session-power"
+readonly PID_FILE="${RUNTIME_DIRECTORY}/swayidle.pid"
+
+lock_after_seconds=${DEFAULT_LOCK_AFTER_SECONDS}
+blank_after_seconds=${DEFAULT_BLANK_AFTER_SECONDS}
+
+usage() {
+	cat >&2 <<'EOF'
+Usage:
+  tdvp-session-powerctl environment
+  tdvp-session-powerctl status
+  tdvp-session-powerctl set lock-after <seconds-or-0>
+  tdvp-session-powerctl set blank-after <seconds-or-0>
+EOF
+}
+
+valid_seconds() {
+	case "$1" in
+		0 | [1-9] | [1-9][0-9] | [1-9][0-9][0-9] | [1-9][0-9][0-9][0-9] | [1-9][0-9][0-9][0-9][0-9])
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+load_configuration() {
+	[ -r "${CONFIG_FILE}" ] || return 0
+	while IFS='=' read -r key value; do
+		case "${key}" in
+			lock_after_seconds)
+				if valid_seconds "${value}"; then
+					lock_after_seconds=${value}
+				fi
+				;;
+			blank_after_seconds)
+				if valid_seconds "${value}"; then
+					blank_after_seconds=${value}
+				fi
+				;;
+		esac
+	done < "${CONFIG_FILE}"
+}
+
+write_configuration() {
+	mkdir -p "${CONFIG_DIRECTORY}"
+	chmod 0700 "${CONFIG_DIRECTORY}"
+	readonly temporary_file="${CONFIG_DIRECTORY}/.session-power.conf.$$"
+	(umask 077
+		printf 'lock_after_seconds=%s\n' "${lock_after_seconds}"
+		printf 'blank_after_seconds=%s\n' "${blank_after_seconds}"
+	) > "${temporary_file}"
+	mv -f "${temporary_file}" "${CONFIG_FILE}"
+}
+
+print_environment() {
+	# The output is deliberately limited to validated decimal assignments. The
+	# companion session script can evaluate it without interpreting user-provided
+	# configuration as shell code.
+	printf 'TDVP_LOCK_AFTER_SECONDS=%s\n' "${lock_after_seconds}"
+	printf 'TDVP_BLANK_AFTER_SECONDS=%s\n' "${blank_after_seconds}"
+}
+
+stop_existing_idle() {
+	[ -r "${PID_FILE}" ] || return 0
+	readonly previous_pid="$(cat "${PID_FILE}" 2>/dev/null || true)"
+	case "${previous_pid}" in
+		'' | *[!0-9]*)
+			return 0
+			;;
+	esac
+	if ! kill -0 "${previous_pid}" 2>/dev/null; then
+		return 0
+	fi
+	kill -TERM "${previous_pid}" 2>/dev/null || true
+	attempt=0
+	while kill -0 "${previous_pid}" 2>/dev/null && [ "${attempt}" -lt 20 ]; do
+		sleep 0.05
+		attempt=$((attempt + 1))
+	done
+}
+
+restart_idle() {
+	stop_existing_idle
+	"${SESSION_IDLE}" >/dev/null 2>&1 &
+}
+
+load_configuration
+
+case "${1:-}" in
+	environment)
+		[ "$#" -eq 1 ] || { usage; exit 2; }
+		print_environment
+		;;
+	status)
+		[ "$#" -eq 1 ] || { usage; exit 2; }
+		print_environment
+		;;
+	set)
+		[ "$#" -eq 3 ] || { usage; exit 2; }
+		valid_seconds "${3}" || {
+			echo 'tdvp-session-powerctl: timeout must be 0 or an integer number of seconds' >&2
+			exit 2
+		}
+		case "${2}" in
+			lock-after)
+				lock_after_seconds=${3}
+				;;
+			blank-after)
+				blank_after_seconds=${3}
+				;;
+			*)
+				usage
+				exit 2
+				;;
+		esac
+		write_configuration
+		restart_idle
+		;;
+	*)
+		usage
+		exit 2
+		;;
+esac

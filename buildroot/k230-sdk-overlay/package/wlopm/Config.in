@@ -1,0 +1,13 @@
+config BR2_PACKAGE_WLOPM
+	bool "wlopm"
+	depends on BR2_USE_MMU
+	select BR2_PACKAGE_WAYLAND
+	help
+	  Small Wayland client for zwlr-output-power-management-v1. TDVP uses it
+	  only after swaylock has established an authenticated session lock; it
+	  temporarily powers outputs off without changing their Labwc layout.
+
+	  https://git.sr.ht/~leon_plickat/wlopm
+
+comment "wlopm needs an MMU"
+	depends on !BR2_USE_MMU

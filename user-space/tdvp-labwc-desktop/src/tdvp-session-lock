@@ -1,0 +1,30 @@
+#!/bin/sh
+# Lock an existing TDVP Wayland session. This deliberately remains a user
+# session operation: PAM authentication and ext-session-lock are coordinated by
+# swaylock and Labwc, not by the root-owned hardware service.
+set -eu
+
+readonly SWAYLOCK=/usr/bin/swaylock
+readonly LOCK_COLOR=1f1e1b
+
+if [ ! -x "${SWAYLOCK}" ]; then
+	echo 'tdvp-session-lock: swaylock is not installed' >&2
+	exit 127
+fi
+
+: "${XDG_RUNTIME_DIR:?tdvp-session-lock needs XDG_RUNTIME_DIR}"
+readonly LOCK_DIRECTORY="${XDG_RUNTIME_DIR}/tdvp-session-lock"
+
+# mkdir is atomic. A duplicate touch on the Quick Settings button must not
+# create competing session-lock clients, but an exited lock must release this
+# guard before the next manual or idle lock request.
+if ! mkdir "${LOCK_DIRECTORY}" 2>/dev/null; then
+	exit 0
+fi
+
+cleanup() {
+	rmdir "${LOCK_DIRECTORY}" 2>/dev/null || true
+}
+trap cleanup EXIT HUP INT TERM
+
+"${SWAYLOCK}" -f -c "${LOCK_COLOR}"

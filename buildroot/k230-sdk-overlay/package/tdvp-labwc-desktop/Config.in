@@ -23,6 +23,8 @@ config BR2_PACKAGE_TDVP_LABWC_DESKTOP
 	select BR2_PACKAGE_WFPLUG_VOLUMEPULSE
 	select BR2_PACKAGE_WPA_SUPPLICANT_DBUS
 	select BR2_PACKAGE_WLR_RANDR
+	select BR2_PACKAGE_SWAYIDLE
+	select BR2_PACKAGE_WLOPM
 	help
 	  Install the T-Display K230's standard Labwc desktop session.
 

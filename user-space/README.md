@@ -4,7 +4,7 @@ This directory contains source owned by the image build:
 
 | Source | Responsibility |
 | --- | --- |
-| `tdvp-labwc-desktop` | Systemd service and XDG configuration for the Labwc desktop session. It starts PCManFM desktop mode and the TDVP-themed wf-panel-pi top panel after Labwc has acquired the DRM backend; mouse-emulated touch retains left-click taps/drags and converts a stationary long press into a right click. |
+| `tdvp-labwc-desktop` | Systemd service and XDG configuration for the Labwc desktop session. It starts PCManFM desktop mode, the TDVP-themed wf-panel-pi top panel, and the user-session `swayidle` policy after Labwc has acquired the DRM backend; `swayidle` invokes PAM-backed `swaylock` before `wlopm` blanks Wayland outputs. Mouse-emulated touch retains left-click taps/drags and converts a stationary long press into a right click. |
 | `tdvp-kpu-acceptance` | KPU runtime inspection and acceptance utility. |
 | `vicliu-pocket-linux-hardware` | Board integration service and hardware-state publishing tools. |
 

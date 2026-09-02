@@ -56,6 +56,8 @@ packages=(
 	gtk-layer-shell
 	labwc
 	swaylock
+	swayidle
+	wlopm
 	tdvp-quick-settings
 	libfm-extra
 	libmenu-cache
@@ -94,6 +96,8 @@ required_config=(
 	BR2_PACKAGE_GTK_LAYER_SHELL
 	BR2_PACKAGE_LABWC
 	BR2_PACKAGE_SWAYLOCK
+	BR2_PACKAGE_SWAYIDLE
+	BR2_PACKAGE_WLOPM
 	BR2_PACKAGE_TDVP_QUICK_SETTINGS
 	BR2_PACKAGE_GTKMM3
 	BR2_PACKAGE_LIBFM_EXTRA
@@ -212,7 +216,15 @@ require_content "${HARDWARE_SOURCE}/hardware/quick_settings_service.cpp" 'speake
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/src/swaylock"
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/swaylock.mk" '-Dpam=enabled'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/src/swaylock" 'auth       required   pam_unix.so'
-require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'TDVP_QUICK_SETTINGS_VERSION = 0.1.12'
+require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swayidle/Config.in"
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swayidle/swayidle.mk" '-Dlogind=enabled'
+require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/wlopm/Config.in"
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/wlopm/wlopm.mk" 'WLOPM_VERSION = v1.0.0'
+require_file "${DESKTOP_SOURCE}/tdvp-session-lock"
+require_file "${DESKTOP_SOURCE}/tdvp-session-powerctl"
+require_file "${DESKTOP_SOURCE}/tdvp-session-idle"
+require_content "${DESKTOP_SOURCE}/autostart" 'tdvp-session-idle'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'TDVP_QUICK_SETTINGS_VERSION = 0.2.1'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-quick-settings/tdvp-quick-settings.mk" 'vicliu624,tdvp-quick-settings'
 require_content "${DESKTOP_SOURCE}/tdvp-gdk-committed-compat.c" 'g_signal_handler_disconnect'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '-lglib-2.0'

@@ -24,7 +24,9 @@ TDVP_LABWC_DESKTOP_DEPENDENCIES = \
 	wfplug-power \
 	wfplug-volumepulse \
 	wfplug-menu \
-	wlr-randr
+	wlr-randr \
+	swayidle \
+	wlopm
 
 define TDVP_LABWC_DESKTOP_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -std=c11 -O2 -Wall -Wextra \
@@ -55,6 +57,12 @@ define TDVP_LABWC_DESKTOP_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/local/bin/tdvp-wf-panel-session
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-pulseaudio-session \
 		$(TARGET_DIR)/usr/local/bin/tdvp-pulseaudio-session
+	$(INSTALL) -D -m 0755 $(@D)/tdvp-session-lock \
+		$(TARGET_DIR)/usr/local/bin/tdvp-session-lock
+	$(INSTALL) -D -m 0755 $(@D)/tdvp-session-powerctl \
+		$(TARGET_DIR)/usr/local/bin/tdvp-session-powerctl
+	$(INSTALL) -D -m 0755 $(@D)/tdvp-session-idle \
+		$(TARGET_DIR)/usr/local/bin/tdvp-session-idle
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-panel-menu \
 		$(TARGET_DIR)/usr/local/bin/tdvp-panel-menu
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-key-bridge \

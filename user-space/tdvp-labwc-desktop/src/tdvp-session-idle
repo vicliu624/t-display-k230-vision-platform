@@ -1,0 +1,68 @@
+#!/bin/sh
+# Long-lived but strictly user-session-scoped idle policy. It is intentionally
+# started by Labwc autostart rather than as a root or boot-time service.
+set -eu
+
+readonly POWERCTL=/usr/local/bin/tdvp-session-powerctl
+readonly SESSION_LOCK=/usr/local/bin/tdvp-session-lock
+readonly WLOPM=/usr/bin/wlopm
+readonly SWAYIDLE=/usr/bin/swayidle
+
+: "${XDG_RUNTIME_DIR:?tdvp-session-idle needs XDG_RUNTIME_DIR}"
+readonly RUNTIME_DIRECTORY="${XDG_RUNTIME_DIR}/tdvp-session-power"
+readonly PID_FILE="${RUNTIME_DIRECTORY}/swayidle.pid"
+readonly STATE_FILE="${RUNTIME_DIRECTORY}/state.env"
+
+[ -x "${POWERCTL}" ] || exit 127
+[ -x "${SESSION_LOCK}" ] || exit 127
+[ -x "${SWAYIDLE}" ] || exit 127
+
+eval "$("${POWERCTL}" environment)"
+readonly lock_after_seconds="${TDVP_LOCK_AFTER_SECONDS}"
+readonly blank_after_seconds="${TDVP_BLANK_AFTER_SECONDS}"
+
+mkdir -p "${RUNTIME_DIRECTORY}"
+chmod 0700 "${RUNTIME_DIRECTORY}"
+printf '%s\n' "$$" > "${PID_FILE}"
+readonly state_temporary_file="${RUNTIME_DIRECTORY}/.state.env.$$"
+{
+	printf 'lock_after_seconds=%s\n' "${lock_after_seconds}"
+	printf 'blank_after_seconds=%s\n' "${blank_after_seconds}"
+	if [ "${lock_after_seconds}" -gt 0 ]; then
+		printf 'lock_enabled=1\n'
+	else
+		printf 'lock_enabled=0\n'
+	fi
+	if [ "${lock_after_seconds}" -gt 0 ] && [ "${blank_after_seconds}" -gt 0 ] && [ -x "${WLOPM}" ]; then
+		printf 'blank_enabled=1\n'
+	else
+		printf 'blank_enabled=0\n'
+	fi
+} > "${state_temporary_file}"
+mv -f "${state_temporary_file}" "${STATE_FILE}"
+
+cleanup() {
+	if [ -r "${PID_FILE}" ] && [ "$(cat "${PID_FILE}" 2>/dev/null || true)" = "$$" ]; then
+		rm -f "${PID_FILE}"
+	fi
+}
+trap cleanup EXIT HUP INT TERM
+
+if [ "${lock_after_seconds}" -eq 0 ]; then
+	"${SWAYIDLE}" -w before-sleep "${SESSION_LOCK}"
+	exit $?
+fi
+
+if [ "${blank_after_seconds}" -eq 0 ] || [ ! -x "${WLOPM}" ]; then
+	"${SWAYIDLE}" -w \
+		timeout "${lock_after_seconds}" "${SESSION_LOCK}" \
+		before-sleep "${SESSION_LOCK}"
+	exit $?
+fi
+
+readonly blank_after_total_seconds=$((lock_after_seconds + blank_after_seconds))
+"${SWAYIDLE}" -w \
+	timeout "${lock_after_seconds}" "${SESSION_LOCK}" \
+	timeout "${blank_after_total_seconds}" "${WLOPM} --off '*'" \
+	resume "${WLOPM} --on '*'" \
+	before-sleep "${SESSION_LOCK}"

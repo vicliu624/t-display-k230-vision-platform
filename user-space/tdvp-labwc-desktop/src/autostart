@@ -35,6 +35,13 @@ if [ -x /usr/bin/tdvp-quick-settings ]; then
 	/usr/bin/tdvp-quick-settings &
 fi
 
+# Keep the policy within the authenticated Wayland session. The script starts
+# swayidle, locks through swaylock and only then asks wlopm to power the output
+# down; it never turns off or rearranges Labwc outputs with wlr-randr.
+if [ -x /usr/local/bin/tdvp-session-idle ]; then
+	/usr/local/bin/tdvp-session-idle &
+fi
+
 # Board-level key policy: the TCA8418 Menu key opens or closes Raspberry Pi's
 # existing smenu component through its documented wfpanelctl command.
 # It is a proper Wayland surface, unlike the currently affected GTK3 panel popup.
