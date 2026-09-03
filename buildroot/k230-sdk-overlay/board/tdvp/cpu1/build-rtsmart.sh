@@ -75,9 +75,9 @@ fi
 if git -C "${CPU1_CHECKOUT_DIR}" sparse-checkout -h >/dev/null 2>&1; then
 	git -C "${CPU1_CHECKOUT_DIR}" sparse-checkout init --no-cone
 	git -C "${CPU1_CHECKOUT_DIR}" sparse-checkout set --no-cone \
-		canmv_k230/Kconfig canmv_k230/Makefile canmv_k230/configs \
+		canmv_k230/Kconfig canmv_k230/Kconfig.canmv canmv_k230/Makefile canmv_k230/configs \
 		canmv_k230/boards/Kconfig canmv_k230/boards/k230_canmv_v3p0 canmv_k230/tools \
-		canmv_k230/src/applications canmv_k230/src/rtsmart/Makefile \
+		canmv_k230/src/applications canmv_k230/src/uboot canmv_k230/src/rtsmart/Makefile \
 		canmv_k230/src/rtsmart/parse_config canmv_k230/src/rtsmart/rtsmart \
 		canmv_k230/src/opensbi
 else
@@ -94,12 +94,14 @@ else
 	{
 		printf '%s\n' \
 			'/canmv_k230/Kconfig' \
+			'/canmv_k230/Kconfig.canmv' \
 			'/canmv_k230/Makefile' \
 			'/canmv_k230/configs/' \
 			'/canmv_k230/boards/Kconfig' \
 			'/canmv_k230/boards/k230_canmv_v3p0/' \
 			'/canmv_k230/tools/' \
 			'/canmv_k230/src/applications/' \
+			'/canmv_k230/src/uboot/' \
 			'/canmv_k230/src/rtsmart/Makefile' \
 			'/canmv_k230/src/rtsmart/parse_config/' \
 			'/canmv_k230/src/rtsmart/rtsmart/' \
