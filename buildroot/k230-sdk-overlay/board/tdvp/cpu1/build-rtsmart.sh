@@ -31,6 +31,15 @@ require_file() {
 	[ -s "$1" ] || fail "required file is missing or empty: $1"
 }
 
+# The upstream SDK inspects its parent make process for a -jN argument and
+# rejects every value other than 1.  Buildroot's jobserver leaves its original
+# -jN in recursive make metadata even if a child is invoked with -j1.  Start
+# each SDK make tree without that metadata instead, so its nested top-level
+# make sees a parent command line with no parallel-build option at all.
+run_sdk_make() {
+	env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS make "$@"
+}
+
 require_file "${ABI_HEADER}"
 mkdir -p "${CPU1_CACHE_ROOT}" "${CPU1_TOOLCHAIN_DIR}" "$(dirname "${FIRMWARE_OUTPUT}")"
 
@@ -106,10 +115,7 @@ fi
 grep -Fq "tdvp_cpu1_service.c" "${SCONSCRIPT}" || fail "cannot add CPU1 service to RT-Smart SConscript"
 
 pushd "${CPU1_SOURCE_DIR}" >/dev/null
-# The upstream K230 SDK rejects any parent Make process whose command line has
-# -jN (N != 1).  This post-image hook is started by Buildroot's parallel make,
-# so every SDK make invocation must explicitly be single-threaded.
-make -j1 k230_canmv_v3p0_defconfig
+run_sdk_make k230_canmv_v3p0_defconfig
 for setting in \
 	"CONFIG_MEM_BASE_ADDR=${CPU1_RUNTIME_BASE}" \
 	"CONFIG_MEM_RTSMART_BASE=${CPU1_RUNTIME_BASE}" \
@@ -122,7 +128,7 @@ for setting in \
 		printf '%s\n' "${setting}" >> .config
 	fi
 done
-make -j1 .autoconf
+run_sdk_make .autoconf
 
 export SDK_SRC_ROOT_DIR="${CPU1_SOURCE_DIR}"
 export SDK_TOOLCHAIN_DIR="${CPU1_TOOLCHAIN_DIR}"
@@ -140,8 +146,8 @@ export SDK_OPENSBI_BUILD_DIR="${SDK_BUILD_DIR}/opensbi"
 export NCPUS="${TDVP_CPU1_JOBS:-2}"
 mkdir -p "${SDK_BUILD_IMAGES_DIR}" "${SDK_RTSMART_BUILD_DIR}" "${SDK_OPENSBI_BUILD_DIR}"
 
-make -j1 -C "${SDK_RTSMART_SRC_DIR}" kernel CROSS_COMPILE="${CPU1_CROSS_COMPILE}"
-make -j1 -C "${SDK_OPENSBI_SRC_DIR}" all CROSS_COMPILE="${CPU1_CROSS_COMPILE}"
+run_sdk_make -C "${SDK_RTSMART_SRC_DIR}" kernel CROSS_COMPILE="${CPU1_CROSS_COMPILE}"
+run_sdk_make -C "${SDK_OPENSBI_SRC_DIR}" all CROSS_COMPILE="${CPU1_CROSS_COMPILE}"
 CPU1_FIRMWARE="${SDK_BUILD_IMAGES_DIR}/opensbi/opensbi_rtt_system.bin"
 require_file "${CPU1_FIRMWARE}"
 if [ "$(stat -c '%s' "${CPU1_FIRMWARE}")" -gt $((20 * 1024 * 1024)) ]; then
