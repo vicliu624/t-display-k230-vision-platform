@@ -104,6 +104,19 @@ git -C "${CPU1_CHECKOUT_DIR}" fetch --depth=1 --filter=blob:limit=1048576 \
 git -C "${CPU1_CHECKOUT_DIR}" checkout --detach --force "${CPU1_COMMIT}"
 git -C "${CPU1_CHECKOUT_DIR}" read-tree -mu HEAD
 
+# The pinned SDK's mkenv.mk probes an optional third-party mirror with curl
+# but supplies neither a connection nor a transfer deadline.  Once the CPU1
+# build is allowed past its parallel-build guard, an unreachable mirror can
+# otherwise leave post-image running forever.  A failed bounded probe preserves
+# the upstream non-native branch while keeping the image build deterministic.
+CPU1_MKENV="${CPU1_SOURCE_DIR}/tools/mkenv.mk"
+require_file "${CPU1_MKENV}"
+sed -i \
+	's|curl --output /dev/null --silent --head --fail https://ai.b-bug.org/k230/|curl --connect-timeout 10 --max-time 30 --output /dev/null --silent --head --fail https://ai.b-bug.org/k230/|' \
+	"${CPU1_MKENV}"
+grep -Fq 'curl --connect-timeout 10 --max-time 30 --output /dev/null --silent --head --fail https://ai.b-bug.org/k230/' \
+	"${CPU1_MKENV}" || fail "cannot bound the upstream CPU1 mirror probe"
+
 APPLICATION_DIR="${CPU1_SOURCE_DIR}/src/rtsmart/rtsmart/kernel/bsp/maix3/applications"
 SCONSCRIPT="${APPLICATION_DIR}/SConscript"
 require_file "${SCONSCRIPT}"
