@@ -59,6 +59,12 @@ fi
 CPU1_CROSS_COMPILE="${CPU1_TOOLCHAIN_DIR}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/bin/riscv64-unknown-linux-musl-"
 [ -x "${CPU1_CROSS_COMPILE}gcc" ] || fail "RT-Smart cross compiler is unavailable"
 
+# The SDK evaluates toolchain_rtsmart.mk while processing the initial
+# k230_canmv_v3p0_defconfig target.  Export the cache directory before that
+# first make invocation so it finds the toolchain provisioned above instead of
+# its unrelated per-user default (~/.kendryte/k230_toolchains).
+export SDK_TOOLCHAIN_DIR="${CPU1_TOOLCHAIN_DIR}"
+
 if [ ! -d "${CPU1_CHECKOUT_DIR}/.git" ]; then
 	[ ! -e "${CPU1_CHECKOUT_DIR}" ] || fail "CPU1 source path is not a Git checkout: ${CPU1_CHECKOUT_DIR}"
 	# Fetch source blobs in one pack but leave large prebuilt images and release
