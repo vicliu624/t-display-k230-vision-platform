@@ -34,10 +34,11 @@ require_file() {
 # The upstream SDK inspects its parent make process for a -jN argument and
 # rejects every value other than 1.  Buildroot's jobserver leaves its original
 # -jN in recursive make metadata even if a child is invoked with -j1.  Start
-# each SDK make tree without that metadata instead, so its nested top-level
-# make sees a parent command line with no parallel-build option at all.
+# each SDK make tree without that metadata instead.  GNU make also propagates
+# MAKEPPID across recursive make boundaries, so clear that inherited parent PID
+# as well and let the SDK's first make see this script shell as its parent.
 run_sdk_make() {
-	env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS make "$@"
+	env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS -u MAKEPPID make "$@"
 }
 
 require_file "${ABI_HEADER}"
