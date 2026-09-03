@@ -34,11 +34,13 @@ require_file() {
 # The upstream SDK inspects its parent make process for a -jN argument and
 # rejects every value other than 1.  Buildroot's jobserver leaves its original
 # -jN in recursive make metadata even if a child is invoked with -j1.  Start
-# each SDK make tree without that metadata instead.  GNU make also propagates
-# MAKEPPID across recursive make boundaries, so clear that inherited parent PID
-# as well and let the SDK's first make see this script shell as its parent.
+# each SDK make tree without that metadata instead.  The SDK's mkenv.mk does
+# not consult MAKEFLAGS directly: it runs `ps` on MAKEPPID.  GNU make preserves
+# an imported MAKEPPID for a child make, so merely unsetting it lets the value
+# from Buildroot be recreated.  Pin it to this script's Bash PID; that command
+# line has no -j option and each SDK make tree then inherits the safe value.
 run_sdk_make() {
-	env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS -u MAKEPPID make "$@"
+	env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS MAKEPPID="$$" make "$@"
 }
 
 require_file "${ABI_HEADER}"
