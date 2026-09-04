@@ -144,10 +144,25 @@ grep -Fq 'curl --connect-timeout 10 --max-time 30 --output /dev/null --silent --
 
 APPLICATION_DIR="${CPU1_SOURCE_DIR}/src/rtsmart/rtsmart/kernel/bsp/maix3/applications"
 SCONSCRIPT="${APPLICATION_DIR}/SConscript"
+RTSMART_BUILDING="${CPU1_SOURCE_DIR}/src/rtsmart/rtsmart/kernel/rt-thread/tools/building.py"
 require_file "${SCONSCRIPT}"
+require_file "${RTSMART_BUILDING}"
 require_file "${CPU1_SOURCE_DIR}/src/rtsmart/Makefile"
 require_file "${CPU1_SOURCE_DIR}/src/opensbi/Makefile"
 mkdir -p "${CPU1_SOURCE_DIR}/src/rtsmart/mpp/include/comm"
+
+# SCons 4.5 on the current Ubuntu runner exposes these construction variables
+# as deque instances.  This pinned RT-Thread revision assumed list instances,
+# so normalize both operands before the first RT-Smart SCons invocation.
+sed -i \
+	"/^[[:space:]]*CPPPATH = Env.get(/c\            CPPPATH = list(Env.get('CPPPATH', [''])) + list(group.get('LOCAL_CPPPATH', ['']))" \
+	"/^[[:space:]]*CPPDEFINES = Env.get(/c\            CPPDEFINES = list(Env.get('CPPDEFINES', [''])) + list(group.get('LOCAL_CPPDEFINES', ['']))" \
+	"${RTSMART_BUILDING}"
+grep -Fq "CPPPATH = list(Env.get('CPPPATH', [''])) + list(group.get('LOCAL_CPPPATH', ['']))" \
+	"${RTSMART_BUILDING}" || fail "cannot adapt RT-Smart CPPPATH for SCons 4"
+grep -Fq "CPPDEFINES = list(Env.get('CPPDEFINES', [''])) + list(group.get('LOCAL_CPPDEFINES', ['']))" \
+	"${RTSMART_BUILDING}" || fail "cannot adapt RT-Smart CPPDEFINES for SCons 4"
+
 install -m 0644 "${SCRIPT_DIR}/tdvp_cpu1_service.c" "${APPLICATION_DIR}/tdvp_cpu1_service.c"
 install -m 0644 "${ABI_HEADER}" "${APPLICATION_DIR}/tdvp_cpu1_abi.h"
 if ! grep -Fq "tdvp_cpu1_service.c" "${SCONSCRIPT}"; then
