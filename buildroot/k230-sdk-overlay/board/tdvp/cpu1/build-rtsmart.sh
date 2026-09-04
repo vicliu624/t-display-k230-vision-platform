@@ -51,6 +51,16 @@ run_sdk_make() {
 require_file "${ABI_HEADER}"
 mkdir -p "${CPU1_CACHE_ROOT}" "${CPU1_TOOLCHAIN_DIR}" "${CPU1_OPENSBI_TOOLCHAIN_DIR}" "$(dirname "${FIRMWARE_OUTPUT}")"
 
+# The upstream OpenSBI image wrapper calls the host-side U-Boot mkimage tool
+# through SDK_UBOOT_BUILD_DIR, even though this integration builds only the
+# CPU1 firmware and does not build U-Boot itself.  Use the distro-provided
+# compatible tool in that expected location, and fail before the expensive
+# SDK build if either upstream host dependency is unavailable.
+CPU1_MKIMAGE="$(command -v mkimage || true)"
+[ -n "${CPU1_MKIMAGE}" ] || fail "U-Boot mkimage is unavailable; install u-boot-tools"
+python3 -c 'from Crypto.Cipher import AES' \
+	|| fail "Python Crypto module is unavailable; install python3-pycryptodome"
+
 if [ ! -x "${CPU1_TOOLCHAIN_DIR}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/bin/riscv64-unknown-linux-musl-gcc" ]; then
 	archive_path="${CPU1_TOOLCHAIN_DIR}/${TOOLCHAIN_ARCHIVE}"
 	if [ ! -f "${archive_path}" ]; then
@@ -213,10 +223,13 @@ export SDK_BUILD_DIR="${CPU1_SOURCE_DIR}/output/${CONFIG_BOARD}"
 export SDK_BUILD_IMAGES_DIR="${SDK_BUILD_DIR}/images"
 export SDK_RTSMART_SRC_DIR="${CPU1_SOURCE_DIR}/src/rtsmart"
 export SDK_RTSMART_BUILD_DIR="${SDK_BUILD_DIR}/rtsmart"
+export SDK_UBOOT_BUILD_DIR="${CPU1_CACHE_ROOT}/host-uboot"
 export SDK_OPENSBI_SRC_DIR="${CPU1_SOURCE_DIR}/src/opensbi"
 export SDK_OPENSBI_BUILD_DIR="${SDK_BUILD_DIR}/opensbi"
 export NCPUS="${TDVP_CPU1_JOBS:-2}"
-mkdir -p "${SDK_BUILD_IMAGES_DIR}" "${SDK_RTSMART_BUILD_DIR}" "${SDK_OPENSBI_BUILD_DIR}"
+mkdir -p "${SDK_BUILD_IMAGES_DIR}" "${SDK_RTSMART_BUILD_DIR}" "${SDK_UBOOT_BUILD_DIR}/tools" "${SDK_OPENSBI_BUILD_DIR}"
+ln -sfn "${CPU1_MKIMAGE}" "${SDK_UBOOT_BUILD_DIR}/tools/mkimage"
+require_file "${SDK_UBOOT_BUILD_DIR}/tools/mkimage"
 
 run_sdk_make -C "${SDK_RTSMART_SRC_DIR}" kernel CROSS_COMPILE="${CPU1_CROSS_COMPILE}"
 # RT-Smart uses the upstream musl toolchain, whereas OpenSBI's Kendryte
