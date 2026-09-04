@@ -14,14 +14,18 @@ CPU1_CACHE_ROOT="${TDVP_CPU1_CACHE_ROOT:-$(dirname "${FIRMWARE_OUTPUT}")/.tdvp-c
 CPU1_CHECKOUT_DIR="${TDVP_CPU1_SOURCE_DIR:-${CPU1_CACHE_ROOT}/canmv_k230}"
 CPU1_SOURCE_DIR="${CPU1_CHECKOUT_DIR}/canmv_k230"
 CPU1_TOOLCHAIN_DIR="${TDVP_CPU1_TOOLCHAIN_DIR:-${CPU1_CACHE_ROOT}/toolchain}"
+CPU1_OPENSBI_TOOLCHAIN_DIR="${TDVP_CPU1_OPENSBI_TOOLCHAIN_DIR:-${CPU1_CACHE_ROOT}/opensbi-toolchain}"
 CPU1_REPOSITORY="https://github.com/Xinyuan-LilyGO/T-Display-K230_canmv_rt.git"
 CPU1_COMMIT="abb07090ad8a666ed7a5e097b3c714b918731645"
 TOOLCHAIN_ARCHIVE="riscv64-unknown-linux-musl-rv64imafdcv-lp64d-20230420.tar.bz2"
 TOOLCHAIN_URL="https://github.com/kendryte/canmv_k230/releases/download/v1.1/${TOOLCHAIN_ARCHIVE}"
+OPENSBI_TOOLCHAIN_NAME="Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.0"
+OPENSBI_TOOLCHAIN_ARCHIVE="${OPENSBI_TOOLCHAIN_NAME}.tar.bz2"
+OPENSBI_TOOLCHAIN_URL="https://github.com/kendryte/canmv_k230/releases/download/v1.1/${OPENSBI_TOOLCHAIN_ARCHIVE}"
 CPU1_RUNTIME_BASE="0x10000000"
 CPU1_RUNTIME_SIZE="0x04000000"
 CPU1_HEAP_SIZE="0x02000000"
-CPU1_OPENSBI_CROSS_COMPILE="${TDVP_CPU1_OPENSBI_CROSS_COMPILE:-/opt/toolchain/Xuantie-900-gcc-linux-6.6.0-glibc-x86_64-V3.0.2/bin/riscv64-unknown-linux-gnu-}"
+CPU1_OPENSBI_CROSS_COMPILE="${TDVP_CPU1_OPENSBI_CROSS_COMPILE:-${CPU1_OPENSBI_TOOLCHAIN_DIR}/${OPENSBI_TOOLCHAIN_NAME}/bin/riscv64-unknown-linux-gnu-}"
 
 fail() {
 	printf 'TDVP CPU1 firmware: %s\n' "$*" >&2
@@ -45,7 +49,7 @@ run_sdk_make() {
 }
 
 require_file "${ABI_HEADER}"
-mkdir -p "${CPU1_CACHE_ROOT}" "${CPU1_TOOLCHAIN_DIR}" "$(dirname "${FIRMWARE_OUTPUT}")"
+mkdir -p "${CPU1_CACHE_ROOT}" "${CPU1_TOOLCHAIN_DIR}" "${CPU1_OPENSBI_TOOLCHAIN_DIR}" "$(dirname "${FIRMWARE_OUTPUT}")"
 
 if [ ! -x "${CPU1_TOOLCHAIN_DIR}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/bin/riscv64-unknown-linux-musl-gcc" ]; then
 	archive_path="${CPU1_TOOLCHAIN_DIR}/${TOOLCHAIN_ARCHIVE}"
@@ -55,6 +59,16 @@ if [ ! -x "${CPU1_TOOLCHAIN_DIR}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/
 		mv "${archive_path}.part" "${archive_path}"
 	fi
 	tar -xjf "${archive_path}" -C "${CPU1_TOOLCHAIN_DIR}"
+fi
+
+if [ ! -x "${CPU1_OPENSBI_CROSS_COMPILE}gcc" ]; then
+	archive_path="${CPU1_OPENSBI_TOOLCHAIN_DIR}/${OPENSBI_TOOLCHAIN_ARCHIVE}"
+	if [ ! -f "${archive_path}" ]; then
+		curl --fail --location --retry 5 \
+			--output "${archive_path}.part" "${OPENSBI_TOOLCHAIN_URL}"
+		mv "${archive_path}.part" "${archive_path}"
+	fi
+	tar -xjf "${archive_path}" -C "${CPU1_OPENSBI_TOOLCHAIN_DIR}"
 fi
 
 CPU1_CROSS_COMPILE="${CPU1_TOOLCHAIN_DIR}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/bin/riscv64-unknown-linux-musl-"
