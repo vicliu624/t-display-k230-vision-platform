@@ -602,7 +602,9 @@ require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-session-idle'
 require_rootfs_content '/etc/xdg/labwc/autostart' 'tdvp-session-idle'
 require_rootfs_content '/usr/local/bin/tdvp-session-lock' 'readonly SWAYLOCK=/usr/bin/swaylock'
 require_rootfs_content '/usr/local/bin/tdvp-session-lock' '"${SWAYLOCK}" -f'
-require_rootfs_content '/usr/local/bin/tdvp-session-idle' 'wlopm --off'
+require_rootfs_content '/usr/local/bin/tdvp-session-idle' 'readonly WLOPM=/usr/bin/wlopm'
+require_rootfs_content '/usr/local/bin/tdvp-session-idle' "\"\${WLOPM} --off '*'\""
+require_rootfs_content '/usr/local/bin/tdvp-session-idle' "\"\${WLOPM} --on '*'\""
 require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-greeter-labwc'
 require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-labwc-session'
 require_fs_path "${ROOTFS}" '/usr/libexec/vicliu-pocket-linux-hardware/vpl-hardwared'
