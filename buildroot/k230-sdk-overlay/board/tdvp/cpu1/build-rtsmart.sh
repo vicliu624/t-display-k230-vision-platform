@@ -61,8 +61,8 @@ mkdir -p "${CPU1_CACHE_ROOT}" "${CPU1_TOOLCHAIN_DIR}" "${CPU1_OPENSBI_TOOLCHAIN_
 CPU1_MKIMAGE="$(command -v mkimage || true)"
 [ -n "${CPU1_MKIMAGE}" ] || fail "U-Boot mkimage is unavailable; install u-boot-tools"
 [ -x "${CPU1_PYTHON}" ] || fail "Python interpreter is unavailable: ${CPU1_PYTHON}"
-"${CPU1_PYTHON}" -c 'from Crypto.Cipher import AES' \
-	|| fail "Python Crypto module is unavailable; install python3-pycryptodome"
+"${CPU1_PYTHON}" -c 'from Cryptodome.Cipher import AES; from Cryptodome.PublicKey import RSA' \
+	|| fail "Python Cryptodome module is unavailable; install python3-pycryptodome"
 
 if [ ! -x "${CPU1_TOOLCHAIN_DIR}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/bin/riscv64-unknown-linux-musl-gcc" ]; then
 	archive_path="${CPU1_TOOLCHAIN_DIR}/${TOOLCHAIN_ARCHIVE}"
@@ -171,6 +171,24 @@ sed -i \
 grep -Fq 'curl --connect-timeout 10 --max-time 30 --output /dev/null --silent --head --fail https://ai.b-bug.org/k230/' \
 	"${CPU1_MKENV}" || fail "cannot bound the upstream CPU1 mirror probe"
 
+# Ubuntu's python3-pycryptodome package deliberately exposes the Cryptodome
+# namespace, whereas this pinned upstream image script imports Crypto.  The
+# image path below is non-secure (-n), so its unconditional gmssl imports are
+# unused and can be disabled without pulling an unpinned Python package into
+# the reproducible host.  The secure-image guard below prevents using this
+# compatibility path for encryption or signing.
+FIRMWARE_GEN="${CPU1_SOURCE_DIR}/tools/firmware_gen.py"
+require_file "${FIRMWARE_GEN}"
+sed -i \
+	-e 's/^from Crypto\./from Cryptodome./' \
+	-e '/^from gmssl\./s/^/# /' \
+	"${FIRMWARE_GEN}"
+grep -Fq 'from Cryptodome.Cipher import AES' "${FIRMWARE_GEN}" \
+	|| fail "cannot adapt upstream firmware Crypto import"
+if grep -Eq '^[[:space:]]*from gmssl\.' "${FIRMWARE_GEN}"; then
+	fail "cannot disable unused upstream firmware gmssl imports"
+fi
+
 APPLICATION_DIR="${CPU1_SOURCE_DIR}/src/rtsmart/rtsmart/kernel/bsp/maix3/applications"
 SCONSCRIPT="${APPLICATION_DIR}/SConscript"
 RTSMART_BUILDING="${CPU1_SOURCE_DIR}/src/rtsmart/rtsmart/kernel/rt-thread/tools/building.py"
@@ -214,6 +232,9 @@ for setting in \
 	fi
 done
 run_sdk_make .autoconf
+if grep -q '^CONFIG_GEN_SECURITY_IMG=y' .config; then
+	fail "secure CPU1 images require the upstream gmssl signing environment"
+fi
 
 export SDK_SRC_ROOT_DIR="${CPU1_SOURCE_DIR}"
 export SDK_TOOLCHAIN_DIR="${CPU1_TOOLCHAIN_DIR}"
