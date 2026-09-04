@@ -181,11 +181,11 @@ FIRMWARE_GEN="${CPU1_SOURCE_DIR}/tools/firmware_gen.py"
 require_file "${FIRMWARE_GEN}"
 sed -i \
 	-e 's/^from Crypto\./from Cryptodome./' \
-	-e '/^from gmssl\./s/^/# /' \
+	-e '/^from gmssl[ .]/s/^/# /' \
 	"${FIRMWARE_GEN}"
 grep -Fq 'from Cryptodome.Cipher import AES' "${FIRMWARE_GEN}" \
 	|| fail "cannot adapt upstream firmware Crypto import"
-if grep -Eq '^[[:space:]]*from gmssl\.' "${FIRMWARE_GEN}"; then
+if grep -Eq '^[[:space:]]*from gmssl([ .])' "${FIRMWARE_GEN}"; then
 	fail "cannot disable unused upstream firmware gmssl imports"
 fi
 
