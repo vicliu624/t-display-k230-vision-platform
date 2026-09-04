@@ -15,6 +15,8 @@ CPU1_CHECKOUT_DIR="${TDVP_CPU1_SOURCE_DIR:-${CPU1_CACHE_ROOT}/canmv_k230}"
 CPU1_SOURCE_DIR="${CPU1_CHECKOUT_DIR}/canmv_k230"
 CPU1_TOOLCHAIN_DIR="${TDVP_CPU1_TOOLCHAIN_DIR:-${CPU1_CACHE_ROOT}/toolchain}"
 CPU1_OPENSBI_TOOLCHAIN_DIR="${TDVP_CPU1_OPENSBI_TOOLCHAIN_DIR:-${CPU1_CACHE_ROOT}/opensbi-toolchain}"
+CPU1_HOST_TOOLS_DIR="${CPU1_CACHE_ROOT}/host-tools"
+CPU1_PYTHON="${TDVP_CPU1_PYTHON:-/usr/bin/python3}"
 CPU1_REPOSITORY="https://github.com/Xinyuan-LilyGO/T-Display-K230_canmv_rt.git"
 CPU1_COMMIT="abb07090ad8a666ed7a5e097b3c714b918731645"
 TOOLCHAIN_ARCHIVE="riscv64-unknown-linux-musl-rv64imafdcv-lp64d-20230420.tar.bz2"
@@ -58,7 +60,8 @@ mkdir -p "${CPU1_CACHE_ROOT}" "${CPU1_TOOLCHAIN_DIR}" "${CPU1_OPENSBI_TOOLCHAIN_
 # SDK build if either upstream host dependency is unavailable.
 CPU1_MKIMAGE="$(command -v mkimage || true)"
 [ -n "${CPU1_MKIMAGE}" ] || fail "U-Boot mkimage is unavailable; install u-boot-tools"
-python3 -c 'from Crypto.Cipher import AES' \
+[ -x "${CPU1_PYTHON}" ] || fail "Python interpreter is unavailable: ${CPU1_PYTHON}"
+"${CPU1_PYTHON}" -c 'from Crypto.Cipher import AES' \
 	|| fail "Python Crypto module is unavailable; install python3-pycryptodome"
 
 if [ ! -x "${CPU1_TOOLCHAIN_DIR}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/bin/riscv64-unknown-linux-musl-gcc" ]; then
@@ -227,9 +230,11 @@ export SDK_UBOOT_BUILD_DIR="${CPU1_CACHE_ROOT}/host-uboot"
 export SDK_OPENSBI_SRC_DIR="${CPU1_SOURCE_DIR}/src/opensbi"
 export SDK_OPENSBI_BUILD_DIR="${SDK_BUILD_DIR}/opensbi"
 export NCPUS="${TDVP_CPU1_JOBS:-2}"
-mkdir -p "${SDK_BUILD_IMAGES_DIR}" "${SDK_RTSMART_BUILD_DIR}" "${SDK_UBOOT_BUILD_DIR}/tools" "${SDK_OPENSBI_BUILD_DIR}"
+mkdir -p "${SDK_BUILD_IMAGES_DIR}" "${SDK_RTSMART_BUILD_DIR}" "${SDK_UBOOT_BUILD_DIR}/tools" "${SDK_OPENSBI_BUILD_DIR}" "${CPU1_HOST_TOOLS_DIR}"
 ln -sfn "${CPU1_MKIMAGE}" "${SDK_UBOOT_BUILD_DIR}/tools/mkimage"
+ln -sfn "${CPU1_PYTHON}" "${CPU1_HOST_TOOLS_DIR}/python3"
 require_file "${SDK_UBOOT_BUILD_DIR}/tools/mkimage"
+export PATH="${CPU1_HOST_TOOLS_DIR}:${PATH}"
 
 run_sdk_make -C "${SDK_RTSMART_SRC_DIR}" kernel CROSS_COMPILE="${CPU1_CROSS_COMPILE}"
 # RT-Smart uses the upstream musl toolchain, whereas OpenSBI's Kendryte

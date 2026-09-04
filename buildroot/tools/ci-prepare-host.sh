@@ -22,7 +22,7 @@ sudo apt-get install -y \
     unzip wget xz-utils
 
 command -v mkimage >/dev/null
-python3 -c 'from Crypto.Cipher import AES'
+/usr/bin/python3 -c 'from Crypto.Cipher import AES'
 
 mkdir -p "${CACHE_ROOT}/toolchain"
 if [ ! -x "${TOOLCHAIN_DIR}/bin/riscv64-unknown-linux-gnu-gcc" ]; then
