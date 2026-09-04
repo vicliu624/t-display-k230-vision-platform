@@ -106,7 +106,7 @@ else
 			'/canmv_k230/src/rtsmart/Makefile' \
 			'/canmv_k230/src/rtsmart/Kconfig' \
 			'/canmv_k230/src/rtsmart/mpp/Kconfig' \
-			'/canmv_k230/src/rtsmart/parse_config/' \
+			'/canmv_k230/src/rtsmart/parse_config' \
 			'/canmv_k230/src/rtsmart/rtsmart/' \
 			'/canmv_k230/src/opensbi/'
 	} > "${CPU1_SPARSE_FILE}"
@@ -115,6 +115,19 @@ git -C "${CPU1_CHECKOUT_DIR}" fetch --depth=1 --filter=blob:limit=1048576 \
 	origin "${CPU1_COMMIT}"
 git -C "${CPU1_CHECKOUT_DIR}" checkout --detach --force "${CPU1_COMMIT}"
 git -C "${CPU1_CHECKOUT_DIR}" read-tree -mu HEAD
+
+# parse_config is an executable at the root of the RT-Smart source directory.
+# Some Git sparse-checkout implementations keep the parent directory but omit
+# that file-only pattern.  Restore exactly the pinned blob when that happens,
+# instead of expanding the checkout to unrelated SDK trees.
+CPU1_PARSE_CONFIG="${CPU1_SOURCE_DIR}/src/rtsmart/parse_config"
+if [ ! -f "${CPU1_PARSE_CONFIG}" ]; then
+	mkdir -p "$(dirname "${CPU1_PARSE_CONFIG}")"
+	git -C "${CPU1_CHECKOUT_DIR}" show "${CPU1_COMMIT}:canmv_k230/src/rtsmart/parse_config" \
+		> "${CPU1_PARSE_CONFIG}"
+	chmod 0755 "${CPU1_PARSE_CONFIG}"
+fi
+require_file "${CPU1_PARSE_CONFIG}"
 
 # The pinned SDK's mkenv.mk probes an optional third-party mirror with curl
 # but supplies neither a connection nor a transfer deadline.  Once the CPU1
