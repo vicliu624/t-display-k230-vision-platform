@@ -21,6 +21,7 @@ TOOLCHAIN_URL="https://github.com/kendryte/canmv_k230/releases/download/v1.1/${T
 CPU1_RUNTIME_BASE="0x10000000"
 CPU1_RUNTIME_SIZE="0x04000000"
 CPU1_HEAP_SIZE="0x02000000"
+CPU1_OPENSBI_CROSS_COMPILE="${TDVP_CPU1_OPENSBI_CROSS_COMPILE:-/opt/toolchain/Xuantie-900-gcc-linux-6.6.0-glibc-x86_64-V3.0.2/bin/riscv64-unknown-linux-gnu-}"
 
 fail() {
 	printf 'TDVP CPU1 firmware: %s\n' "$*" >&2
@@ -58,6 +59,7 @@ fi
 
 CPU1_CROSS_COMPILE="${CPU1_TOOLCHAIN_DIR}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/bin/riscv64-unknown-linux-musl-"
 [ -x "${CPU1_CROSS_COMPILE}gcc" ] || fail "RT-Smart cross compiler is unavailable"
+[ -x "${CPU1_OPENSBI_CROSS_COMPILE}gcc" ] || fail "OpenSBI Linux cross compiler is unavailable"
 
 # The SDK evaluates toolchain_rtsmart.mk while processing the initial
 # k230_canmv_v3p0_defconfig target.  Export the cache directory before that
@@ -203,7 +205,9 @@ export NCPUS="${TDVP_CPU1_JOBS:-2}"
 mkdir -p "${SDK_BUILD_IMAGES_DIR}" "${SDK_RTSMART_BUILD_DIR}" "${SDK_OPENSBI_BUILD_DIR}"
 
 run_sdk_make -C "${SDK_RTSMART_SRC_DIR}" kernel CROSS_COMPILE="${CPU1_CROSS_COMPILE}"
-run_sdk_make -C "${SDK_OPENSBI_SRC_DIR}" all CROSS_COMPILE="${CPU1_CROSS_COMPILE}"
+# RT-Smart uses the upstream musl toolchain, whereas OpenSBI's Kendryte
+# platform requires the XuanTie Linux toolchain installed by the CI host.
+run_sdk_make -C "${SDK_OPENSBI_SRC_DIR}" all CROSS_COMPILE="${CPU1_OPENSBI_CROSS_COMPILE}"
 CPU1_FIRMWARE="${SDK_BUILD_IMAGES_DIR}/opensbi/opensbi_rtt_system.bin"
 require_file "${CPU1_FIRMWARE}"
 if [ "$(stat -c '%s' "${CPU1_FIRMWARE}")" -gt $((20 * 1024 * 1024)) ]; then
