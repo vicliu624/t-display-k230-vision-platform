@@ -155,8 +155,8 @@ mkdir -p "${CPU1_SOURCE_DIR}/src/rtsmart/mpp/include/comm"
 # as deque instances.  This pinned RT-Thread revision assumed list instances,
 # so normalize both operands before the first RT-Smart SCons invocation.
 sed -i \
-	"/^[[:space:]]*CPPPATH = Env.get(/c\            CPPPATH = list(Env.get('CPPPATH', [''])) + list(group.get('LOCAL_CPPPATH', ['']))" \
-	"/^[[:space:]]*CPPDEFINES = Env.get(/c\            CPPDEFINES = list(Env.get('CPPDEFINES', [''])) + list(group.get('LOCAL_CPPDEFINES', ['']))" \
+	-e "/^[[:space:]]*CPPPATH = Env.get(/c\            CPPPATH = list(Env.get('CPPPATH', [''])) + list(group.get('LOCAL_CPPPATH', ['']))" \
+	-e "/^[[:space:]]*CPPDEFINES = Env.get(/c\            CPPDEFINES = list(Env.get('CPPDEFINES', [''])) + list(group.get('LOCAL_CPPDEFINES', ['']))" \
 	"${RTSMART_BUILDING}"
 grep -Fq "CPPPATH = list(Env.get('CPPPATH', [''])) + list(group.get('LOCAL_CPPPATH', ['']))" \
 	"${RTSMART_BUILDING}" || fail "cannot adapt RT-Smart CPPPATH for SCons 4"
