@@ -51,7 +51,8 @@ for conflicting_patch in \
 	0036-tdvp-riscv-dts-canaan-add-t-display-k230-keyboard.patch \
 	0037-tdvp-input-tca8418-polling.patch \
 	0038-tdvp-input-tca8418-hardware-debounce.patch \
-	0039-tdvp-pinctrl-k230-support-standard-schmitt-enable.patch; do
+	0039-tdvp-pinctrl-k230-support-standard-schmitt-enable.patch \
+	0053-tdvp-cpu1-rtsmart-mailbox.patch; do
 	rm -f "$PATCH_DIR/$conflicting_patch"
 done
 
