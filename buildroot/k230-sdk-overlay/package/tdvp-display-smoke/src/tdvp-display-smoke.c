@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -17,6 +18,9 @@
 #include <xf86drmMode.h>
 
 #define TDVP_MAX_PROPS 64
+#define TDVP_PAGE_FLIP_TIMEOUT_MS 1000U
+#define TDVP_NSEC_PER_SEC 1000000000ULL
+#define TDVP_NSEC_PER_USEC 1000ULL
 
 struct tdvp_props {
 	drmModePropertyPtr props[TDVP_MAX_PROPS];
@@ -38,6 +42,10 @@ struct tdvp_display {
 	struct tdvp_props plane_props;
 	uint32_t plane_id;
 	uint32_t fourcc;
+	/* The test owns a complete modeset until it atomically disables it. */
+	bool test_scanout_active;
+	/* Do not release a buffer while a submitted flip can still reference it. */
+	bool page_flip_pending;
 };
 
 struct tdvp_buffer {
@@ -46,6 +54,30 @@ struct tdvp_buffer {
 	uint32_t pitch;
 	uint64_t size;
 	void *map;
+};
+
+struct tdvp_page_flip {
+	bool received;
+	bool unexpected_crtc;
+	bool clock_failed;
+	uint32_t expected_crtc_id;
+	uint32_t observed_crtc_id;
+	uint32_t submitted_fb_id;
+	uint32_t released_fb_id;
+	unsigned int sequence;
+	unsigned int seconds;
+	unsigned int microseconds;
+	uint64_t submitted_ns;
+	uint64_t received_ns;
+};
+
+struct tdvp_vblank {
+	bool received;
+	bool clock_failed;
+	unsigned int sequence;
+	unsigned int seconds;
+	unsigned int microseconds;
+	uint64_t received_ns;
 };
 
 struct tdvp_color {
@@ -77,6 +109,7 @@ struct tdvp_options {
 	unsigned int seconds;
 	unsigned int cell;
 	unsigned int fps;
+	unsigned int page_flip_timeout_ms;
 };
 
 static const uint32_t tdvp_format_candidates[] = {
@@ -120,9 +153,13 @@ static void tdvp_usage(const char *argv0)
 	printf("                      vlines, hlines, checker, stride, grid, counter\n");
 	printf("  --cell N            line/checker/grid cell width in pixels\n");
 	printf("  --fps N             counter updates per second, 1..60 (default: 1)\n");
+	printf("  --page-flip-timeout-ms N\n");
+	printf("                      wait limit for each dynamic flip (default: %u)\n",
+	       TDVP_PAGE_FLIP_TIMEOUT_MS);
 	printf("\n");
 	printf("counter uses two dumb buffers: first commit modesets, later commits\n");
-	printf("only replace the plane framebuffer. All coordinates are raw DRM mode\n");
+	printf("only replace the plane framebuffer and wait for the matching page-flip\n");
+	printf("event before reusing the previous buffer. All coordinates are raw DRM mode\n");
 	printf("coordinates, before any fbcon or userspace rotation policy.\n");
 }
 
@@ -146,6 +183,31 @@ static void tdvp_sleep_milliseconds(unsigned int milliseconds)
 
 	while (nanosleep(&req, &req) < 0 && errno == EINTR) {
 	}
+}
+
+static int tdvp_monotonic_nanoseconds(uint64_t *out)
+{
+	struct timespec now;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &now) < 0 || now.tv_sec < 0 ||
+		(uint64_t)now.tv_sec > UINT64_MAX / TDVP_NSEC_PER_SEC) {
+		tdvp_print_errno("clock_gettime(CLOCK_MONOTONIC)");
+		return -1;
+	}
+
+	*out = (uint64_t)now.tv_sec * TDVP_NSEC_PER_SEC +
+		(uint64_t)now.tv_nsec;
+	return 0;
+}
+
+static int tdvp_monotonic_milliseconds(uint64_t *out)
+{
+	uint64_t now_ns;
+
+	if (tdvp_monotonic_nanoseconds(&now_ns) < 0)
+		return -1;
+	*out = now_ns / 1000000ULL;
+	return 0;
 }
 
 static int tdvp_parse_uint(const char *value, unsigned int *out)
@@ -837,10 +899,256 @@ static void tdvp_fill_pattern(const struct tdvp_display *display,
 	}
 }
 
+static void tdvp_page_flip_handler(int fd, unsigned int sequence,
+				  unsigned int seconds, unsigned int microseconds,
+				  unsigned int crtc_id, void *data)
+{
+	struct tdvp_page_flip *page_flip = data;
+
+	(void)fd;
+	page_flip->received = true;
+	page_flip->observed_crtc_id = crtc_id;
+	page_flip->sequence = sequence;
+	page_flip->seconds = seconds;
+	page_flip->microseconds = microseconds;
+	page_flip->unexpected_crtc = crtc_id != page_flip->expected_crtc_id;
+	if (tdvp_monotonic_nanoseconds(&page_flip->received_ns) < 0)
+		page_flip->clock_failed = true;
+}
+
+static void tdvp_vblank_handler(int fd, unsigned int sequence,
+				unsigned int seconds, unsigned int microseconds,
+				void *data)
+{
+	struct tdvp_vblank *vblank = data;
+
+	(void)fd;
+	vblank->received = true;
+	vblank->sequence = sequence;
+	vblank->seconds = seconds;
+	vblank->microseconds = microseconds;
+	if (tdvp_monotonic_nanoseconds(&vblank->received_ns) < 0)
+		vblank->clock_failed = true;
+}
+
+static int tdvp_wait_for_page_flip(struct tdvp_display *display,
+				   struct tdvp_page_flip *page_flip,
+				   unsigned int timeout_ms)
+{
+	struct pollfd pollfd = {
+		.fd = display->fd,
+		.events = POLLIN,
+	};
+	drmEventContext event = {
+		.version = 3,
+		.page_flip_handler2 = tdvp_page_flip_handler,
+	};
+	uint64_t start_ms;
+	uint64_t deadline_ms;
+	int ret;
+
+	if (tdvp_monotonic_milliseconds(&start_ms) < 0)
+		return -1;
+	if (start_ms > UINT64_MAX - timeout_ms) {
+		fprintf(stderr,
+			"tdvp-display-smoke: invalid page-flip timeout deadline\n");
+		return -1;
+	}
+	deadline_ms = start_ms + timeout_ms;
+
+	while (!page_flip->received) {
+		uint64_t now_ms;
+		uint64_t remaining_ms;
+		int poll_timeout_ms;
+
+		if (tdvp_monotonic_milliseconds(&now_ms) < 0)
+			return -1;
+		if (now_ms >= deadline_ms) {
+			fprintf(stderr,
+				"tdvp-display-smoke: timed out after %u ms waiting for page-flip event\n",
+				timeout_ms);
+			return -1;
+		}
+		remaining_ms = deadline_ms - now_ms;
+		poll_timeout_ms = remaining_ms > (uint64_t)INT_MAX ?
+			INT_MAX : (int)remaining_ms;
+
+		do {
+			ret = poll(&pollfd, 1, poll_timeout_ms);
+		} while (ret < 0 && errno == EINTR);
+		if (ret == 0) {
+			fprintf(stderr,
+				"tdvp-display-smoke: timed out after %u ms waiting for page-flip event\n",
+				timeout_ms);
+			return -1;
+		}
+		if (ret < 0) {
+			tdvp_print_errno("poll(page-flip)");
+			return -1;
+		}
+		if ((pollfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 ||
+		    (pollfd.revents & POLLIN) == 0) {
+			fprintf(stderr,
+				"tdvp-display-smoke: unexpected page-flip poll events 0x%x\n",
+				pollfd.revents);
+			return -1;
+		}
+		if (drmHandleEvent(display->fd, &event) != 0) {
+			tdvp_print_errno("drmHandleEvent(page-flip)");
+			return -1;
+		}
+	}
+	/* The event has released the previous scan-out buffer even if validation
+	 * below rejects its metadata. */
+	display->page_flip_pending = false;
+
+	if (page_flip->unexpected_crtc) {
+		fprintf(stderr,
+			"tdvp-display-smoke: page-flip event CRTC %u, expected %u\n",
+			page_flip->observed_crtc_id, page_flip->expected_crtc_id);
+		return -1;
+	}
+	if (page_flip->clock_failed || page_flip->received_ns <= page_flip->submitted_ns) {
+		fprintf(stderr,
+			"tdvp-display-smoke: invalid submit-to-event clock sample for FB %u\n",
+			page_flip->submitted_fb_id);
+		return -1;
+	}
+
+	return 0;
+}
+
+/*
+ * A detach event is the minimum normal KMS release point. Keep the smoke
+ * buffer alive for one more independently requested vblank before issuing
+ * DRM_IOCTL_MODE_RMFB/DRM_IOCTL_MODE_DESTROY_DUMB. This is deliberately a
+ * test-only margin: it does not change the compositor's normal presentation
+ * latency, but protects maintenance diagnostics if a driver reports a detach
+ * event too close to its hardware latch point.
+ */
+static int tdvp_wait_for_post_detach_vblank(struct tdvp_display *display,
+		unsigned int timeout_ms, unsigned int detach_sequence)
+{
+	struct tdvp_vblank vblank = { 0 };
+	drmVBlank request = { 0 };
+	struct pollfd pollfd = {
+		.fd = display->fd,
+		.events = POLLIN,
+	};
+	drmEventContext event = {
+		.version = 3,
+		.vblank_handler = tdvp_vblank_handler,
+	};
+	uint32_t crtc_selector;
+	uint64_t start_ms;
+	uint64_t deadline_ms;
+	uint32_t sequence_delta;
+	int ret;
+
+	if (display->crtc_idx < 0) {
+		fprintf(stderr,
+			"tdvp-display-smoke: cannot request a guard vblank without a CRTC index\n");
+		return -1;
+	}
+	crtc_selector = (uint32_t)display->crtc_idx << DRM_VBLANK_HIGH_CRTC_SHIFT;
+	if ((crtc_selector & ~DRM_VBLANK_HIGH_CRTC_MASK) != 0) {
+		fprintf(stderr,
+			"tdvp-display-smoke: CRTC index %d is not representable in DRM vblank requests\n",
+			display->crtc_idx);
+		return -1;
+	}
+	request.request.type = DRM_VBLANK_RELATIVE | DRM_VBLANK_EVENT |
+		(int)crtc_selector;
+	request.request.sequence = 1;
+	request.request.signal = (unsigned long)(uintptr_t)&vblank;
+	if (drmWaitVBlank(display->fd, &request) != 0) {
+		tdvp_print_errno("drmWaitVBlank(post-detach guard)");
+		return -1;
+	}
+
+	if (tdvp_monotonic_milliseconds(&start_ms) < 0)
+		return -1;
+	if (start_ms > UINT64_MAX - timeout_ms) {
+		fprintf(stderr,
+			"tdvp-display-smoke: invalid post-detach vblank timeout deadline\n");
+		return -1;
+	}
+	deadline_ms = start_ms + timeout_ms;
+
+	while (!vblank.received) {
+		uint64_t now_ms;
+		uint64_t remaining_ms;
+		int poll_timeout_ms;
+
+		if (tdvp_monotonic_milliseconds(&now_ms) < 0)
+			return -1;
+		if (now_ms >= deadline_ms) {
+			fprintf(stderr,
+				"tdvp-display-smoke: timed out after %u ms waiting for post-detach vblank\n",
+				timeout_ms);
+			return -1;
+		}
+		remaining_ms = deadline_ms - now_ms;
+		poll_timeout_ms = remaining_ms > (uint64_t)INT_MAX ?
+			INT_MAX : (int)remaining_ms;
+
+		do {
+			ret = poll(&pollfd, 1, poll_timeout_ms);
+		} while (ret < 0 && errno == EINTR);
+		if (ret == 0) {
+			fprintf(stderr,
+				"tdvp-display-smoke: timed out after %u ms waiting for post-detach vblank\n",
+				timeout_ms);
+			return -1;
+		}
+		if (ret < 0) {
+			tdvp_print_errno("poll(post-detach vblank)");
+			return -1;
+		}
+		if ((pollfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 ||
+		    (pollfd.revents & POLLIN) == 0) {
+			fprintf(stderr,
+				"tdvp-display-smoke: unexpected post-detach vblank poll events 0x%x\n",
+				pollfd.revents);
+			return -1;
+		}
+		if (drmHandleEvent(display->fd, &event) != 0) {
+			tdvp_print_errno("drmHandleEvent(post-detach vblank)");
+			return -1;
+		}
+	}
+	if (vblank.clock_failed) {
+		fprintf(stderr,
+			"tdvp-display-smoke: invalid post-detach vblank clock sample\n");
+		return -1;
+	}
+	/*
+	 * DRM_VBLANK_RELATIVE asks for the next vblank after the detach event has
+	 * been handled.  Require that relationship explicitly instead of treating
+	 * any callback as a release margin: a stale/repeated vblank sequence would
+	 * otherwise permit freeing a buffer while a broken driver could still be
+	 * latching the detached plane.  The half-range check remains correct across
+	 * the unsigned 32-bit DRM sequence wrap.
+	 */
+	sequence_delta = (uint32_t)vblank.sequence - (uint32_t)detach_sequence;
+	if (sequence_delta == 0 || sequence_delta > INT32_MAX) {
+		fprintf(stderr,
+			"tdvp-display-smoke: guard vblank sequence %u did not advance after detach sequence %u\n",
+			vblank.sequence, detach_sequence);
+		return -1;
+	}
+
+	printf("tdvp-display-smoke: guard_vblank sequence=%u timestamp=%u.%06u\n",
+		vblank.sequence, vblank.seconds, vblank.microseconds);
+	return 0;
+}
+
 static int tdvp_commit_buffer(struct tdvp_display *display,
-			      const struct tdvp_buffer *buffer, bool modeset)
+			      const struct tdvp_buffer *buffer, bool modeset,
+			      struct tdvp_page_flip *page_flip)
 {
 	drmModeAtomicReqPtr req;
+	uint32_t flags = modeset ? DRM_MODE_ATOMIC_ALLOW_MODESET : 0;
 	int ret;
 
 	req = drmModeAtomicAlloc();
@@ -892,15 +1200,88 @@ static int tdvp_commit_buffer(struct tdvp_display *display,
 			  display->mode.vdisplay) < 0)
 		ret = -1;
 
-	if (!ret && drmModeAtomicCommit(display->fd, req,
-				       modeset ? DRM_MODE_ATOMIC_ALLOW_MODESET : 0,
-				       NULL) < 0) {
+	if (page_flip != NULL) {
+		flags |= DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT;
+		page_flip->submitted_fb_id = buffer->fb_id;
+		if (tdvp_monotonic_nanoseconds(&page_flip->submitted_ns) < 0) {
+			drmModeAtomicFree(req);
+			return -1;
+		}
+	}
+	if (!ret && drmModeAtomicCommit(display->fd, req, flags, page_flip) < 0) {
 		tdvp_print_errno("drmModeAtomicCommit");
 		ret = -1;
+	}
+	if (!ret && modeset)
+		display->test_scanout_active = true;
+	if (!ret && page_flip != NULL) {
+		display->page_flip_pending = true;
 	}
 
 	drmModeAtomicFree(req);
 	return ret;
+}
+
+/*
+ * Do not let the following drmModeRmFB/DESTROY_DUMB operations race a plane
+ * that the smoke test configured. Keep the CRTC and connector active: the
+ * same maintenance transaction samples vblank immediately afterwards. An
+ * event-gated plane detach removes the test FB without suppressing that
+ * independent vblank check.
+ */
+static int tdvp_disable_test_scanout(struct tdvp_display *display,
+		unsigned int page_flip_timeout_ms)
+{
+	drmModeAtomicReqPtr req;
+	struct tdvp_page_flip page_flip = {
+		.expected_crtc_id = display->crtc_id,
+	};
+	int ret = 0;
+
+	if (!display->test_scanout_active)
+		return 0;
+	if (display->page_flip_pending) {
+		fprintf(stderr,
+			"tdvp-display-smoke: refusing teardown while a page flip is pending\n");
+		return -1;
+	}
+
+	req = drmModeAtomicAlloc();
+	if (!req) {
+		fprintf(stderr, "tdvp-display-smoke: drmModeAtomicAlloc(detach) failed\n");
+		return -1;
+	}
+
+	if (tdvp_add_prop(req, display->plane_id, &display->plane_props,
+			  "FB_ID", 0) < 0 ||
+	    tdvp_add_prop(req, display->plane_id, &display->plane_props,
+			  "CRTC_ID", 0) < 0) {
+		ret = -1;
+	}
+	if (!ret && tdvp_monotonic_nanoseconds(&page_flip.submitted_ns) < 0)
+		ret = -1;
+	if (!ret && drmModeAtomicCommit(display->fd, req,
+			DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT,
+			&page_flip) < 0) {
+		tdvp_print_errno("drmModeAtomicCommit(detach)");
+		ret = -1;
+	}
+
+	drmModeAtomicFree(req);
+	if (ret)
+		return -1;
+
+	display->page_flip_pending = true;
+	if (tdvp_wait_for_page_flip(display, &page_flip,
+			page_flip_timeout_ms) < 0)
+		return -1;
+	if (tdvp_wait_for_post_detach_vblank(display,
+			page_flip_timeout_ms, page_flip.sequence) < 0)
+		return -1;
+
+	display->test_scanout_active = false;
+	printf("tdvp-display-smoke: PASS test plane detached and guard vblank observed before buffer release\n");
+	return 0;
 }
 
 static bool tdvp_requested_format_matches(const char *requested,
@@ -969,7 +1350,7 @@ static int tdvp_run_static(struct tdvp_display *display,
 			   struct tdvp_buffer *buffer)
 {
 	tdvp_fill_pattern(display, buffer, options->pattern, options->cell, 0);
-	if (tdvp_commit_buffer(display, buffer, true) < 0)
+	if (tdvp_commit_buffer(display, buffer, true, NULL) < 0)
 		return -1;
 
 	printf("tdvp-display-smoke: PASS static pattern=%s hold_seconds=%u\n",
@@ -984,36 +1365,151 @@ static int tdvp_run_counter(struct tdvp_display *display,
 {
 	uint64_t frames = (uint64_t)options->seconds * options->fps;
 	uint64_t frame;
+	uint64_t first_event_us = 0;
+	uint64_t previous_event_us = 0;
+	uint64_t min_event_interval_us = UINT64_MAX;
+	uint64_t max_event_interval_us = 0;
+	uint64_t total_submit_to_event_us = 0;
+	uint64_t min_submit_to_event_us = UINT64_MAX;
+	uint64_t max_submit_to_event_us = 0;
+	uint64_t run_started_ns;
+	uint64_t run_completed_ns;
+	uint64_t wall_elapsed_ns;
+	uint32_t first_sequence = 0;
+	uint32_t previous_sequence = 0;
+	uint32_t min_sequence_step = UINT_MAX;
+	uint32_t max_sequence_step = 0;
+	bool buffer_writable[2] = { false, true };
+	unsigned int current_buffer_index = 0;
 	unsigned int interval_ms = 1000U / options->fps;
 
 	tdvp_fill_pattern(display, &buffers[0], options->pattern, options->cell, 0);
 	tdvp_fill_pattern(display, &buffers[1], options->pattern, options->cell, 0);
-	if (tdvp_commit_buffer(display, &buffers[0], true) < 0)
+	if (tdvp_commit_buffer(display, &buffers[0], true, NULL) < 0)
 		return -1;
 
 	printf("tdvp-display-smoke: PASS initial modeset pattern=counter frames=%llu fps=%u\n",
 	       (unsigned long long)frames, options->fps);
+	if (tdvp_monotonic_nanoseconds(&run_started_ns) < 0)
+		return -1;
 	for (frame = 1; frame <= frames; ++frame) {
-		struct tdvp_buffer *next = &buffers[frame & 1U];
+		unsigned int next_buffer_index = (unsigned int)(frame & 1U);
+		unsigned int released_buffer_index = current_buffer_index;
+		struct tdvp_buffer *next = &buffers[next_buffer_index];
+		uint64_t submit_to_event_us;
+		struct tdvp_page_flip page_flip = {
+			.expected_crtc_id = display->crtc_id,
+			.released_fb_id = buffers[released_buffer_index].fb_id,
+		};
 
+		if (!buffer_writable[next_buffer_index]) {
+			fprintf(stderr,
+				"tdvp-display-smoke: refusing to overwrite FB %u before its page-flip release\n",
+				next->fb_id);
+			return -1;
+		}
 		tdvp_fill_pattern(display, next, options->pattern, options->cell,
 				  frame);
-		if (tdvp_commit_buffer(display, next, false) < 0) {
+		if (tdvp_commit_buffer(display, next, false, &page_flip) < 0 ||
+		    tdvp_wait_for_page_flip(display, &page_flip,
+					    options->page_flip_timeout_ms) < 0) {
 			fprintf(stderr,
-				"tdvp-display-smoke: dynamic commit failed at frame=%llu\n",
+				"tdvp-display-smoke: dynamic flip failed at frame=%llu\n",
 				(unsigned long long)frame);
 			return -1;
 		}
 
+		{
+			uint64_t event_us = (uint64_t)page_flip.seconds * 1000000ULL +
+				page_flip.microseconds;
+			submit_to_event_us = (page_flip.received_ns - page_flip.submitted_ns) /
+				TDVP_NSEC_PER_USEC;
+
+			if (submit_to_event_us < min_submit_to_event_us)
+				min_submit_to_event_us = submit_to_event_us;
+			if (submit_to_event_us > max_submit_to_event_us)
+				max_submit_to_event_us = submit_to_event_us;
+			total_submit_to_event_us += submit_to_event_us;
+
+			if (frame == 1) {
+				first_sequence = page_flip.sequence;
+				first_event_us = event_us;
+			} else {
+				uint32_t sequence_step =
+					page_flip.sequence - previous_sequence;
+				uint64_t event_interval_us;
+
+				if (sequence_step == 0) {
+					fprintf(stderr,
+						"tdvp-display-smoke: page-flip sequence did not advance at frame=%llu\n",
+						(unsigned long long)frame);
+					return -1;
+				}
+				if (event_us <= previous_event_us) {
+					fprintf(stderr,
+						"tdvp-display-smoke: page-flip timestamp did not advance at frame=%llu\n",
+						(unsigned long long)frame);
+					return -1;
+				}
+
+				event_interval_us = event_us - previous_event_us;
+				if (sequence_step < min_sequence_step)
+					min_sequence_step = sequence_step;
+				if (sequence_step > max_sequence_step)
+					max_sequence_step = sequence_step;
+				if (event_interval_us < min_event_interval_us)
+					min_event_interval_us = event_interval_us;
+				if (event_interval_us > max_event_interval_us)
+					max_event_interval_us = event_interval_us;
+			}
+
+			previous_sequence = page_flip.sequence;
+			previous_event_us = event_us;
+		}
+
+		/* The event is the release point for the buffer that was scanned out. */
+		buffer_writable[released_buffer_index] = true;
+		buffer_writable[next_buffer_index] = false;
+		current_buffer_index = next_buffer_index;
+
 		if ((frame % options->fps) == 0) {
-			printf("tdvp-display-smoke: frame=%llu elapsed_seconds=%llu\n",
+			printf("tdvp-display-smoke: frame=%llu nominal_seconds=%llu "
+			       "flip_seq=%u flip_time=%u.%06u submit_to_event_ms=%.3f "
+			       "released_fb=%u submitted_fb=%u\n",
 			       (unsigned long long)frame,
-			       (unsigned long long)(frame / options->fps));
+			       (unsigned long long)(frame / options->fps),
+			       page_flip.sequence, page_flip.seconds,
+			       page_flip.microseconds,
+			       (double)submit_to_event_us / 1000.0,
+			       page_flip.released_fb_id, page_flip.submitted_fb_id);
 		}
 		tdvp_sleep_milliseconds(interval_ms);
 	}
+	if (tdvp_monotonic_nanoseconds(&run_completed_ns) < 0 ||
+	    run_completed_ns <= run_started_ns) {
+		fprintf(stderr,
+			"tdvp-display-smoke: invalid counter wall-clock duration\n");
+		return -1;
+	}
+	wall_elapsed_ns = run_completed_ns - run_started_ns;
 
-	printf("tdvp-display-smoke: PASS dynamic pattern=counter frames=%llu\n",
+	printf("tdvp-display-smoke: PASS dynamic pattern=counter frames=%llu "
+	       "requested_fps=%u wall_elapsed_ms=%llu achieved_fps=%.2f "
+	       "sequence=%u..%u sequence_step=%u..%u event_span_ms=%llu "
+	       "event_interval_ms=%llu..%llu submit_to_event_ms=%.3f/%.3f/%.3f "
+	       "released_buffers=%llu\n",
+	       (unsigned long long)frames, options->fps,
+	       (unsigned long long)(wall_elapsed_ns / 1000000ULL),
+	       (double)frames * (double)TDVP_NSEC_PER_SEC / (double)wall_elapsed_ns,
+	       first_sequence, previous_sequence,
+	       frames > 1 ? min_sequence_step : 0,
+	       frames > 1 ? max_sequence_step : 0,
+	       (unsigned long long)((previous_event_us - first_event_us) / 1000ULL),
+	       (unsigned long long)(frames > 1 ? min_event_interval_us / 1000ULL : 0),
+	       (unsigned long long)(frames > 1 ? max_event_interval_us / 1000ULL : 0),
+	       (double)min_submit_to_event_us / 1000.0,
+	       (double)total_submit_to_event_us / (double)frames / 1000.0,
+	       (double)max_submit_to_event_us / 1000.0,
 	       (unsigned long long)frames);
 	return 0;
 }
@@ -1023,6 +1519,7 @@ static int tdvp_run_smoke(struct tdvp_display *display,
 {
 	struct tdvp_buffer buffers[2];
 	bool dynamic = tdvp_pattern_is_dynamic(options->pattern);
+	bool release_buffers = true;
 	int ret;
 
 	memset(buffers, 0, sizeof(buffers));
@@ -1044,8 +1541,24 @@ static int tdvp_run_smoke(struct tdvp_display *display,
 	else
 		ret = tdvp_run_static(display, options, &buffers[0]);
 
-	tdvp_destroy_buffer(display, &buffers[1]);
-	tdvp_destroy_buffer(display, &buffers[0]);
+	if (tdvp_disable_test_scanout(display, options->page_flip_timeout_ms) < 0) {
+		fprintf(stderr,
+			"tdvp-display-smoke: test scanout teardown failed; preserving FBs until DRM close\n");
+		release_buffers = false;
+		ret = -1;
+	}
+	if (release_buffers) {
+		tdvp_destroy_buffer(display, &buffers[1]);
+		tdvp_destroy_buffer(display, &buffers[0]);
+	} else {
+		/*
+		 * A failed teardown must never issue DRM_IOCTL_MODE_DESTROY_DUMB for a
+		 * buffer the KMS state may still reference. Closing the test's DRM FD
+		 * drops its master/file resources; process exit then unmaps this memory.
+		 */
+		fprintf(stderr,
+			"tdvp-display-smoke: deferring FB/dumb-buffer destruction to DRM close\n");
+	}
 	return ret;
 }
 
@@ -1058,6 +1571,7 @@ int main(int argc, char **argv)
 		.seconds = 5,
 		.cell = 0,
 		.fps = 1,
+		.page_flip_timeout_ms = TDVP_PAGE_FLIP_TIMEOUT_MS,
 	};
 	struct tdvp_display display;
 	int i;
@@ -1067,8 +1581,10 @@ int main(int argc, char **argv)
 		if (strcmp(argv[i], "--device") == 0 && i + 1 < argc) {
 			options.device = argv[++i];
 		} else if (strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
-			if (tdvp_parse_uint(argv[++i], &options.seconds) < 0) {
-				fprintf(stderr, "tdvp-display-smoke: invalid --seconds value\n");
+			if (tdvp_parse_uint(argv[++i], &options.seconds) < 0 ||
+			    options.seconds == 0) {
+				fprintf(stderr,
+					"tdvp-display-smoke: --seconds must be positive\n");
 				return 1;
 			}
 		} else if (strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
@@ -1088,6 +1604,14 @@ int main(int argc, char **argv)
 			if (tdvp_parse_uint(argv[++i], &options.fps) < 0 ||
 			    options.fps == 0 || options.fps > 60) {
 				fprintf(stderr, "tdvp-display-smoke: --fps must be 1..60\n");
+				return 1;
+			}
+		} else if (strcmp(argv[i], "--page-flip-timeout-ms") == 0 && i + 1 < argc) {
+			if (tdvp_parse_uint(argv[++i], &options.page_flip_timeout_ms) < 0 ||
+			    options.page_flip_timeout_ms == 0 ||
+			    options.page_flip_timeout_ms > 10000) {
+				fprintf(stderr,
+					"tdvp-display-smoke: --page-flip-timeout-ms must be 1..10000\n");
 				return 1;
 			}
 		} else if (strcmp(argv[i], "--help") == 0 ||

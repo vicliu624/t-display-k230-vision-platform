@@ -28,6 +28,7 @@ TDVP_OVERLAY="${PROJECT_DIR}/buildroot/k230-sdk-overlay"
 USERSPACE_DIR="${PROJECT_DIR}/user-space"
 TDVP_CORE_PATCHES="${PROJECT_DIR}/buildroot/patches/buildroot"
 SOURCE_LOCK="${PROJECT_DIR}/buildroot/sdk-sources.lock"
+RENDERER_STACK_LOCK_CHECK="${SCRIPT_DIR}/verify-tdvp-renderer-stack-lock.sh"
 WORKTREE="$(realpath -m "$1")"
 SDK_COMMIT="5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7"
 PROFILE="k230_canmv_t_display_rm69a10_labwc_desktop_defconfig"
@@ -35,6 +36,7 @@ COMPONENTS=(
 	"tdvp-greeter"
 	"tdvp-kpu-acceptance"
 	"tdvp-labwc-desktop"
+	"tdvp-wayland-tools"
 	"vicliu-pocket-linux-hardware"
 )
 
@@ -146,10 +148,39 @@ write_build_graph_manifest() {
 		cd "${overlay_dir}"
 		# Kconfig, the selected defconfig, board kernel fragments, and the ordered
 		# Linux patch queue determine the effective Buildroot/kernel configuration.
-		# Source, assets, and package make recipes are rebuilt package-by-package;
-		# a Linux patch change requires a fresh output tree so the patched kernel
-		# source cannot be reused accidentally.
+		# The Linux patch subset is tracked independently below: it needs a Linux
+		# package reset, not a toolchain and desktop-package rebuild.
 		find . -type f \( -name Config.in -o -path './configs/*' -o -path './board/*/fragment/*' -o -path './linux/*.patch' \) -print0 | LC_ALL=C sort -z |
+			while IFS= read -r -d '' file; do
+				if LC_ALL=C grep -Iq . "${file}"; then
+					hash="$(sed 's/\r$//' "${file}" | sha256sum | awk '{print $1}')"
+				else
+					hash="$(sha256sum "${file}" | awk '{print $1}')"
+				fi
+				printf '%s  buildroot/k230-sdk-overlay/%s\n' "${hash}" "${file#./}"
+			done
+	) | LC_ALL=C sort
+}
+
+write_linux_patch_manifest() {
+	local overlay_dir="$1"
+
+	(
+		cd "${overlay_dir}"
+		find ./linux -type f -name '*.patch' -print0 | LC_ALL=C sort -z |
+			while IFS= read -r -d '' file; do
+				hash="$(sed 's/\r$//' "${file}" | sha256sum | awk '{print $1}')"
+				printf '%s  buildroot/k230-sdk-overlay/%s\n' "${hash}" "${file#./}"
+			done
+	) | LC_ALL=C sort
+}
+
+write_non_linux_build_graph_manifest() {
+	local overlay_dir="$1"
+
+	(
+		cd "${overlay_dir}"
+		find . -type f \( -name Config.in -o -path './configs/*' -o -path './board/*/fragment/*' \) -print0 | LC_ALL=C sort -z |
 			while IFS= read -r -d '' file; do
 				if LC_ALL=C grep -Iq . "${file}"; then
 					hash="$(sed 's/\r$//' "${file}" | sha256sum | awk '{print $1}')"
@@ -184,6 +215,21 @@ write_previous_build_graph_manifest() {
 		$2 ~ /^buildroot\/k230-sdk-overlay\/linux\/.*\.patch$/ { print }' "${manifest}" | LC_ALL=C sort
 }
 
+write_previous_linux_patch_manifest() {
+	local manifest="$1"
+
+	awk '$2 ~ /^buildroot\/k230-sdk-overlay\/linux\/.*\.patch$/ { print }' "${manifest}" | LC_ALL=C sort
+}
+
+write_previous_non_linux_build_graph_manifest() {
+	local manifest="$1"
+
+	awk '$2 == "buildroot/k230-sdk-overlay/Config.in" || \
+		$2 ~ /^buildroot\/k230-sdk-overlay\/.*\/Config\.in$/ || \
+		$2 ~ /^buildroot\/k230-sdk-overlay\/configs\// || \
+		$2 ~ /^buildroot\/k230-sdk-overlay\/board\/.*\/fragment\// { print }' "${manifest}" | LC_ALL=C sort
+}
+
 write_previous_overlay_manifest() {
 	local manifest="$1"
 
@@ -204,6 +250,7 @@ require_dir "${TDVP_OVERLAY}"
 require_dir "${USERSPACE_DIR}"
 require_dir "${TDVP_CORE_PATCHES}"
 require_file "${SOURCE_LOCK}"
+require_file "${RENDERER_STACK_LOCK_CHECK}"
 
 for component in "${COMPONENTS[@]}"; do
 	require_dir "${USERSPACE_DIR}/${component}/src"
@@ -218,6 +265,10 @@ fi
 previous_manifest="${WORKTREE}/.tdvp/sdk-baseline-manifest"
 current_graph_digest="$(write_build_graph_manifest "${TDVP_OVERLAY}" | sha256sum | awk '{print $1}')"
 previous_graph_digest=""
+current_non_linux_graph_digest="$(write_non_linux_build_graph_manifest "${TDVP_OVERLAY}" | sha256sum | awk '{print $1}')"
+previous_non_linux_graph_digest=""
+current_linux_patch_digest="$(write_linux_patch_manifest "${TDVP_OVERLAY}" | sha256sum | awk '{print $1}')"
+previous_linux_patch_digest=""
 current_overlay_digest="$(write_platform_source_manifest | sha256sum | awk '{print $1}')"
 previous_overlay_digest=""
 current_core_patch_digest="$(write_core_patch_manifest "${TDVP_CORE_PATCHES}" | sha256sum | awk '{print $1}')"
@@ -227,15 +278,30 @@ if [ -f "${previous_manifest}" ] && \
 	previous_graph_digest="$(write_previous_build_graph_manifest "${previous_manifest}" | sha256sum | awk '{print $1}')"
 fi
 if [ -f "${previous_manifest}" ] && \
+	[ -n "$(write_previous_non_linux_build_graph_manifest "${previous_manifest}")" ]; then
+	previous_non_linux_graph_digest="$(write_previous_non_linux_build_graph_manifest "${previous_manifest}" | sha256sum | awk '{print $1}')"
+fi
+if [ -f "${previous_manifest}" ] && \
+	[ -n "$(write_previous_linux_patch_manifest "${previous_manifest}")" ]; then
+	previous_linux_patch_digest="$(write_previous_linux_patch_manifest "${previous_manifest}" | sha256sum | awk '{print $1}')"
+fi
+if [ -f "${previous_manifest}" ] && \
 	[ -n "$(write_previous_overlay_manifest "${previous_manifest}")" ]; then
 	previous_overlay_digest="$(write_previous_overlay_manifest "${previous_manifest}" | sha256sum | awk '{print $1}')"
 fi
 graph_changed=0
+linux_patch_changed=0
 core_patch_changed=0
 overlay_changed=0
-if [ -n "${previous_graph_digest}" ] && \
-	[ "${previous_graph_digest}" != "${current_graph_digest}" ]; then
-	graph_changed=1
+if [ -f "${previous_manifest}" ]; then
+	if [ -z "${previous_non_linux_graph_digest}" ] || \
+		[ "${previous_non_linux_graph_digest}" != "${current_non_linux_graph_digest}" ]; then
+		graph_changed=1
+	fi
+	if [ -z "${previous_linux_patch_digest}" ] || \
+		[ "${previous_linux_patch_digest}" != "${current_linux_patch_digest}" ]; then
+		linux_patch_changed=1
+	fi
 fi
 if [ -f "${previous_manifest}" ] && \
 	{ [ -z "${previous_core_patch_digest}" ] || \
@@ -253,6 +319,8 @@ if [ "${TDVP_STAGE_DRY_RUN:-0}" = "1" ]; then
 		graph_status="baseline absent"
 	elif [ "${graph_changed}" = "1" ]; then
 		graph_status="package graph or core patch set changed; Buildroot output reset required"
+	elif [ "${linux_patch_changed}" = "1" ]; then
+		graph_status="Linux patch set changed; linux-dirclean is required before the next kernel build"
 	else
 		graph_status="unchanged; incremental package rebuild is sufficient"
 	fi
@@ -277,6 +345,8 @@ TDVP SDK stage: dry run
   build graph:         ${graph_status}
   overlay source:      ${overlay_status}
 	build graph digest:  ${current_graph_digest}
+	non-Linux graph:     ${current_non_linux_graph_digest}
+	Linux patch digest:  ${current_linux_patch_digest}
 	overlay digest:      ${current_overlay_digest}
 	core patch digest:   ${current_core_patch_digest}
 	core patch set:      ${core_patch_status}
@@ -304,17 +374,32 @@ stage_component_sources "${WORKTREE}/buildroot-overlay"
 normalize_text_line_endings
 verify_staged_component_sources "${WORKTREE}/buildroot-overlay"
 
-# A package graph change must start from an empty Buildroot target tree. Source
-# and asset changes are deliberately incremental: their individual packages
-# are cleaned and rebuilt by the requested package target.
+# The VGLite userspace sources originate in the SDK copy rather than the TDVP
+# overlay. Record their effective staged tree separately: the ordinary
+# platform-source manifest intentionally only covers TDVP-owned files.
+write_renderer_stack_manifest() {
+	bash "${RENDERER_STACK_LOCK_CHECK}" --stage "${WORKTREE}"
+}
+
+current_renderer_stack_digest="$(write_renderer_stack_manifest | sha256sum | awk '{print $1}')"
+
+mkdir -p "${WORKTREE}/.tdvp"
+linux_patch_reset_marker="${WORKTREE}/.tdvp/linux-patch-reset-required"
+
+# A Kconfig, defconfig, board-fragment, or core Buildroot patch change starts
+# from an empty target tree. A Linux patch-only change preserves the toolchain
+# and unrelated packages, but leaves a durable marker that the build helper
+# consumes by running linux-dirclean before it builds Linux again.
 if [ "${graph_changed}" = "1" ]; then
 	rm -rf "${WORKTREE}/output/${PROFILE}" \
 		"${WORKTREE}/output/buildroot-2025.02.1"
+	rm -f "${linux_patch_reset_marker}"
+elif [ "${linux_patch_changed}" = "1" ]; then
+	printf '%s\n' "${current_linux_patch_digest}" > "${linux_patch_reset_marker}"
 fi
 
-mkdir -p "${WORKTREE}/.tdvp"
 {
-	printf 'tdvp_sdk_stage_version=6\n'
+	printf 'tdvp_sdk_stage_version=7\n'
 	printf 'sdk_commit=%s\n' "${SDK_COMMIT}"
 	printf 'sdk_buildroot_version=2025.02.1\n'
 	printf 'profile=%s\n' "${PROFILE}"
@@ -325,10 +410,14 @@ mkdir -p "${WORKTREE}/.tdvp"
 	printf 'source_lock=buildroot/sdk-sources.lock\n'
 	printf 'source_lock_sha256='
 	sed 's/\r$//' "${SOURCE_LOCK}" | sha256sum | awk '{print $1}'
+	printf 'renderer_stack_sha256=%s\n' "${current_renderer_stack_digest}"
 	printf 'text_line_endings=lf-in-disposable-worktree\n'
 	printf 'build_graph_sha256=%s\n' "${current_graph_digest}"
+	printf 'non_linux_build_graph_sha256=%s\n' "${current_non_linux_graph_digest}"
+	printf 'linux_patch_sha256=%s\n' "${current_linux_patch_digest}"
 	printf 'core_patch_sha256=%s\n' "${current_core_patch_digest}"
 	printf 'local_overlay_changed=%s\n' "${overlay_changed}"
+	write_renderer_stack_manifest
 	write_platform_source_manifest
 } > "${WORKTREE}/.tdvp/sdk-baseline-manifest"
 

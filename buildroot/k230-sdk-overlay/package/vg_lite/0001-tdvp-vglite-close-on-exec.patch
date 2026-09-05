@@ -1,0 +1,45 @@
+From 9f49a6202cb63cfb11378e2a166f9a2cb7dfc410 Mon Sep 17 00:00:00 2001
+From: TDVP Display Maintainers <display@tdvp.invalid>
+Date: Fri, 5 Sep 2026 16:58:00 +0800
+Subject: [PATCH] vglite: prevent the process-global device fd from leaking on
+ exec
+
+The vendor VGLite userspace library opens /dev/vg_lite lazily with O_RDWR,
+but leaves the descriptor inheritable. Labwc starts its desktop autostart
+programs through exec, so PCManFM, wf-panel, Quick Settings and the LilyGO key
+helper retain references to Labwc's VGLite file description even though none
+of them use VGLite.
+
+K230 has one VGLite hardware context. Inheriting that file does not create a
+second context, but it prevents the kernel file-release path from running when
+Labwc exits and makes resource lifetime depend on unrelated desktop clients.
+
+Set O_CLOEXEC when the library opens the device. Fork without exec remains
+unchanged, while every normal desktop exec closes the inherited descriptor
+before its program starts.
+
+Signed-off-by: TDVP Display Maintainers <display@tdvp.invalid>
+---
+ VGLiteKernel/linux/vg_lite_ioctl.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/VGLiteKernel/linux/vg_lite_ioctl.c b/VGLiteKernel/linux/vg_lite_ioctl.c
+index 6eb7e91..b630659 100644
+--- a/VGLiteKernel/linux/vg_lite_ioctl.c
++++ b/VGLiteKernel/linux/vg_lite_ioctl.c
+@@ -92,7 +92,12 @@ vg_lite_error_t vg_lite_kernel(vg_lite_kernel_command_t command, void * data)
+     };
+ 
+     if (device == 0) {
+-        device = open("/dev/vg_lite", O_RDWR);
++        /*
++         * Labwc starts ordinary desktop clients through exec. This file owns
++         * the process-global VGLite driver context, so child programs must
++         * not retain it and delay the kernel's per-file release lifecycle.
++         */
++        device = open("/dev/vg_lite", O_RDWR | O_CLOEXEC);
+         if (device == -1)
+             return VG_LITE_GENERIC_IO;
+ 
+-- 
+2.47.1

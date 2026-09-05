@@ -1,0 +1,785 @@
+diff --git a/backend/drm/drm.c b/backend/drm/drm.c
+index ea23f17..c22397c 100644
+--- a/backend/drm/drm.c
++++ b/backend/drm/drm.c
+@@ -47,6 +47,48 @@ static const uint32_t COMMIT_OUTPUT_STATE =
+ static const uint32_t SUPPORTED_OUTPUT_STATE =
+ 	WLR_OUTPUT_STATE_BACKEND_OPTIONAL | COMMIT_OUTPUT_STATE;
+ 
++/*
++ * A K230 VGLite frame and its KMS framebuffer meet at wlr_buffer. This
++ * opt-in trace gives an on-device reproduction a stable correlation key
++ * without changing the ownership or release rules of either subsystem.
++ */
++static bool tdvp_vglite_diagnostics_enabled(void) {
++	static int enabled = -1;
++	if (enabled < 0) {
++		enabled = env_parse_bool("TDVP_VGLITE_DIAGNOSTICS");
++	}
++	return enabled != 0;
++}
++
++static uint32_t tdvp_drm_fb_id(const struct wlr_drm_fb *fb) {
++	return fb != NULL ? fb->id : 0;
++}
++
++static void *tdvp_drm_fb_buffer(const struct wlr_drm_fb *fb) {
++	return fb != NULL ? (void *)fb->wlr_buf : NULL;
++}
++
++static void tdvp_drm_log_buffers(struct wlr_drm_connector *conn,
++		const char *stage, uint32_t commit_seq,
++		const struct wlr_drm_fb *submitted_fb) {
++	if (!tdvp_vglite_diagnostics_enabled()) {
++		return;
++	}
++
++	struct wlr_drm_plane *plane = conn->crtc != NULL ? conn->crtc->primary : NULL;
++	const struct wlr_drm_fb *current_fb = plane != NULL ? plane->current_fb : NULL;
++	const struct wlr_drm_fb *queued_fb = plane != NULL ? plane->queued_fb : NULL;
++	wlr_drm_conn_log(conn, WLR_INFO,
++		"TDVP_VGLITE_DIAG stage=%s commit_seq=%"PRIu32
++		" submitted_fb=%"PRIu32" submitted_buffer=%p"
++		" current_fb=%"PRIu32" current_buffer=%p"
++		" queued_fb=%"PRIu32" queued_buffer=%p",
++		stage, commit_seq,
++		tdvp_drm_fb_id(submitted_fb), tdvp_drm_fb_buffer(submitted_fb),
++		tdvp_drm_fb_id(current_fb), tdvp_drm_fb_buffer(current_fb),
++		tdvp_drm_fb_id(queued_fb), tdvp_drm_fb_buffer(queued_fb));
++}
++
+ bool check_drm_features(struct wlr_drm_backend *drm) {
+ 	if (drmGetCap(drm->fd, DRM_CAP_CURSOR_WIDTH, &drm->cursor_width)) {
+ 		drm->cursor_width = 64;
+@@ -554,6 +596,8 @@ static void drm_connector_apply_commit(const struct wlr_drm_connector_state *sta
+ 	struct wlr_drm_crtc *crtc = conn->crtc;
+ 
+ 	drm_fb_copy(&crtc->primary->queued_fb, state->primary_fb);
++	tdvp_drm_log_buffers(conn, "queue", conn->output.commit_seq + 1,
++		state->primary_fb);
+ 	if (crtc->cursor != NULL) {
+ 		drm_fb_copy(&crtc->cursor->queued_fb, state->cursor_fb);
+ 	}
+@@ -621,7 +665,30 @@ static bool drm_commit(struct wlr_drm_backend *drm,
+ 		page_flip->async = (flags & DRM_MODE_PAGE_FLIP_ASYNC);
+ 	}
+ 
++	const bool diagnostics = tdvp_vglite_diagnostics_enabled() && !test_only;
++	struct timespec started = { 0 }, finished = { 0 };
++	if (diagnostics) {
++		(void)clock_gettime(CLOCK_MONOTONIC, &started);
++	}
+ 	bool ok = drm->iface->commit(drm, state, page_flip, flags, test_only);
++	if (diagnostics) {
++		(void)clock_gettime(CLOCK_MONOTONIC, &finished);
++		const char *iface = drm->iface == &atomic_iface ? "atomic" : "legacy-or-liftoff";
++		const double elapsed_ms =
++			(double)(finished.tv_sec - started.tv_sec) * 1000.0 +
++			(double)(finished.tv_nsec - started.tv_nsec) / 1000000.0;
++		for (size_t i = 0; i < state->connectors_len; i++) {
++			const struct wlr_drm_connector_state *conn_state = &state->connectors[i];
++			wlr_drm_conn_log(conn_state->connector, WLR_INFO,
++				"TDVP_VGLITE_DIAG stage=drm_commit commit_seq=%"PRIu32
++				" iface=%s flags=0x%"PRIx32" result=%s elapsed_ms=%.3f"
++				" submitted_fb=%"PRIu32" submitted_buffer=%p",
++				conn_state->connector->output.commit_seq + 1, iface, flags,
++				ok ? "success" : "failure", elapsed_ms,
++				tdvp_drm_fb_id(conn_state->primary_fb),
++				tdvp_drm_fb_buffer(conn_state->primary_fb));
++		}
++	}
+ 	if (ok && !test_only) {
+ 		for (size_t i = 0; i < state->connectors_len; i++) {
+ 			drm_connector_apply_commit(&state->connectors[i], page_flip);
+@@ -2059,6 +2126,15 @@ static void handle_page_flip(int fd, unsigned seq,
+ 	}
+ 
+ 	struct wlr_drm_plane *plane = conn->crtc->primary;
++	struct wlr_drm_fb *presented_fb = plane->queued_fb;
++	if (tdvp_vglite_diagnostics_enabled()) {
++		wlr_drm_conn_log(conn, WLR_INFO,
++			"TDVP_VGLITE_DIAG stage=page_flip_event commit_seq=%"PRIu32
++			" drm_sequence=%u drm_timestamp=%u.%06u",
++			conn->output.commit_seq, seq, tv_sec, tv_usec);
++	}
++	tdvp_drm_log_buffers(conn, "page_flip_before", conn->output.commit_seq,
++		presented_fb);
+ 	if (plane->queued_fb) {
+ 		drm_fb_move(&plane->current_fb, &plane->queued_fb);
+ 	}
+@@ -2071,6 +2147,8 @@ static void handle_page_flip(int fd, unsigned seq,
+ 	wl_list_for_each(layer, &conn->crtc->layers, link) {
+ 		drm_fb_move(&layer->current_fb, &layer->queued_fb);
+ 	}
++	tdvp_drm_log_buffers(conn, "page_flip_after", conn->output.commit_seq,
++		presented_fb);
+ 
+ 	/* Don't report ZERO_COPY in multi-gpu situations, because we had to copy
+ 	 * data between the GPUs, even if we were using the direct scanout
+diff --git a/docs/env_vars.md b/docs/env_vars.md
+index a2a86c8..c28592c 100644
+--- a/docs/env_vars.md
++++ b/docs/env_vars.md
+@@ -9,7 +9,8 @@ wlroots reads these environment variables
+ * *WLR_XWAYLAND*: specifies the path to an Xwayland binary to be used (instead
+   of following shell search semantics for "Xwayland")
+ * *WLR_RENDERER*: forces the creation of a specified renderer (available
+-  renderers: gles2, pixman, vulkan)
++  renderers: gles2, pixman, vulkan, vglite when built with the K230 VGLite
++  renderer)
+ * *WLR_RENDER_DRM_DEVICE*: specifies the DRM node to use for
+   hardware-accelerated renderers.
+ * *WLR_EGL_NO_MODIFIERS*: set to 1 to disable format modifiers in EGL, this can
+@@ -27,6 +28,23 @@ wlroots reads these environment variables
+ * *WLR_DRM_FORCE_LIBLIFTOFF*: set to 1 to force libliftoff (by default,
+   libliftoff is never used)
+ 
++## K230 VGLite renderer
++
++* *TDVP_VGLITE_FRAME_TIMING*: set to a non-zero value to log the time spent
++  in `vg_lite_finish()` for each output render pass.
++* *TDVP_VGLITE_DIAGNOSTICS*: set to `1` for a short, controlled reproduction
++  of a presentation issue. It emits `TDVP_VGLITE_DIAG` records for VGLite
++  texture uploads (damage rectangle count, copied bytes, and complete source
++  texture bytes), completion, DRM commit submission, FB queueing, and page-flip
++  completion. The completion record also contains texture/solid clip-rectangle
++  and VGLite-blit-attempt counts, so damage fragmentation can be correlated
++  with `vg_lite_finish()` latency without coalescing clips unsafely. The common
++  `wlr_buffer` pointer and DRM FB ID correlate the
++  presentation records; texture logs quantify the SHM upload/cache-maintenance
++  tradeoff. It is off by default and intentionally produces records at the
++  texture-update and output-frame rates; do not leave it enabled during normal
++  use.
++
+ ## Headless backend
+ 
+ * *WLR_HEADLESS_OUTPUTS*: when using the headless backend specifies the number
+diff --git a/include/render/vglite.h b/include/render/vglite.h
+index fbe9f1c..70b46ee 100644
+--- a/include/render/vglite.h
++++ b/include/render/vglite.h
+@@ -2,6 +2,7 @@
+ #define RENDER_VGLITE_H
+ 
+ #include <stdbool.h>
++#include <stddef.h>
+ #include <stdint.h>
+ #include <vg_lite.h>
+ #include <wayland-server-core.h>
+@@ -15,6 +16,8 @@ struct wlr_vglite_renderer {
+ 	/* A duplicate of the DRM backend's primary card FD. */
+ 	int drm_fd;
+ 	bool initialized;
++	/* A failed vg_lite_finish() leaves command completion untrustworthy. */
++	bool context_failed;
+ 
+ 	struct wl_list buffers; // wlr_vglite_buffer.link
+ 	struct wl_list textures; // wlr_vglite_texture.link
+@@ -30,6 +33,7 @@ struct wlr_vglite_renderer {
+ struct wlr_vglite_buffer {
+ 	struct wlr_vglite_renderer *renderer;
+ 	struct wlr_buffer *buffer;
++	uint32_t drm_format;
+ 	vg_lite_buffer_t target;
+ 	struct wl_listener destroy;
+ 	struct wl_list link; // wlr_vglite_renderer.buffers
+@@ -43,12 +47,32 @@ struct wlr_vglite_texture {
+ 	uint32_t drm_format;
+ 	vg_lite_buffer_t source;
+ 	bool allocated;
++	/*
++	 * CPU uploads modify the VGLite allocation directly. The K230 vendor
++	 * vg_lite_blit() otherwise cleans the whole source allocation for every
++	 * blit, including every damage-clip rectangle. Permit exactly the first
++	 * post-upload blit to retain the source CPU mapping, then suppress the
++	 * redundant vendor clean for subsequent clips and later static frames.
++	 */
++	bool source_cache_dirty;
+ };
+ 
+ struct wlr_vglite_render_pass {
+ 	struct wlr_render_pass base;
+ 	struct wlr_vglite_buffer *buffer;
++	bool data_ptr_access_active;
+ 	bool failed;
++	bool diagnostics;
++	/*
++	 * Per-pass accounting used only by TDVP_VGLITE_DIAGNOSTICS. A VGLite
++	 * blit is issued once for every clip rectangle, so these counters expose
++	 * damage fragmentation without changing the renderer's clip semantics.
++	 */
++	size_t texture_clip_rects;
++	size_t solid_clip_rects;
++	size_t texture_blit_attempts;
++	size_t solid_blit_attempts;
++	size_t texture_cache_flushes;
+ };
+ 
+ bool vglite_format_from_drm(uint32_t drm_format,
+@@ -59,6 +83,8 @@ struct wlr_vglite_texture *vglite_texture_from_wlr(
+ 	struct wlr_texture *texture);
+ struct wlr_vglite_buffer *vglite_buffer_get_or_create(
+ 	struct wlr_vglite_renderer *renderer, struct wlr_buffer *buffer);
++bool vglite_buffer_begin_data_ptr_access(struct wlr_vglite_buffer *buffer);
++void vglite_buffer_end_data_ptr_access(struct wlr_vglite_buffer *buffer);
+ struct wlr_render_pass *vglite_begin_render_pass(
+ 	struct wlr_vglite_buffer *buffer,
+ 	const struct wlr_buffer_pass_options *options);
+diff --git a/render/vglite/pass.c b/render/vglite/pass.c
+index 6c677a1..9950892 100644
+--- a/render/vglite/pass.c
++++ b/render/vglite/pass.c
+@@ -21,6 +21,21 @@ static bool frame_timing_enabled(void) {
+ 	return enabled != 0;
+ }
+ 
++/*
++ * This is deliberately separate from TDVP_VGLITE_FRAME_TIMING. The latter is
++ * useful for an aggregate performance run; this switch emits a per-frame
++ * record which is intended to be correlated with the DRM page-flip records.
++ * Keep it opt-in because the records are emitted at the output frame rate.
++ */
++static bool diagnostics_enabled(void) {
++	static int enabled = -1;
++	if (enabled < 0) {
++		const char *setting = getenv("TDVP_VGLITE_DIAGNOSTICS");
++		enabled = setting != NULL && strcmp(setting, "1") == 0;
++	}
++	return enabled != 0;
++}
++
+ static uint64_t elapsed_nanoseconds(const struct timespec *started,
+ 		const struct timespec *finished) {
+ 	return (uint64_t)(finished->tv_sec - started->tv_sec) * UINT64_C(1000000000) +
+@@ -154,6 +169,69 @@ static void reset_source_alpha(void) {
+ 	(void)vg_lite_source_global_alpha(VG_LITE_NORMAL, 0xff);
+ }
+ 
++/*
++ * K230's vg_lite_blit() invokes a whole-allocation CPU-cache clean whenever
++ * source->memory is non-NULL. wlroots may call it once for every clip
++ * rectangle, and layer-shell clients commonly own a full-output ARGB texture
++ * while changing only a narrow band. Let precisely the first post-upload
++ * blit perform the vendor's proven clean; hide the CPU mapping for later
++ * clips and static frames. This does not depend on VG_LITE_CACHE: the locked
++ * K230 kernel currently implements that ioctl as a no-op. The GPU address and
++ * allocation handle remain intact, and source->memory is restored before
++ * returning so CPU uploads, readback and destruction retain their normal ABI.
++ */
++static vg_lite_error_t blit_cached_texture(struct wlr_vglite_render_pass *pass,
++		struct wlr_vglite_texture *texture, vg_lite_matrix_t *matrix,
++		vg_lite_blend_t blend, vg_lite_filter_t filter) {
++	void *source_memory = texture->source.memory;
++	if (source_memory == NULL) {
++		wlr_log(WLR_ERROR, "VGLite texture source has no CPU mapping");
++		return VG_LITE_INVALID_ARGUMENT;
++	}
++
++	bool source_cache_dirty = texture->source_cache_dirty;
++	if (!source_cache_dirty) {
++		/* The texture has no new CPU writes; suppress the redundant clean. */
++		texture->source.memory = NULL;
++	}
++	vg_lite_error_t error = vg_lite_blit(&pass->buffer->target, &texture->source,
++		matrix, blend, 0, filter);
++	texture->source.memory = source_memory;
++	if (error == VG_LITE_SUCCESS && source_cache_dirty) {
++		/* vg_lite_blit() has just cleaned this mapped source allocation once. */
++		texture->source_cache_dirty = false;
++		if (pass->diagnostics) {
++			pass->texture_cache_flushes++;
++		}
++	}
++	return error;
++}
++
++/*
++ * Scissor and global source alpha belong to the process-wide VGLite context,
++ * not to a wlroots render pass. The normal texture and rectangle paths restore
++ * their own state, but a failing vendor call can interrupt that cleanup. Do a
++ * best-effort restore before finishing an already-failed pass so a later
++ * recovery frame never inherits a stale clip or alpha value. This deliberately
++ * stays off the successful fast path.
++ */
++static bool restore_default_render_state(void) {
++	bool ok = true;
++	vg_lite_error_t error = vg_lite_disable_scissor();
++	if (error != VG_LITE_SUCCESS) {
++		wlr_log(WLR_ERROR, "vg_lite_disable_scissor(recovery) failed: %d", error);
++		ok = false;
++	}
++
++	error = vg_lite_source_global_alpha(VG_LITE_NORMAL, 0xff);
++	if (error != VG_LITE_SUCCESS) {
++		wlr_log(WLR_ERROR,
++			"vg_lite_source_global_alpha(recovery) failed: %d", error);
++		ok = false;
++	}
++	return ok;
++}
++
+ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+ 		const struct wlr_render_texture_options *options) {
+ 	struct wlr_vglite_render_pass *pass = get_render_pass(wlr_pass);
+@@ -183,13 +261,16 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+ 		wlr_log(WLR_ERROR, "Failed to configure VGLite source alpha");
+ 		return;
+ 	}
+-
+ 	int n_rects = 0;
+ 	const pixman_box32_t *rects = options->clip ?
+ 		pixman_region32_rectangles((pixman_region32_t *)options->clip, &n_rects) : NULL;
+-	if (rects == NULL) {
++	/* A non-NULL but empty clip means "draw nowhere", not "draw everywhere". */
++	if (options->clip == NULL) {
+ 		n_rects = 1;
+ 	}
++	if (pass->diagnostics) {
++		pass->texture_clip_rects += n_rects;
++	}
+ 	for (int i = 0; i < n_rects; ++i) {
+ 		const pixman_box32_t *clip = rects == NULL ? NULL : &rects[i];
+ 		if (!set_clip(clip)) {
+@@ -197,8 +278,11 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+ 			wlr_log(WLR_ERROR, "Failed to configure VGLite scissor");
+ 			break;
+ 		}
+-		vg_lite_error_t error = vg_lite_blit(&pass->buffer->target, &texture->source,
+-			&matrix, get_blend(options->blend_mode), 0, get_filter(options->filter_mode));
++		if (pass->diagnostics) {
++			pass->texture_blit_attempts++;
++		}
++		vg_lite_error_t error = blit_cached_texture(pass, texture, &matrix,
++			get_blend(options->blend_mode), get_filter(options->filter_mode));
+ 		if (error != VG_LITE_SUCCESS) {
+ 			fail_pass(pass, "vg_lite_blit(texture)", error);
+ 			break;
+@@ -249,9 +333,13 @@ static void render_pass_add_rect(struct wlr_render_pass *wlr_pass,
+ 	int n_rects = 0;
+ 	const pixman_box32_t *rects = options->clip ?
+ 		pixman_region32_rectangles((pixman_region32_t *)options->clip, &n_rects) : NULL;
+-	if (rects == NULL) {
++	/* Preserve empty clip regions instead of treating them as no clip. */
++	if (options->clip == NULL) {
+ 		n_rects = 1;
+ 	}
++	if (pass->diagnostics) {
++		pass->solid_clip_rects += n_rects;
++	}
+ 	enum wlr_render_blend_mode mode = options->color.a == 1 ?
+ 		WLR_RENDER_BLEND_MODE_NONE : options->blend_mode;
+ 	for (int i = 0; i < n_rects; ++i) {
+@@ -260,6 +348,9 @@ static void render_pass_add_rect(struct wlr_render_pass *wlr_pass,
+ 			pass->failed = true;
+ 			break;
+ 		}
++		if (pass->diagnostics) {
++			pass->solid_blit_attempts++;
++		}
+ 		vg_lite_error_t error = vg_lite_blit(&pass->buffer->target, &renderer->solid,
+ 			&matrix, get_blend(mode), 0, VG_LITE_FILTER_POINT);
+ 		if (error != VG_LITE_SUCCESS) {
+@@ -274,21 +365,61 @@ static void render_pass_add_rect(struct wlr_render_pass *wlr_pass,
+ 
+ static bool render_pass_submit(struct wlr_render_pass *wlr_pass) {
+ 	struct wlr_vglite_render_pass *pass = get_render_pass(wlr_pass);
+-	const bool measure = frame_timing_enabled();
++	const bool diagnostics = pass->diagnostics;
++	const bool measure = frame_timing_enabled() || diagnostics;
++	bool state_recovery_attempted = pass->failed;
++	bool state_recovery_ok = true;
+ 	struct timespec started = { 0 }, finished = { 0 };
++	if (state_recovery_attempted) {
++		state_recovery_ok = restore_default_render_state();
++	}
+ 	if (measure) {
+ 		(void)clock_gettime(CLOCK_MONOTONIC, &started);
+ 	}
+ 	vg_lite_error_t error = vg_lite_finish();
+ 	if (measure) {
+ 		(void)clock_gettime(CLOCK_MONOTONIC, &finished);
+-		wlr_log(WLR_DEBUG, "VGLite frame finish=%.3f ms",
+-			(double)elapsed_nanoseconds(&started, &finished) / 1000000.0);
+ 	}
+ 	if (error != VG_LITE_SUCCESS) {
+ 		fail_pass(pass, "vg_lite_finish", error);
++		/*
++		 * The vendor implementation may return an error after command
++		 * submission has started. Do not issue another synchronous finish here:
++		 * that could turn a reported GPU failure into an unbounded wait. Restore
++		 * the process-global state on a best-effort basis, then permanently
++		 * reject new VGLite passes. Labwc observes the failed commits and its
++		 * existing circuit breaker restarts a fresh Pixman renderer instead of
++		 * submitting another frame through an untrustworthy VGLite context.
++		 */
++		if (!state_recovery_attempted) {
++			state_recovery_attempted = true;
++			(void)restore_default_render_state();
++		}
++		pass->buffer->renderer->context_failed = true;
++		/* No successful finish exists to prove that restoration reached the GPU. */
++		state_recovery_ok = false;
+ 	}
+ 	bool ok = !pass->failed;
++	if (diagnostics) {
++		wlr_log(WLR_INFO,
++			"TDVP_VGLITE_DIAG stage=vglite_finish buffer=%p elapsed_ms=%.3f "
++			"result=%d pass_ok=%d texture_clip_rects=%zu "
++			"texture_blit_attempts=%zu texture_cache_flushes=%zu "
++			"solid_clip_rects=%zu solid_blit_attempts=%zu "
++			"state_recovery_attempted=%d state_recovery_ok=%d",
++			(void *)pass->buffer->buffer,
++			(double)elapsed_nanoseconds(&started, &finished) / 1000000.0,
++			error, ok, pass->texture_clip_rects, pass->texture_blit_attempts,
++			pass->texture_cache_flushes, pass->solid_clip_rects,
++			pass->solid_blit_attempts,
++			state_recovery_attempted, state_recovery_ok);
++	} else if (measure) {
++		wlr_log(WLR_DEBUG, "VGLite frame finish=%.3f ms",
++			(double)elapsed_nanoseconds(&started, &finished) / 1000000.0);
++	}
++	if (pass->data_ptr_access_active) {
++		vglite_buffer_end_data_ptr_access(pass->buffer);
++	}
+ 	wlr_buffer_unlock(pass->buffer->buffer);
+ 	free(pass);
+ 	return ok;
+@@ -310,6 +441,12 @@ struct wlr_render_pass *vglite_begin_render_pass(
+ 	}
+ 	wlr_render_pass_init(&pass->base, &render_pass_impl);
+ 	pass->buffer = buffer;
++	pass->diagnostics = diagnostics_enabled();
++	if (!vglite_buffer_begin_data_ptr_access(buffer)) {
++		free(pass);
++		return NULL;
++	}
++	pass->data_ptr_access_active = true;
+ 	wlr_buffer_lock(buffer->buffer);
+ 	return &pass->base;
+ }
+diff --git a/render/vglite/renderer.c b/render/vglite/renderer.c
+index 04fc45a..71b65f1 100644
+--- a/render/vglite/renderer.c
++++ b/render/vglite/renderer.c
+@@ -23,6 +23,21 @@
+ static const struct wlr_renderer_impl renderer_impl;
+ static const struct wlr_texture_impl texture_impl;
+ 
++/*
++ * Keep texture-upload evidence separate from the per-frame finish timing in
++ * pass.c.  A VGLite source buffer is cache-maintained as a whole by the vendor
++ * blit API, while wlroots copies only the Wayland damage into it.  The two
++ * byte counts must be observable together when validating a real desktop.
++ */
++static bool texture_upload_diagnostics_enabled(void) {
++	static int enabled = -1;
++	if (enabled < 0) {
++		const char *setting = getenv("TDVP_VGLITE_DIAGNOSTICS");
++		enabled = setting != NULL && strcmp(setting, "1") == 0;
++	}
++	return enabled != 0;
++}
++
+ bool wlr_renderer_is_vglite(struct wlr_renderer *renderer) {
+ 	return renderer != NULL && renderer->impl == &renderer_impl;
+ }
+@@ -51,11 +66,19 @@ bool vglite_format_from_drm(uint32_t drm_format,
+ 		vg_lite_buffer_format_t *format) {
+ 	switch (drm_format) {
+ 	case DRM_FORMAT_XRGB8888:
++		/* DRM little-endian bytes are B, G, R, X: X is not alpha. */
++		*format = VG_LITE_BGRX8888;
++		return true;
+ 	case DRM_FORMAT_ARGB8888:
++		/* DRM little-endian bytes are B, G, R, A. */
+ 		*format = VG_LITE_BGRA8888;
+ 		return true;
+ 	case DRM_FORMAT_XBGR8888:
++		/* DRM little-endian bytes are R, G, B, X: X is not alpha. */
++		*format = VG_LITE_RGBX8888;
++		return true;
+ 	case DRM_FORMAT_ABGR8888:
++		/* DRM little-endian bytes are R, G, B, A. */
+ 		*format = VG_LITE_RGBA8888;
+ 		return true;
+ 	default:
+@@ -93,7 +116,7 @@ struct wlr_vglite_buffer *vglite_buffer_get_or_create(
+ 	size_t stride = 0;
+ 	vg_lite_buffer_format_t format;
+ 	if (!wlr_buffer_get_dmabuf(wlr_buffer, &dmabuf) ||
+-			dmabuf.n_planes != 1 || dmabuf.offset[0] != 0 ||
++			dmabuf.n_planes != 1 || dmabuf.fd[0] < 0 || dmabuf.offset[0] != 0 ||
+ 			(dmabuf.modifier != DRM_FORMAT_MOD_LINEAR &&
+ 			 dmabuf.modifier != DRM_FORMAT_MOD_INVALID) ||
+ 			!vglite_format_from_drm(dmabuf.format, &format)) {
+@@ -108,7 +131,8 @@ struct wlr_vglite_buffer *vglite_buffer_get_or_create(
+ 		return NULL;
+ 	}
+ 
+-	if (drm_format != dmabuf.format || stride > INT32_MAX) {
++	if (data == NULL || drm_format != dmabuf.format ||
++			stride < (size_t)wlr_buffer->width * 4U || stride > INT32_MAX) {
+ 		wlr_buffer_end_data_ptr_access(wlr_buffer);
+ 		wlr_log(WLR_ERROR, "VGLite render target has inconsistent DRM metadata");
+ 		return NULL;
+@@ -123,6 +147,7 @@ struct wlr_vglite_buffer *vglite_buffer_get_or_create(
+ 
+ 	buffer->renderer = renderer;
+ 	buffer->buffer = wlr_buffer;
++	buffer->drm_format = drm_format;
+ 	buffer->target = (vg_lite_buffer_t){
+ 		.width = wlr_buffer->width,
+ 		.height = wlr_buffer->height,
+@@ -138,6 +163,14 @@ struct wlr_vglite_buffer *vglite_buffer_get_or_create(
+ 		free(buffer);
+ 		return NULL;
+ 	}
++	/*
++	 * vg_lite_map() needs the CPU address to establish its DMA-BUF mapping,
++	 * but wlr_buffer data access is scoped. Each render pass obtains a fresh
++	 * mapping before VGLite accesses the target and clears it again after
++	 * vg_lite_finish(). Keeping the old address here would be invalid for an
++	 * allocator whose end_data_ptr_access() unmaps or remaps its CPU view.
++	 */
++	buffer->target.memory = NULL;
+ 
+ 	buffer->destroy.notify = handle_buffer_destroy;
+ 	wl_signal_add(&wlr_buffer->events.destroy, &buffer->destroy);
+@@ -147,6 +180,33 @@ struct wlr_vglite_buffer *vglite_buffer_get_or_create(
+ 	return buffer;
+ }
+ 
++bool vglite_buffer_begin_data_ptr_access(struct wlr_vglite_buffer *buffer) {
++	void *data = NULL;
++	uint32_t drm_format = DRM_FORMAT_INVALID;
++	size_t stride = 0;
++
++	if (!wlr_buffer_begin_data_ptr_access(buffer->buffer,
++			WLR_BUFFER_DATA_PTR_ACCESS_READ | WLR_BUFFER_DATA_PTR_ACCESS_WRITE,
++			&data, &drm_format, &stride)) {
++		wlr_log(WLR_ERROR, "VGLite render target is missing CPU data access");
++		return false;
++	}
++	if (data == NULL || drm_format != buffer->drm_format ||
++			stride != (size_t)buffer->target.stride) {
++		wlr_buffer_end_data_ptr_access(buffer->buffer);
++		wlr_log(WLR_ERROR, "VGLite render target data access changed unexpectedly");
++		return false;
++	}
++
++	buffer->target.memory = data;
++	return true;
++}
++
++void vglite_buffer_end_data_ptr_access(struct wlr_vglite_buffer *buffer) {
++	wlr_buffer_end_data_ptr_access(buffer->buffer);
++	buffer->target.memory = NULL;
++}
++
+ static bool texture_copy_from_buffer(struct wlr_vglite_texture *texture,
+ 		struct wlr_buffer *buffer, const pixman_region32_t *damage) {
+ 	void *data = NULL;
+@@ -159,13 +219,20 @@ static bool texture_copy_from_buffer(struct wlr_vglite_texture *texture,
+ 	}
+ 
+ 	bool ok = false;
+-	if (drm_format != texture->drm_format || !vglite_format_from_drm(drm_format,
+-			&texture->source.format) || stride < (size_t)buffer->width * 4U) {
++	if (data == NULL || texture->source.memory == NULL ||
++			texture->source.width != buffer->width ||
++			texture->source.height != buffer->height ||
++			texture->source.stride <= 0 ||
++			drm_format != texture->drm_format || !vglite_format_from_drm(drm_format,
++			&texture->source.format) || stride < (size_t)buffer->width * 4U ||
++			(size_t)texture->source.stride < (size_t)buffer->width * 4U) {
+ 		wlr_log(WLR_ERROR, "Unsupported or changed VGLite SHM texture format");
+ 		goto out;
+ 	}
+ 
+ 	int n_rects = 0;
++	size_t copied_bytes = 0;
++	size_t copy_calls = 0;
+ 	const pixman_box32_t *rects = pixman_region32_rectangles(damage, &n_rects);
+ 	for (int i = 0; i < n_rects; ++i) {
+ 		const pixman_box32_t *rect = &rects[i];
+@@ -174,13 +241,52 @@ static bool texture_copy_from_buffer(struct wlr_vglite_texture *texture,
+ 			wlr_log(WLR_ERROR, "Invalid VGLite SHM texture damage rectangle");
+ 			goto out;
+ 		}
+-		for (int y = rect->y1; y < rect->y2; ++y) {
+-			char *dst = (char *)texture->source.memory +
+-				(size_t)y * (size_t)texture->source.stride + (size_t)rect->x1 * 4U;
+-			const char *src = (const char *)data + (size_t)y * stride +
+-				(size_t)rect->x1 * 4U;
+-			memcpy(dst, src, (size_t)(rect->x2 - rect->x1) * 4U);
++		size_t row_bytes = (size_t)(rect->x2 - rect->x1) * 4U;
++		int height = rect->y2 - rect->y1;
++		char *dst = (char *)texture->source.memory +
++			(size_t)rect->y1 * (size_t)texture->source.stride +
++			(size_t)rect->x1 * 4U;
++		const char *src = (const char *)data + (size_t)rect->y1 * stride +
++			(size_t)rect->x1 * 4U;
++
++		/*
++		 * The initial SHM upload commonly covers every byte of a tightly
++		 * packed texture. Copy it once instead of issuing one memcpy per row;
++		 * this does not widen partial damage or copy row padding.
++		 */
++		if (rect->x1 == 0 && row_bytes == (size_t)texture->source.stride &&
++				stride == (size_t)texture->source.stride) {
++			memcpy(dst, src, row_bytes * (size_t)height);
++			copy_calls++;
++		} else {
++			for (int y = 0; y < height; ++y) {
++				memcpy(dst + (size_t)y * (size_t)texture->source.stride,
++					src + (size_t)y * stride, row_bytes);
++				copy_calls++;
++			}
+ 		}
++		copied_bytes += row_bytes * (size_t)height;
++	}
++	bool cache_flush_pending = n_rects > 0;
++	if (texture_upload_diagnostics_enabled()) {
++		wlr_log(WLR_INFO,
++			"TDVP_VGLITE_DIAG stage=texture_upload texture=%p damage_rects=%d "
++			"copied_bytes=%zu source_bytes=%zu copy_calls=%zu "
++			"cache_flush_pending=%d",
++			(void *)texture, n_rects, copied_bytes,
++			(size_t)texture->source.stride * (size_t)texture->source.height,
++			copy_calls, cache_flush_pending);
++	}
++	/*
++	 * VGLite allocations are CPU-mapped. Their next use as a source needs a
++	 * cache clean. render_pass_add_texture() permits the first vendor blit to
++	 * perform that clean, then suppresses the same full-allocation operation on
++	 * every later clip rectangle. This preserves the vendor's real cache path
++	 * without relying on the K230 VG_LITE_CACHE ioctl, which is currently a
++	 * successful no-op in the locked driver.
++	 */
++	if (cache_flush_pending) {
++		texture->source_cache_dirty = true;
+ 	}
+ 	ok = true;
+ 
+@@ -192,6 +298,12 @@ out:
+ static bool texture_update_from_buffer(struct wlr_texture *wlr_texture,
+ 		struct wlr_buffer *buffer, const pixman_region32_t *damage) {
+ 	struct wlr_vglite_texture *texture = vglite_texture_from_wlr(wlr_texture);
++	if (texture->renderer->context_failed) {
++		/* Do not write new client contents into a quarantined VGLite resource. */
++		wlr_log(WLR_ERROR,
++			"VGLite texture update rejected after a previous vg_lite_finish failure");
++		return false;
++	}
+ 	return texture_copy_from_buffer(texture, buffer, damage);
+ }
+ 
+@@ -205,6 +317,12 @@ static bool texture_update_from_buffer(struct wlr_texture *wlr_texture,
+ static bool texture_read_pixels(struct wlr_texture *wlr_texture,
+ 		const struct wlr_texture_read_pixels_options *options) {
+ 	struct wlr_vglite_texture *texture = vglite_texture_from_wlr(wlr_texture);
++	if (texture->renderer->context_failed) {
++		/* Do not re-enter a global finish after another path poisoned it. */
++		wlr_log(WLR_ERROR,
++			"VGLite texture readback rejected after a previous vg_lite_finish failure");
++		return false;
++	}
+ 	struct wlr_box src;
+ 	wlr_texture_read_pixels_options_get_src_box(options, wlr_texture, &src);
+ 	if (options->format != texture->drm_format || src.x < 0 || src.y < 0 ||
+@@ -215,8 +333,25 @@ static bool texture_read_pixels(struct wlr_texture *wlr_texture,
+ 		wlr_log(WLR_ERROR, "Unsupported VGLite texture readback request");
+ 		return false;
+ 	}
+-	if (vg_lite_finish() != VG_LITE_SUCCESS) {
+-		wlr_log(WLR_ERROR, "VGLite texture readback could not synchronize GPU");
++	vg_lite_error_t error = vg_lite_finish();
++	if (error != VG_LITE_SUCCESS) {
++		/* Keep the failure containment rule identical to render-pass submit. */
++		texture->renderer->context_failed = true;
++		/*
++		 * Readback is outside a render-pass submit, so its failed finish would
++		 * otherwise be invisible to the per-pass diagnostics report. Keep the
++		 * error itself opt-in, just like the existing upload/pass/DRM records:
++		 * a Gate 1 capture must not accept a run which quarantined the renderer
++		 * merely because earlier successful finish records are also in the log.
++		 */
++		if (texture_upload_diagnostics_enabled()) {
++			wlr_log(WLR_INFO,
++				"TDVP_VGLITE_DIAG stage=texture_readback_finish result=%d "
++				"renderer_quarantined=1", error);
++		}
++		wlr_log(WLR_ERROR,
++			"VGLite texture readback could not synchronize GPU: %d; renderer quarantined",
++			error);
+ 		return false;
+ 	}
+ 
+@@ -254,12 +389,24 @@ static const struct wlr_texture_impl texture_impl = {
+ static struct wlr_texture *texture_from_buffer(struct wlr_renderer *wlr_renderer,
+ 		struct wlr_buffer *buffer) {
+ 	struct wlr_vglite_renderer *renderer = vglite_renderer_from_wlr(wlr_renderer);
++	if (renderer->context_failed) {
++		/* vg_lite_allocate() must not re-enter a globally failed context either. */
++		wlr_log(WLR_ERROR,
++			"VGLite texture creation rejected after a previous vg_lite_finish failure");
++		return NULL;
++	}
+ 	void *data = NULL;
+ 	uint32_t drm_format = DRM_FORMAT_INVALID;
+ 	size_t stride = 0;
+ 	if (!wlr_buffer_begin_data_ptr_access(buffer, WLR_BUFFER_DATA_PTR_ACCESS_READ,
+ 			&data, &drm_format, &stride)) {
+-		wlr_log(WLR_ERROR, "VGLite client DMA-BUF import is not enabled on K230");
++		wlr_log(WLR_ERROR,
++			"VGLite client buffer has no CPU data pointer; K230 DMA-BUF import is disabled");
++		return NULL;
++	}
++	if (data == NULL) {
++		wlr_buffer_end_data_ptr_access(buffer);
++		wlr_log(WLR_ERROR, "VGLite client texture has no CPU-accessible data");
+ 		return NULL;
+ 	}
+ 	wlr_buffer_end_data_ptr_access(buffer);
+@@ -332,7 +479,12 @@ static void renderer_destroy(struct wlr_renderer *wlr_renderer) {
+ 	struct wlr_vglite_texture *texture, *texture_tmp;
+ 	struct wlr_vglite_buffer *buffer, *buffer_tmp;
+ 
+-	(void)vg_lite_finish();
++	if (!renderer->context_failed) {
++		(void)vg_lite_finish();
++	} else {
++		/* A prior finish failed; teardown must not re-enter its unbounded wait. */
++		wlr_log(WLR_ERROR, "Skipping vg_lite_finish during failed-context teardown");
++	}
+ 	wl_list_for_each_safe(texture, texture_tmp, &renderer->textures, link) {
+ 		wlr_texture_destroy(&texture->wlr_texture);
+ 	}
+@@ -356,6 +508,11 @@ static void renderer_destroy(struct wlr_renderer *wlr_renderer) {
+ static struct wlr_render_pass *begin_buffer_pass(struct wlr_renderer *wlr_renderer,
+ 		struct wlr_buffer *buffer, const struct wlr_buffer_pass_options *options) {
+ 	struct wlr_vglite_renderer *renderer = vglite_renderer_from_wlr(wlr_renderer);
++	if (renderer->context_failed) {
++		wlr_log(WLR_ERROR,
++			"VGLite renderer rejected a pass after a previous vg_lite_finish failure");
++		return NULL;
++	}
+ 	if (options->color_transform != NULL) {
+ 		wlr_log(WLR_ERROR, "VGLite output color transforms are not supported");
+ 		return NULL;
+diff --git a/types/output/render.c b/types/output/render.c
+index 709646a..ca9f808 100644
+--- a/types/output/render.c
++++ b/types/output/render.c
+@@ -214,6 +214,11 @@ struct wlr_render_pass *wlr_output_begin_render_pass(struct wlr_output *output,
+ 	assert(renderer != NULL);
+ 	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(renderer, buffer, render_options);
+ 	if (pass == NULL) {
++		// wlr_swapchain_acquire() holds the slot until the buffer is unlocked.
++		// A renderer rejection (for example an unsupported VGLite target) must
++		// release that acquisition, otherwise repeated failed frames exhaust the
++		// output swapchain and turn a recoverable render error into a stall.
++		wlr_buffer_unlock(buffer);
+ 		return NULL;
+ 	}
+ 

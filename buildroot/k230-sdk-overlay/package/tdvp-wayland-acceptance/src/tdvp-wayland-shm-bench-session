@@ -1,0 +1,82 @@
+#!/bin/sh
+set -eu
+
+# Discover the actual Labwc runtime directory instead of assuming /run/user.
+bench=${TDVP_WAYLAND_SHM_BENCH_PROGRAM:-/usr/bin/tdvp-wayland-shm-bench}
+session_user=
+labwc_pid=
+
+usage() {
+    cat <<'EOF'
+usage: tdvp-wayland-shm-bench-session [--user USER] [--pid PID] [--] [BENCH-OPTIONS]
+
+Locate a live Labwc process, read its XDG_RUNTIME_DIR, and run the bounded
+wl_shm frame-callback benchmark against that exact Wayland socket. Root
+defaults to tdvp and drops to the Labwc owner before opening the socket.
+EOF
+}
+
+fail() {
+    echo "tdvp-wayland-shm-bench-session: $*" >&2
+    exit 1
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+    --user)
+        [ "$#" -ge 2 ] || fail "--user requires an account name"
+        session_user=$2; shift 2
+        ;;
+    --pid)
+        [ "$#" -ge 2 ] || fail "--pid requires a Labwc PID"
+        labwc_pid=$2; shift 2
+        ;;
+    --help|-h)
+        usage; exit 0
+        ;;
+    --)
+        shift; break
+        ;;
+    *)
+        break
+        ;;
+    esac
+done
+
+[ -x "$bench" ] || fail "benchmark is not installed at $bench"
+if [ -z "$session_user" ]; then
+    if [ "$(id -u)" -eq 0 ]; then session_user=tdvp; else session_user=$(id -un); fi
+fi
+if [ -z "$labwc_pid" ]; then
+    labwc_pid=$(pgrep -u "$session_user" -x labwc 2>/dev/null | sed -n '1p' || true)
+fi
+[ -n "$labwc_pid" ] || fail "no live Labwc process for user $session_user"
+[ -r "/proc/$labwc_pid/environ" ] || fail "cannot read Labwc environment for pid $labwc_pid"
+[ "$(cat "/proc/$labwc_pid/comm" 2>/dev/null || true)" = labwc ] || fail "pid $labwc_pid is not Labwc"
+
+labwc_uid=$(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+	"/proc/$labwc_pid/status" | sed -n '1p')
+[ -n "$labwc_uid" ] || fail "cannot determine the owner of Labwc pid $labwc_pid"
+session_uid=$(id -u "$session_user" 2>/dev/null || true)
+[ -n "$session_uid" ] || fail "cannot resolve the requested session user $session_user"
+[ "$labwc_uid" = "$session_uid" ] ||
+	fail "Labwc pid $labwc_pid belongs to uid $labwc_uid, not user $session_user"
+
+env_value() {
+    tr '\000' '\n' < "/proc/$labwc_pid/environ" | sed -n "s/^$1=//p" | sed -n '1p'
+}
+
+runtime_dir=$(env_value XDG_RUNTIME_DIR)
+wayland_display=$(env_value WAYLAND_DISPLAY)
+[ -n "$runtime_dir" ] || fail "Labwc did not export XDG_RUNTIME_DIR"
+case "$runtime_dir" in /*) ;; *) fail "Labwc exported a non-absolute XDG_RUNTIME_DIR" ;; esac
+[ -n "$wayland_display" ] || wayland_display=wayland-0
+case "$wayland_display" in */*) fail "Labwc exported an invalid WAYLAND_DISPLAY" ;; esac
+[ -S "$runtime_dir/$wayland_display" ] || fail "Wayland socket is absent: $runtime_dir/$wayland_display"
+
+echo "tdvp-wayland-shm-bench-session: labwc_pid=$labwc_pid user=$session_user runtime=$runtime_dir socket=$wayland_display"
+if [ "$(id -u)" -eq "$labwc_uid" ]; then
+    exec env XDG_RUNTIME_DIR="$runtime_dir" WAYLAND_DISPLAY="$wayland_display" "$bench" "$@"
+fi
+[ "$(id -u)" -eq 0 ] || fail "must run as $session_user or root to use that Labwc session"
+exec su -s /bin/sh "$session_user" -c 'export XDG_RUNTIME_DIR="$1" WAYLAND_DISPLAY="$2"; shift 2; exec "$@"' sh "$runtime_dir" "$wayland_display" "$bench" -- "$@"

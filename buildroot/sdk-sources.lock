@@ -17,6 +17,26 @@ commit = 7d4e1f444f461dbe3833bd99a4640e7b6c2cd529
 version = 6.6.36
 defconfig = k230
 dts = canaan/k230-canmv-rm69a10 canaan/k230-canmv-v3
+page_flip_lifecycle_patch = buildroot/k230-sdk-overlay/linux/0053-tdvp-drm-canaan-page-flip-lifecycle.patch
+page_flip_lifecycle_patch_sha256 = 1bbbdf04294c0e919929e42dd1046b47abe26047ce98de430c66c8124a8eebec
+vglite_resource_ownership_patch = buildroot/k230-sdk-overlay/linux/0054-tdvp-vglite-per-client-resource-ownership.patch
+vglite_resource_ownership_patch_sha256 = de6516114beabbdffacb3a8e0b9d5f62b2004f2e3be78ddf952c2791f89c3fc3
+vglite_open_lifetime_patch = buildroot/k230-sdk-overlay/linux/0055-tdvp-vglite-no-reset-on-secondary-open.patch
+vglite_open_lifetime_patch_sha256 = b74248c90334a1f73d6f6beb07eec1fda0ab11451938dd4b9e9309ea28aa04ca
+vglite_submit_wait_lease_patch = buildroot/k230-sdk-overlay/linux/0056-tdvp-vglite-serialize-submit-through-wait.patch
+vglite_submit_wait_lease_patch_sha256 = 01c4fd82fd126a7723c336758c45c20cf1722c427a23997c97cf4ccd93351f41
+vglite_command_engine_guard_edges_patch = buildroot/k230-sdk-overlay/linux/0057-tdvp-vglite-command-engine-guard-edges.patch
+vglite_command_engine_guard_edges_patch_sha256 = b9e0bd17b19dbc7d9f88b43f0ca05621e8f0ff8efc4bcf89d6e2cad0124a3634
+vglite_inflight_close_recovery_patch = buildroot/k230-sdk-overlay/linux/0058-tdvp-vglite-abort-inflight-close-safely.patch
+vglite_inflight_close_recovery_patch_sha256 = 2e488514a3af16f4cb1b2f5f1deaed4b3cecf8a79d062ae3ca2adfca38183784
+vglite_wait_watchdog_patch = buildroot/k230-sdk-overlay/linux/0059-tdvp-vglite-bound-infinite-wait-watchdog.patch
+vglite_wait_watchdog_patch_sha256 = e8c2e71065701289b930be91b24c8914cf02c01e2b956fc5269d0ef93f04b27f
+vglite_interrupt_atomicity_patch = buildroot/k230-sdk-overlay/linux/0060-tdvp-vglite-atomic-interrupt-flags.patch
+vglite_interrupt_atomicity_patch_sha256 = 04239961629c2e323a3466913668121c25c7b4f4f6785e4082fd608953e80ce5
+vglite_single_context_open_patch = buildroot/k230-sdk-overlay/linux/0061-tdvp-vglite-enforce-single-context-open.patch
+vglite_single_context_open_patch_sha256 = 601a5f3fb452225846f09f51bf1b79ea3a52c19ce7d4cd1ea78acfa2447fda49
+vglite_completion_idle_yield_patch = buildroot/k230-sdk-overlay/linux/0062-tdvp-vglite-yield-after-early-completion.patch
+vglite_completion_idle_yield_patch_sha256 = e8f06d7721703f6a80ea442a29530a86941d94b476db3bf83cac58163a00b17b
 
 [lewis_rm69a10]
 source = https://github.com/lewisxhe/k230-t-display-linux-patches.git
@@ -28,6 +48,31 @@ source = https://github.com/labwc/labwc.git
 commit = 9af441ecd36bbee66d4df46baa7b482872d989f2
 version = 0.8.4
 wlroots_abi = 0.18
+vglite_render_recovery_patch = buildroot/k230-sdk-overlay/package/labwc/0004-tdvp-vglite-render-failure-recovery.patch
+vglite_render_recovery_patch_sha256 = 995b2771ab2ddbe46d7566d00aab7ddf1d4b95ff6faa280aef525d27d0d4c7b2
+
+# The display stack is built from two independent Buildroot packages and the
+# VGLite sources copied from the pinned SDK. Keep these identities here as a
+# cross-component contract rather than relying on a release reviewer to spot
+# an accidental update in only one package recipe. The package patch makes the
+# locked source commit replay the TDVP linear-SHM lifecycle fixes exactly.
+[wlroots_vglite]
+source = https://github.com/vicliu624/wlroots-vglite.git
+commit = 94bca3e871ec4cce73afbef7bad4d962331ab9bb
+version = 0.18.2
+abi = 0.18
+git4_archive_sha256 = adaf258311c3886209b1dc3641d24fc3df83f51bee5d29787fd332ad01428ff8
+renderer = vglite
+patch_file = buildroot/k230-sdk-overlay/package/wlroots/0001-tdvp-vglite-linear-shm-lifecycle.patch
+patch_sha256 = 6c13ba0f76cd68e07badc89ac6f5e0bc997f0ad8b48a918abdc1ca147d22aecb
+
+[vglite_userspace]
+sdk_source = https://github.com/kendryte/k230_linux_sdk.git
+sdk_commit = 5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7
+sdk_package_path = buildroot-overlay/package/vg_lite
+runtime_library = /usr/lib/libvg_lite.so
+close_on_exec_patch = buildroot/k230-sdk-overlay/package/vg_lite/0001-tdvp-vglite-close-on-exec.patch
+close_on_exec_patch_sha256 = 3ba530078ea2a5cb6153c2657702d7ac0ab0cc16a1c3b136b612e144d4a00782
 
 [greetd]
 source = https://git.sr.ht/~kennylevinsen/greetd

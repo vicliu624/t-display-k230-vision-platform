@@ -5,6 +5,20 @@ set -a
 . /etc/tdvp/labwc/environment
 set +a
 
+# A compositor candidate must always bind the image-owned wlroots and VGLite
+# libraries. Do not inherit an ad-hoc test library or preload from greetd, a
+# maintenance shell, or a previous manual experiment. Application-specific
+# preload handling (for example wf-panel's compatibility library) is scoped to
+# its own launcher and is unaffected by this compositor-only cleanup.
+loader_overrides=absent
+if [ -n "${LD_LIBRARY_PATH:-}" ] || [ -n "${LD_PRELOAD:-}" ]; then
+	loader_overrides=cleared
+fi
+unset LD_LIBRARY_PATH LD_PRELOAD
+# Only this launcher enables the Labwc render-failure recovery gate. Do not
+# inherit a manual setting into a Pixman session or a later experiment.
+unset TDVP_LABWC_VGLITE_FAILURE_RECOVERY TDVP_VGLITE_DIAGNOSTICS
+
 # Preserve the normal XDG lookup model: user configuration takes precedence,
 # while the image-owned Labwc configuration remains in /etc/xdg.
 if [ -z "${HOME:-}" ] || [ ! -d "${HOME}" ]; then
@@ -19,6 +33,7 @@ cd "${HOME}"
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
+export XDG_STATE_HOME="${XDG_STATE_HOME:-${HOME}/.local/state}"
 export XDG_CONFIG_DIRS=/etc/xdg
 export XDG_DATA_DIRS=/usr/local/share:/usr/share
 export XDG_SESSION_TYPE=wayland
@@ -31,5 +46,210 @@ fi
 mkdir -p "${XDG_RUNTIME_DIR}"
 chmod 0700 "${XDG_RUNTIME_DIR}"
 export XDG_RUNTIME_DIR
+mkdir -p "${XDG_STATE_HOME}"
+chmod 0700 "${XDG_STATE_HOME}"
 
-exec /usr/bin/dbus-run-session -- /usr/bin/labwc
+# Renderer changes are session boundaries, never an in-frame fallback.  The
+# helper accepts only image-owned profile values and maps an unavailable or
+# previously failed VGLite profile back to Pixman.  Keep the result in the
+# session log so a recovered Pixman desktop cannot be mistaken for a VGLite
+# run.
+renderer_profile_tool=/usr/local/bin/tdvp-renderer-profile
+renderer_profile=pixman
+renderer_profile_status="helper=missing effective=pixman"
+forced_pixman_recovery=no
+if [ "${TDVP_LABWC_FORCE_PIXMAN:-}" = 1 ]; then
+	# This flag is set only by the controlled self-exec below after a VGLite
+	# crash has been recorded. It can only select the safe renderer; it can
+	# never force VGLite for a manually launched session.
+	renderer_profile=pixman
+	renderer_profile_status="auto-recovery=forced-pixman"
+	forced_pixman_recovery=yes
+	unset TDVP_LABWC_FORCE_PIXMAN
+elif [ -x "${renderer_profile_tool}" ]; then
+	if renderer_profile="$("${renderer_profile_tool}" resolve 2>/dev/null)"; then
+		renderer_profile_status="$("${renderer_profile_tool}" status 2>/dev/null || \
+			printf '%s' 'helper=status-failed')"
+	else
+		renderer_profile=pixman
+		renderer_profile_status="helper=resolve-failed effective=pixman"
+	fi
+fi
+case "${renderer_profile}" in
+	pixman|vglite)
+		WLR_RENDERER="${renderer_profile}"
+		export WLR_RENDERER
+		;;
+	*)
+		renderer_profile=pixman
+		WLR_RENDERER=pixman
+		export WLR_RENDERER
+		renderer_profile_status="helper=invalid-output effective=pixman"
+		;;
+esac
+
+# The first VGLite profile deliberately owns every presentation buffer through
+# its synchronous render-pass path. wlroots otherwise enables its generic
+# single-surface direct scan-out optimization by default. That branch is the
+# eventual right answer for a fullscreen DMA-BUF client, but until the K230
+# DRM driver exposes and validates IN_FENCE_FD/OUT_FENCE_PTR it would bypass
+# the measured VGLite -> finish -> atomic page-flip ownership contract.
+#
+# This is scoped to the experimental VGLite profile: the current Pixman image
+# keeps its existing behavior, and a later fence-qualified direct-scanout gate
+# can remove this guard without changing Labwc's window policy.
+direct_scanout_policy=existing
+vglite_failure_recovery=not-applicable
+vglite_diagnostics=off
+labwc_verbose=off
+labwc_verbose_arg=
+diagnostics_marker="${TDVP_VGLITE_DIAGNOSTICS_FILE:-${XDG_STATE_HOME}/tdvp-labwc/vglite-diagnostics-next-session}"
+if [ "${renderer_profile}" = vglite ]; then
+	WLR_SCENE_DISABLE_DIRECT_SCANOUT=1
+	export WLR_SCENE_DISABLE_DIRECT_SCANOUT
+	TDVP_LABWC_VGLITE_FAILURE_RECOVERY=1
+	export TDVP_LABWC_VGLITE_FAILURE_RECOVERY
+	direct_scanout_policy=disabled-for-vglite
+	vglite_failure_recovery=enabled-after-three-consecutive-failures
+	# Diagnostic logs are useful during a deliberately scheduled Gate 1 run,
+	# but are high-volume enough that they must be opt-in. Consume the marker
+	# before Labwc starts; a later crash-and-Pixman self-exec cannot inherit the
+	# flag, while a Pixman session never consumes a pending VGLite capture.
+	if [ -f "${diagnostics_marker}" ]; then
+		if rm -f "${diagnostics_marker}"; then
+			TDVP_VGLITE_DIAGNOSTICS=1
+			export TDVP_VGLITE_DIAGNOSTICS
+			vglite_diagnostics=enabled-once
+			# The renderer emits the per-pass evidence at WLR_INFO. Labwc's
+			# default threshold is error, so make this one opt-in diagnostic
+			# session verbose as well; ordinary desktop sessions retain their
+			# normal low-volume log level.
+			labwc_verbose=enabled-for-diagnostics
+			labwc_verbose_arg=--verbose
+		else
+			vglite_diagnostics=marker-retained
+		fi
+	fi
+elif [ "${forced_pixman_recovery}" = yes ]; then
+	# Drop only the guard inherited through the self-exec. A fresh Pixman
+	# login keeps its pre-existing environment unchanged.
+	unset WLR_SCENE_DISABLE_DIRECT_SCANOUT
+	direct_scanout_policy=restored-for-pixman-recovery
+fi
+
+# greetd's session worker otherwise leaves Labwc's stdout/stderr attached to
+# the login VT.  That makes a compositor warning visible only after the frame
+# it was meant to diagnose has already failed, and loses the surrounding
+# sequence from the journal.  Keep the current session and one previous
+# session in the user-owned runtime directory.  Rotating before launch keeps a
+# crash exit code and its final messages available after greetd offers a new
+# login, without allowing an unbounded log to accumulate on the rootfs.
+log_file="${XDG_RUNTIME_DIR}/tdvp-labwc.log"
+previous_log_file="${log_file}.previous"
+if [ -f "${log_file}" ]; then
+	mv -f "${log_file}" "${previous_log_file}"
+fi
+: >"${log_file}"
+chmod 0600 "${log_file}"
+printf '%s\n' "tdvp-labwc-session: starting pid=$$" >>"${log_file}"
+printf '%s\n' "tdvp-labwc-session: renderer_profile=${renderer_profile} ${renderer_profile_status}" \
+	>>"${log_file}"
+printf '%s\n' "tdvp-labwc-session: loader_overrides=${loader_overrides}" >>"${log_file}"
+printf '%s\n' "tdvp-labwc-session: direct_scanout=${direct_scanout_policy}" >>"${log_file}"
+printf '%s\n' "tdvp-labwc-session: vglite_failure_recovery=${vglite_failure_recovery}" \
+	>>"${log_file}"
+printf '%s\n' "tdvp-labwc-session: vglite_diagnostics=${vglite_diagnostics}" \
+	>>"${log_file}"
+printf '%s\n' "tdvp-labwc-session: labwc_verbose=${labwc_verbose}" >>"${log_file}"
+
+# Labwc intentionally starts XDG autostart through a detached `setsid()`
+# helper.  It therefore cannot remain in the dbus-run-session process group
+# below.  Give exactly this authenticated desktop a private, user-owned state
+# directory; autostart records its detached PGID there so this launcher can
+# retire the same session's desktop clients when Labwc exits.
+session_root="${XDG_RUNTIME_DIR}/tdvp-labwc-session"
+session_directory="${session_root}/$$"
+mkdir -p "${session_directory}"
+chmod 0700 "${session_root}" "${session_directory}"
+rm -f "${session_directory}/autostart-pgid"
+export TDVP_LABWC_SESSION_DIR="${session_directory}"
+
+# Labwc runs XDG autostart asynchronously.  A direct exec would let its
+# PCManFM, wf-panel-pi, Quick Settings and idle-policy children become
+# orphaned when the compositor exits or is restarted.  Give the authenticated
+# desktop one private process group, then terminate that group after Labwc has
+# ended.  This never reaches greetd or another login because setsid creates a
+# distinct SID/PGID for this invocation.
+/usr/bin/setsid /usr/bin/dbus-run-session -- /usr/bin/labwc ${labwc_verbose_arg} \
+	>>"${log_file}" 2>&1 &
+session_group_leader="$!"
+
+# A compositor crash is a non-zero status, but cleanup must still run.  Do not
+# let `set -e` skip the group termination in precisely that recovery path.
+set +e
+wait "${session_group_leader}"
+session_status="$?"
+set -e
+restart_with_pixman=no
+printf '%s\n' "tdvp-labwc-session: compositor group exited status=${session_status}" \
+	>>"${log_file}"
+
+# A normal logout and the expected terminal signals used by greetd/systemd
+# maintenance do not prove a renderer failure.  Other non-zero exits from an
+# approved VGLite session trip a user-owned circuit breaker.  The next login
+# and the immediate controlled recovery both explicitly use Pixman until root
+# clears the marker.
+if [ "${renderer_profile}" = vglite ]; then
+	case "${session_status}" in
+		0|129|130|143)
+			;;
+		*)
+			if [ -x "${renderer_profile_tool}" ]; then
+				if "${renderer_profile_tool}" trip "${session_status}" >>"${log_file}" 2>&1; then
+					restart_with_pixman=yes
+					printf '%s\n' "tdvp-labwc-session: VGLite circuit breaker recorded" \
+						>>"${log_file}"
+				else
+					printf '%s\n' "tdvp-labwc-session: VGLite circuit breaker could not be recorded" \
+						>>"${log_file}"
+				fi
+			fi
+			;;
+	esac
+fi
+
+# Labwc itself detaches the autostart script into a second session.  Accept a
+# marker only from this invocation's private directory and only when it is a
+# decimal PGID; a user can never cause this cleanup to target another account.
+autostart_group=""
+autostart_group_file="${session_directory}/autostart-pgid"
+if [ -r "${autostart_group_file}" ]; then
+	IFS= read -r autostart_group < "${autostart_group_file}" || autostart_group=""
+	case "${autostart_group}" in
+		''|*[!0-9]*) autostart_group="" ;;
+	esac
+fi
+if [ -n "${autostart_group}" ]; then
+	kill -TERM "-${autostart_group}" 2>/dev/null || true
+fi
+
+# BusyBox kill accepts a negative PID as a process-group target, but not the
+# GNU `--` separator.  The leader may already have exited while descendants
+# still hold the group, hence intentionally ignore ESRCH.
+kill -TERM "-${session_group_leader}" 2>/dev/null || true
+rm -f "${autostart_group_file}"
+rmdir "${session_directory}" 2>/dev/null || true
+rmdir "${session_root}" 2>/dev/null || true
+
+# Do not make an authenticated user log in again merely because the
+# experimental compositor crashed. This occurs only after trip_vglite() has
+# persisted the breaker, so the self-exec is deterministically Pixman and
+# cannot retry or mix the failed renderer in the same session.
+if [ "${restart_with_pixman}" = yes ]; then
+	printf '%s\n' "tdvp-labwc-session: restarting authenticated desktop with Pixman" \
+		>>"${log_file}"
+	TDVP_LABWC_FORCE_PIXMAN=1
+	export TDVP_LABWC_FORCE_PIXMAN
+	exec /usr/local/bin/tdvp-labwc-session
+fi
+exit "${session_status}"
