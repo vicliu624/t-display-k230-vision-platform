@@ -36,18 +36,29 @@
 | `0053-tdvp-drm-canaan-page-flip-lifecycle.patch` | TDVP | 明确 Canaan DRM 在 CRTC 禁用和 VO IRQ 交付过程中的 page-flip/vblank 事件所有权。 |
 | `0054` 到 `0062` | TDVP | VGLite 的每客户端资源所有权、提交串行化、看门狗、中断、单上下文和完成空闲生命周期修复。 |
 | `0063-tdvp-cpu1-rtsmart-mailbox.patch` | TDVP | 保留 CPU1 的 RT-Smart RAM，仅将非缓存的 64 KiB mailbox 暴露为 `/dev/tdvp-cpu1`，并明确不把 CPU1 纳入 Linux SMP。 |
+| `0064-tdvp-riscv-dts-use-scalar-cpu0.patch` | TDVP | 将物理 CPU0 描述为无 RVV、128 KiB L2，并将 UART3 留给 CPU1 控制台。 |
 
 编号遵循导入的 display queue。词法顺序是 build input，并由 baseline assertion 检查。
 
 ## CPU1 协处理器约定
 
-K230 Linux 设备树刻意只声明 `cpu@0`。`0063` 保留
+K230 Linux 设备树只声明本地 hart `cpu@0`，这个名称本身不决定物理核心。
+固定版本的 SDK 默认让 U-Boot 在物理 CPU1 上运行；TDVP 覆盖
+`CONFIG_LINUX_RUN_CORE_ID=0`，避免启动 CPU1 时复位 U-Boot 自己。
+`0064`、kernel fragment 和用户态 `-mcpu=c908` 标量编译选项与物理 CPU0 保持一致。
+`0063` 保留
 `0x10000000..0x13ffffff` 给 CPU1 的 OpenSBI/RT-Smart runtime，其中最后 64 KiB
 （`0x13ff0000`）是带版本的共享 mailbox。Linux 仅通过 `/dev/tdvp-cpu1` 以非缓存
 页属性映射该 mailbox：它既不启动 CPU1，也不把 CPU1 变成可调度的 Linux CPU。
 
 镜像后处理会编译已固定 commit 的 LilyGO RT-Smart 源码，将固件放入 SD 卡原始
-10--30 MiB slot，并让 U-Boot 在 `blinux` 前启动 CPU1。第一版受限 ABI 提供 `ping`
+10--30 MiB slot，并让 U-Boot 在 `blinux` 前启动 CPU1。该 slot 必须是入口
+`0x10000000`、RT-Smart 偏移 `0x20000` 的原始 `fw_payload.bin`，不能使用 K230
+容器：`boot_baremetal` 只设置复位入口，不解析容器。构建检查核心选择、入口、格式、
+大小和摘要。RT-Smart 可分配 RAM 为 `0x03ff0000` 字节，不包含末尾 mailbox；
+控制台使用 UART3，并关闭共享外设驱动、替换会初始化 SD/USB 的 CanMV `main`。
+Linux 保留 UART0，管理 SD、WiFi、显示等板级外设。核心/ISA 改动后必须重新进行
+冷启动和 VGLite 实机验收。第一版受限 ABI 提供 `ping`
 和 `crc32`，由 `tdvp-cpu1ctl` 与 `libtdvp_cpu1.so.1` 暴露。后续 CPU1 service 必须
 扩展这个带版本 ABI、维持两侧 cache maintenance，且不得把其余保留 RAM 暴露给 Linux 用户态。
 

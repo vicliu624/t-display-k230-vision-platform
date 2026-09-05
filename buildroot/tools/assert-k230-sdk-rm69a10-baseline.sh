@@ -314,6 +314,9 @@ require_content "${CPU1_MAILBOX_PATCH}" 'TDVP_CPU1_MAILBOX'
 require_content "${CPU1_MAILBOX_PATCH}" 'pgprot_noncached'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/fragment/linux.hardware" 'CONFIG_TDVP_CPU1_MAILBOX=y'
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/build-rtsmart.sh"
+require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/verify-boot-contract.sh"
+require_line "${STAGED_OVERLAY}/boot/uboot/u-boot-2022.10-overlay/board/canaan/common/sdk_autoconf.h" '#define CONFIG_LINUX_RUN_CORE_ID 0'
+require_file "${STAGED_OVERLAY}/linux/0064-tdvp-riscv-dts-use-scalar-cpu0.patch"
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c"
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c" 'INIT_APP_EXPORT(tdvp_cpu1_service_init);'
 require_file "${HARDWARE_SOURCE}/tdvp_cpu1_abi.h"
@@ -883,6 +886,8 @@ for symbol in "${required_config[@]}"; do
 	require_line "${CONFIG}" "${symbol}=y"
 done
 require_line "${CONFIG}" 'BR2_JLEVEL=4'
+require_line "${CONFIG}" '# BR2_RISCV_ISA_RVV is not set'
+require_line "${CONFIG}" 'BR2_TARGET_OPTIMIZATION="-mcpu=c908 -mtune=c908"'
 bash "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/verify-sdcard-image.sh" "${IMAGES}"
 require_content "${IMAGES}/tdvp-image-manifest" "profile=${PROFILE}"
 require_content "${IMAGES}/tdvp-image-manifest" 'desktop=labwc'
@@ -894,6 +899,8 @@ require_content "${IMAGES}/tdvp-image-manifest" 'greeter=gtkgreet'
 require_content "${IMAGES}/tdvp-image-manifest" 'session=tdvp-labwc-session'
 require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_execution_model=linux-cpu0+rtsmart-cpu1'
 require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_mailbox_physical=0x13ff0000'
+require_content "${IMAGES}/tdvp-image-manifest" 'linux_physical_cpu=0'
+require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_firmware_format=opensbi-fw-payload-raw'
 require_content "${IMAGES}/tdvp-image-manifest" 'wlroots_commit=94bca3e871ec4cce73afbef7bad4d962331ab9bb'
 require_content "${IMAGES}/tdvp-image-manifest" 'labwc_commit=9af441ecd36bbee66d4df46baa7b482872d989f2'
 require_content "${IMAGES}/tdvp-image-manifest" 'renderer_default=pixman'

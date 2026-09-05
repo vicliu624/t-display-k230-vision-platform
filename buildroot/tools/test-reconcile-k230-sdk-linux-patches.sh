@@ -57,7 +57,8 @@ for active_patch in \
 	0060-tdvp-vglite-atomic-interrupt-flags.patch \
 	0061-tdvp-vglite-enforce-single-context-open.patch \
 	0062-tdvp-vglite-yield-after-early-completion.patch \
-	0063-tdvp-cpu1-rtsmart-mailbox.patch; do
+	0063-tdvp-cpu1-rtsmart-mailbox.patch \
+	0064-tdvp-riscv-dts-use-scalar-cpu0.patch; do
 	cmp -s "${OVERLAY_DIR}/${active_patch}" "${PATCH_DIR}/${active_patch}" || {
 		printf '%s\n' "test-reconcile-k230-sdk-linux-patches: FAIL active patch differs: ${active_patch}" >&2
 		exit 1

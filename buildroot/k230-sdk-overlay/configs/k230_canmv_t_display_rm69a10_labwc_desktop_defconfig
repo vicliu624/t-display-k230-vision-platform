@@ -1,6 +1,6 @@
 BR2_riscv=y
 BR2_RISCV_ISA_RVC=y
-BR2_RISCV_ISA_RVV=y
+# BR2_RISCV_ISA_RVV is not set
 BR2_TOOLCHAIN_EXTERNAL=y
 BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
 BR2_TOOLCHAIN_EXTERNAL_PATH="/opt/toolchain/Xuantie-900-gcc-linux-6.6.0-glibc-x86_64-V3.0.2/"
@@ -11,7 +11,8 @@ BR2_TOOLCHAIN_EXTERNAL_CUSTOM_GLIBC=y
 BR2_TOOLCHAIN_EXTERNAL_CXX=y
 BR2_TOOLCHAIN_EXTERNAL_FORTRAN=y
 BR2_TOOLCHAIN_EXTERNAL_OPENMP=y
-BR2_TARGET_OPTIMIZATION="-mcpu=c908v -mtune=c908 -mrvv-v0p10-compatible -mrvv-auto-vectorize"
+# CPU1 owns RVV; Linux userspace executes on the scalar CPU0.
+BR2_TARGET_OPTIMIZATION="-mcpu=c908 -mtune=c908"
 BR2_DL_DIR="$(TOPDIR)/../../dl"
 # Release candidates must be generated from one stable ext4 worktree/output
 # location. This removes build timestamps and host identity from Buildroot,

@@ -26,6 +26,10 @@ VG_LITE_POST_RSYNC_HOOKS += VG_LITE_APPLY_TDVP_CLOSE_ON_EXEC_PATCH
 DRM_CFLAGS = $(TARGET_CFLAGS) -I$(STAGING_DIR)/usr/include/libdrm -I$(STAGING_DIR)/usr/include
 DRM_LDFLAGS = -L$(STAGING_DIR)/usr/lib -ldrm
 
+# The vendor Makefile puts -mcpu=c908v before CFLAGS. Pass the selected target
+# flags last so the library can also run on scalar CPU0 in the AMP image.
+VG_LITE_CFLAGS += $(TARGET_CFLAGS)
+
 ifeq ($(BR2_RISCV_32), y)
 VG_LITE_CFLAGS += -march=rv32gcv_xtheadc
 DRM_CFLAGS += -march=rv32gcv_xtheadc

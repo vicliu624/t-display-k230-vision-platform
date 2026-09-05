@@ -39,6 +39,8 @@ vglite_completion_idle_yield_patch = buildroot/k230-sdk-overlay/linux/0062-tdvp-
 vglite_completion_idle_yield_patch_sha256 = e8f06d7721703f6a80ea442a29530a86941d94b476db3bf83cac58163a00b17b
 cpu1_mailbox_patch = buildroot/k230-sdk-overlay/linux/0063-tdvp-cpu1-rtsmart-mailbox.patch
 cpu1_mailbox_patch_sha256 = 902867d70a488119bb23a8cb2548a37c0dd3ff80a0f970ced777268d7abbf5c1
+cpu0_scalar_patch = buildroot/k230-sdk-overlay/linux/0064-tdvp-riscv-dts-use-scalar-cpu0.patch
+cpu0_scalar_patch_sha256 = ed9f387af8c434686ca180810fbf6b6a07805ab14884e9374b50b6fbc9e795f4
 
 [cpu1_rtsmart]
 source = https://github.com/Xinyuan-LilyGO/T-Display-K230_canmv_rt.git
@@ -47,6 +49,9 @@ toolchain = riscv64-unknown-linux-musl-rv64imafdcv-lp64d-20230420.tar.bz2
 toolchain_url = https://github.com/kendryte/canmv_k230/releases/download/v1.1/
 runtime_base = 0x10000000
 runtime_size = 0x04000000
+allocatable_size = 0x03ff0000
+firmware_format = opensbi-fw-payload-raw
+linux_physical_cpu = 0
 mailbox_physical = 0x13ff0000
 
 [lewis_rm69a10]

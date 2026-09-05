@@ -52,6 +52,13 @@ jobs:
           chmod +x buildroot/tools/*.sh
           bash buildroot/tools/ci-prepare-host.sh
 
+      - name: Validate patch queue and CPU boot contracts
+        run: |
+          bash buildroot/tools/validate-k230-sdk-linux-patches.sh buildroot/k230-sdk-overlay/linux
+          bash buildroot/tools/test-reconcile-k230-sdk-linux-patches.sh
+          bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
+          bash buildroot/tools/test-tdvp-cpu1-boot-contract.sh
+
       - name: Stage pinned SDK worktree
         run: |
           rm -rf "$TDVP_WORKTREE"

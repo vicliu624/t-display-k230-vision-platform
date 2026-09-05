@@ -222,6 +222,10 @@ for boot_payload in Image k230-canmv-rm69a10.dtb; do
 done
 
 build_cpu1_firmware
+bash "${SCRIPT_DIR}/cpu1/verify-boot-contract.sh" \
+	"${BUILD_DIR:?Buildroot did not provide BUILD_DIR}/uboot-2022.10" \
+	"${BINARIES_DIR}/tdvp-cpu1-rtsmart.bin" \
+	"${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest"
 prepare_deterministic_sdk_packaging
 PATH="${TDVP_POST_IMAGE_TMP}:${PATH}" "${TDVP_POST_IMAGE_TMP}/post-image.sh" "$@"
 
@@ -258,6 +262,8 @@ bash "${IMAGE_GUARD}" "${BINARIES_DIR}"
 	printf 'sdk_commit=5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7\n'
 	printf 'linux_commit=7d4e1f444f461dbe3833bd99a4640e7b6c2cd529\n'
 	printf 'cpu1_execution_model=linux-cpu0+rtsmart-cpu1\n'
+	printf 'linux_physical_cpu=0\n'
+	printf 'cpu1_firmware_format=opensbi-fw-payload-raw\n'
 	printf 'cpu1_runtime_base=0x10000000\n'
 	printf 'cpu1_runtime_size=0x04000000\n'
 	printf 'cpu1_mailbox_physical=0x13ff0000\n'

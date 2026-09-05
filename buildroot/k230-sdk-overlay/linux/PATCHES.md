@@ -37,13 +37,18 @@ ordering constraints and validation gates for this queue.
 | `0053-tdvp-drm-canaan-page-flip-lifecycle.patch` | TDVP | Makes Canaan DRM page-flip/vblank event ownership explicit across CRTC disable and VO IRQ delivery. |
 | `0054` through `0062` | TDVP | VGLite per-client ownership, submission serialization, watchdog, interrupt, single-context and completion-idle lifecycle fixes. |
 | `0063-tdvp-cpu1-rtsmart-mailbox.patch` | TDVP | Reserves CPU1's RT-Smart RAM, exposes only a non-cacheable 64 KiB mailbox at `/dev/tdvp-cpu1`, and deliberately leaves CPU1 outside Linux SMP. |
+| `0064-tdvp-riscv-dts-use-scalar-cpu0.patch` | TDVP | Describes physical CPU0 without RVV, with 128 KiB L2, and reserves UART3 for the CPU1 console. |
 
 The numbering follows the imported display queue. The lexical ordering is a
 build input and is checked by the baseline assertion.
 
 ## CPU1 Coprocessor Contract
 
-The K230 Linux device tree intentionally declares only `cpu@0`.  `0063`
+The K230 Linux device tree intentionally declares only local hart `cpu@0`;
+this name alone does not select a physical core. The pinned SDK normally
+runs U-Boot on physical CPU1. TDVP overrides `CONFIG_LINUX_RUN_CORE_ID=0`
+so resetting CPU1 cannot reset U-Boot itself. `0064`, the kernel fragment
+and scalar `-mcpu=c908` userspace flags match physical CPU0. `0063`
 reserves `0x10000000..0x13ffffff` for the CPU1 OpenSBI/RT-Smart runtime and
 uses the last 64 KiB (`0x13ff0000`) for a versioned shared-memory mailbox.
 Linux maps only that mailbox through `/dev/tdvp-cpu1` with non-cacheable page
@@ -51,7 +56,15 @@ attributes; it neither starts CPU1 nor makes it a schedulable Linux core.
 
 The image post-processing stage compiles the pinned LilyGO RT-Smart source,
 places the firmware in the raw SD-card 10--30 MiB slot, and changes U-Boot to
-launch CPU1 before `blinux`.  The bounded first ABI services are `ping` and
+launch CPU1 before `blinux`. This slot contains raw `fw_payload.bin`, linked
+at `0x10000000` with RT-Smart at offset `0x20000`, not the vendor K230 wrapper:
+`boot_baremetal` only sets a reset vector. A build-time guard verifies core
+selection, entry, format, size and digest. RT-Smart's allocatable RAM ends
+before the mailbox (`0x03ff0000` bytes), uses UART3, disables shared board
+peripheral drivers and replaces the SD/USB-initializing CanMV `main`.
+Linux retains UART0 and owns SD, WiFi, display and other board peripherals.
+Cold-boot and VGLite hardware gates must be repeated after this core/ISA change.
+The bounded first ABI services are `ping` and
 `crc32`, available through `tdvp-cpu1ctl` and `libtdvp_cpu1.so.1`.  Future
 CPU1 jobs must extend this versioned ABI, keep cache maintenance on both cores,
 and must not expose the remainder of the reserved RAM to Linux userspace.
