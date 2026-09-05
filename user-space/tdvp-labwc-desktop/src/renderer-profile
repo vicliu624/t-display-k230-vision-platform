@@ -1,0 +1,6 @@
+# Renderer selection for authenticated Labwc sessions.
+#
+# This is intentionally Pixman in every release image until an experimental
+# image creates /etc/tdvp/labwc/vglite-enabled only after all VGLite/KMS gates
+# have been accepted for its exact kernel, SDK, wlroots and Labwc revisions.
+TDVP_RENDERER_PROFILE=pixman

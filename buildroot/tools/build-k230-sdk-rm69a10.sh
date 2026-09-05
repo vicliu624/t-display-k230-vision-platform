@@ -45,10 +45,14 @@ MANIFEST="$WORKTREE/.tdvp/sdk-baseline-manifest"
 OVERLAY_DIR="$PROJECT_DIR/buildroot/k230-sdk-overlay"
 USERSPACE_DIR="$PROJECT_DIR/user-space"
 CORE_PATCH_DIR="$PROJECT_DIR/buildroot/patches/buildroot"
+RENDERER_STACK_LOCK_CHECK="$SCRIPT_DIR/verify-tdvp-renderer-stack-lock.sh"
+PAGE_FLIP_CONTRACT_CHECK="$SCRIPT_DIR/verify-k230-sdk-pageflip-contract.sh"
+DISPLAY_SMOKE_CLEANUP_CHECK="$SCRIPT_DIR/test-tdvp-display-smoke-cleanup.sh"
 USERSPACE_COMPONENTS=(
 	tdvp-greeter
 	tdvp-kpu-acceptance
 	tdvp-labwc-desktop
+	tdvp-wayland-tools
 	vicliu-pocket-linux-hardware
 )
 
@@ -56,11 +60,31 @@ USERSPACE_COMPONENTS=(
 	printf 'TDVP SDK build: staged manifest missing: %s\n' "$MANIFEST" >&2
 	exit 1
 }
+[ -f "$RENDERER_STACK_LOCK_CHECK" ] || {
+	printf 'TDVP SDK build: renderer stack lock verifier missing: %s\n' \
+		"$RENDERER_STACK_LOCK_CHECK" >&2
+	exit 1
+}
+[ -x "$PAGE_FLIP_CONTRACT_CHECK" ] || {
+	printf 'TDVP SDK build: page-flip contract verifier missing or not executable: %s\n' \
+		"$PAGE_FLIP_CONTRACT_CHECK" >&2
+	exit 1
+}
+[ -x "$DISPLAY_SMOKE_CLEANUP_CHECK" ] || {
+	printf 'TDVP SDK build: display-smoke cleanup verifier missing or not executable: %s\n' \
+		"$DISPLAY_SMOKE_CLEANUP_CHECK" >&2
+	exit 1
+}
 
 grep -Fqx 'sdk_commit=5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7' "$MANIFEST" || {
 	printf '%s\n' 'TDVP SDK build: worktree does not match the pinned SDK commit' >&2
 	exit 1
 }
+
+# The counter utility directly takes DRM master during maintenance. Verify its
+# resource-release ordering before every SDK build so no candidate can restore
+# greetd after manually freeing an active scan-out buffer.
+bash "$DISPLAY_SMOKE_CLEANUP_CHECK"
 
 PROFILE="$(sed -n 's/^profile=//p' "$MANIFEST")"
 case "$PROFILE" in
@@ -125,13 +149,27 @@ write_core_patch_manifest() {
 
 current_source_manifest="$(mktemp)"
 staged_source_manifest="$(mktemp)"
-trap 'rm -f "$current_source_manifest" "$staged_source_manifest"' EXIT
+current_renderer_stack_manifest="$(mktemp)"
+staged_renderer_stack_manifest="$(mktemp)"
+trap 'rm -f "$current_source_manifest" "$staged_source_manifest" "$current_renderer_stack_manifest" "$staged_renderer_stack_manifest"' EXIT
 
 write_platform_source_manifest > "$current_source_manifest"
 grep -E '^[0-9a-f]{64}  ' "$MANIFEST" > "$staged_source_manifest" || true
 
 cmp -s "$current_source_manifest" "$staged_source_manifest" || {
 	printf '%s\n' 'TDVP SDK build: staged platform sources differ from the current project sources' >&2
+	printf '%s\n' 'TDVP SDK build: rerun prepare-k230-sdk-worktree.sh with TDVP_ALLOW_OVERWRITE=1' >&2
+	exit 1
+}
+
+# The SDK contributes VGLite source files that are deliberately outside the
+# TDVP overlay manifest. Recompute the effective staged renderer stack so a
+# later local edit cannot be compiled under an older evidence manifest.
+bash "$RENDERER_STACK_LOCK_CHECK" --stage "$WORKTREE" > "$current_renderer_stack_manifest"
+grep '^renderer_stack_' "$MANIFEST" | \
+	grep -v '^renderer_stack_sha256=' > "$staged_renderer_stack_manifest" || true
+cmp -s "$current_renderer_stack_manifest" "$staged_renderer_stack_manifest" || {
+	printf '%s\n' 'TDVP SDK build: staged renderer stack differs from its baseline manifest' >&2
 	printf '%s\n' 'TDVP SDK build: rerun prepare-k230-sdk-worktree.sh with TDVP_ALLOW_OVERWRITE=1' >&2
 	exit 1
 }
@@ -150,8 +188,9 @@ current_core_patch_digest="$(write_core_patch_manifest "$CORE_PATCH_DIR" | sha25
 # incremental build cannot reuse a package configured from an older staged
 # source tree.
 platform_source_digest="$(sha256sum "$current_source_manifest" | awk '{print $1}')"
-build_input_digest="$(printf 'profile=%s\nplatform_source=%s\ncore_patches=%s\n' \
-	"$PROFILE" "$platform_source_digest" "$current_core_patch_digest" | \
+renderer_stack_digest="$(sha256sum "$current_renderer_stack_manifest" | awk '{print $1}')"
+build_input_digest="$(printf 'profile=%s\nplatform_source=%s\ncore_patches=%s\nrenderer_stack=%s\n' \
+	"$PROFILE" "$platform_source_digest" "$current_core_patch_digest" "$renderer_stack_digest" | \
 	sha256sum | awk '{print $1}')"
 
 if [ "$#" -eq 0 ]; then
@@ -370,6 +409,12 @@ verify_staged_component_sources() {
 
 OUTPUT_DIR="$WORKTREE/output/$PROFILE"
 BUILD_INPUT_STAMP="$OUTPUT_DIR/.tdvp-product-input.sha256"
+# This checkpoint is deliberately weaker than BUILD_INPUT_STAMP.  It records
+# only that every local product package was dircleaned for the current staged
+# inputs; it never attests that an image was built or that its audits passed.
+# Keeping the two states separate lets a failed build resume its already-clean
+# package work without making an unverified image eligible for reuse.
+PACKAGE_CLEAN_STAMP="$OUTPUT_DIR/.tdvp-product-package-clean.sha256"
 
 required_product_config=(
 	BR2_INIT_SYSTEMD
@@ -437,6 +482,9 @@ required_product_config=(
 	BR2_PACKAGE_TDVP_DISPLAY_SMOKE
 	BR2_PACKAGE_TDVP_KEYBOARD_LAYOUT
 	BR2_PACKAGE_TDVP_WAYLAND_ACCEPTANCE
+	BR2_PACKAGE_TDVP_WAYLAND_TOOLS
+	BR2_PACKAGE_TDVP_VGLITE_ACCEPTANCE
+	BR2_PACKAGE_VG_LITE
 )
 
 product_config_matches_contract() {
@@ -492,6 +540,12 @@ if [ -r "$BUILD_INPUT_STAMP" ] && \
 	product_inputs_changed=0
 fi
 
+product_packages_cleaned=0
+if [ -r "$PACKAGE_CLEAN_STAMP" ] && \
+	[ "$(tr -d '\r\n' < "$PACKAGE_CLEAN_STAMP")" = "$build_input_digest" ]; then
+	product_packages_cleaned=1
+fi
+
 verify_staged_component_sources
 
 if [ "$incremental_mode" = "1" ]; then
@@ -507,6 +561,23 @@ if [ "$incremental_mode" = "1" ]; then
 		exit 1
 	}
 	synchronize_stage_overlay
+	if [ "$product_inputs_changed" = "1" ]; then
+		# The product defconfig lives in the staged overlay. A source-only
+		# incremental run otherwise keeps the previous .config indefinitely,
+		# so a newly selected local package can be registered yet never built.
+		# Reapplying a matching defconfig is needlessly expensive: Buildroot
+		# refreshes configuration timestamps and rebuilds Linux/U-Boot even for
+		# a guard or userspace-only edit. The required selection contract is the
+		# fail-safe boundary: every newly selected product package must be added
+		# to required_product_config, which makes this branch reconfigure when
+		# the existing output cannot satisfy the updated profile.
+		if product_config_matches_contract "$OUTPUT_DIR/.config"; then
+			printf '%s\n' 'TDVP SDK build: current product config already satisfies the staged contract'
+		else
+			printf '%s\n' 'TDVP SDK build: refreshing the staged product defconfig'
+			configure_buildroot_output
+		fi
+	fi
 	verify_product_config
 	printf 'TDVP SDK build: incremental target build using %s\n' "$OUTPUT_DIR"
 else
@@ -525,6 +596,21 @@ esac
 
 	configure_buildroot_output
 	verify_product_config
+fi
+
+LINUX_PATCH_RESET_MARKER="$WORKTREE/.tdvp/linux-patch-reset-required"
+linux_patch_refresh_pending=0
+if [ -f "$LINUX_PATCH_RESET_MARKER" ]; then
+	case "$1" in
+		linux-dirclean)
+			printf '%s\n' 'TDVP SDK build: Linux patch refresh marker retained for the next kernel build'
+			;;
+		*)
+			printf '%s\n' 'TDVP SDK build: Linux patch set changed; running linux-dirclean before the requested target'
+			run_buildroot_target linux-dirclean
+			linux_patch_refresh_pending=1
+			;;
+	esac
 fi
 if [ "$image_rebuild_mode" = "1" ]; then
 	[ "$incremental_mode" = "1" ] || {
@@ -562,6 +648,7 @@ if [ "$product_inputs_changed" = "1" ] && [ "$image_rebuild_mode" != "1" ]; then
 	# vendor toolchain or unrelated SDK packages.
 	product_packages=(
 		gtk-layer-shell
+		wlroots
 		labwc
 		libfm-extra
 		libmenu-cache
@@ -599,6 +686,8 @@ if [ "$product_inputs_changed" = "1" ] && [ "$image_rebuild_mode" != "1" ]; then
 		tdvp-display-smoke
 		tdvp-keyboard-layout
 		tdvp-wayland-acceptance
+		tdvp-wayland-tools
+		tdvp-vglite-acceptance
 	)
 	packages_to_clean=()
 	clean_all_product_packages=0
@@ -628,9 +717,22 @@ if [ "$product_inputs_changed" = "1" ] && [ "$image_rebuild_mode" != "1" ]; then
 		packages_to_clean=("${product_packages[@]}")
 	fi
 
-	for package in "${packages_to_clean[@]}"; do
-		run_buildroot_target "${package}-dirclean"
-	done
+	if [ "$clean_all_product_packages" -eq 1 ] && \
+		[ "$product_packages_cleaned" -eq 1 ]; then
+		printf '%s\n' 'TDVP SDK build: product package cleanup already completed for the current staged inputs'
+	else
+		for package in "${packages_to_clean[@]}"; do
+			run_buildroot_target "${package}-dirclean"
+		done
+
+		# Do not record a targeted package clean as a complete product clean: a
+		# later all-target build must still invalidate every other local package
+		# whose staged sources may have changed.  This stamp is intentionally
+		# written only after the full loop succeeds.
+		if [ "$clean_all_product_packages" -eq 1 ]; then
+			printf '%s\n' "$build_input_digest" > "$PACKAGE_CLEAN_STAMP"
+		fi
+	fi
 elif [ "$product_inputs_changed" = "1" ]; then
 	printf '%s\n' 'TDVP SDK build: preserving existing package outputs for explicit image-only rebuild'
 fi
@@ -640,6 +742,36 @@ fi
 mkdir -p "$OUTPUT_DIR/images/deb"
 
 "${BUILD_ENV[@]}" make -j"${build_jobs}" -C "$OUTPUT_DIR" "$@"
+
+# For kernel-bearing targets, prove the reviewed 0053 patch is still
+# constructively applicable to the exact SDK kernel commit and that its event
+# lifecycle still relies on the generic DRM flip_done serialization. This uses
+# an alternate index, so it neither re-patches nor dirties Buildroot's source
+# cache after a successful kernel/image build.
+for target in "$@"; do
+	case "$target" in
+		all|linux|linux-rebuild)
+			bash "$PAGE_FLIP_CONTRACT_CHECK" "$WORKTREE" "$OUTPUT_DIR"
+			break
+			;;
+	esac
+done
+
+# The marker is a transaction boundary: retain it through a failed kernel
+# build, and clear it only after the target that rebuilds Linux succeeds.
+# This makes a later incremental invocation retry the required dirclean rather
+# than accidentally trusting a partially patched kernel tree.
+if [ "$linux_patch_refresh_pending" = "1" ]; then
+	for target in "$@"; do
+		case "$target" in
+			all|linux|linux-rebuild)
+				rm -f "$LINUX_PATCH_RESET_MARKER"
+				printf '%s\n' 'TDVP SDK build: Linux patch refresh completed'
+				break
+				;;
+		esac
+	done
+fi
 
 for target in "$@"; do
 	case "$target" in

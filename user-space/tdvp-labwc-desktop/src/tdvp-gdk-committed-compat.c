@@ -40,6 +40,34 @@ struct deferred_callback {
 	gpointer user_data;
 };
 
+/* gtk-layer-shell's stable enum value for exclusive keyboard focus. */
+#define GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE 1
+
+/*
+ * wfplug-menu requests exclusive keyboard focus every time it opens its
+ * popover. Labwc/VGLite reconfigures that already-top-level panel as a new
+ * layer surface, which visibly flashes the entire output on this device.
+ *
+ * This interposer is loaded only by tdvp-wf-panel-session, so preserve the
+ * panel's existing on-demand keyboard mode instead. Menu pointer operation
+ * and its normal dismissed signal remain entirely upstream wfplug-menu
+ * behaviour; only the redundant exclusive-focus transition is suppressed.
+ */
+void
+gtk_layer_set_keyboard_mode(gpointer window, int mode)
+{
+	typedef void (*set_keyboard_mode_fn)(gpointer, int);
+	static set_keyboard_mode_fn real_set_keyboard_mode;
+
+	if (mode == GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE)
+		return;
+	if (!real_set_keyboard_mode)
+		real_set_keyboard_mode = (set_keyboard_mode_fn)dlsym(RTLD_NEXT,
+			"gtk_layer_set_keyboard_mode");
+	if (real_set_keyboard_mode)
+		real_set_keyboard_mode(window, mode);
+}
+
 static gboolean
 run_deferred_callback(gpointer opaque)
 {

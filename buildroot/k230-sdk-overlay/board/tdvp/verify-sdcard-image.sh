@@ -543,7 +543,7 @@ require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option check_signature 1'
 require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option signature_type gpg-asc'
 require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option gpg_dir /etc/opkg/gpg'
 require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option gpg_trust_level TrustAny'
-require_rootfs_fixed_line '/etc/opkg/tdvp-feed.conf' 'src/gz tdvp_apps_r6 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r6/riscv64'
+require_rootfs_fixed_line '/etc/opkg/tdvp-feed.conf' 'src/gz tdvp_apps https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/stable/riscv64'
 reject_fs_path "${ROOTFS}" '/etc/opkg/tdvp-feed.conf.disabled'
 require_fs_path "${ROOTFS}" '/usr/share/tdvp/opkg/tdvp-repo-public.asc'
 require_rootfs_gpg_fingerprint "${ROOTFS}" '/usr/share/tdvp/opkg/tdvp-repo-public.asc' \

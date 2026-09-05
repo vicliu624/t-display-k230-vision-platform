@@ -12,7 +12,18 @@ cleanup() {
 
 trap cleanup EXIT HUP INT TERM
 
-/usr/bin/labwc &
+log_file="${XDG_RUNTIME_DIR}/tdvp-greeter.log"
+previous_log_file="${log_file}.previous"
+if [ -f "${log_file}" ]; then
+	mv -f "${log_file}" "${previous_log_file}"
+fi
+: >"${log_file}"
+chmod 0600 "${log_file}"
+
+# Do not leave expected early Wayland connection retries, malformed vendor
+# EDID warnings, or Gtk diagnostics on the login VT. They remain available in
+# the greeter-owned runtime log, which is rotated once per greeter session.
+/usr/bin/labwc >>"${log_file}" 2>&1 &
 labwc_pid="$!"
 
 # The board's physical DSI orientation is an output property.  Keeping the
@@ -21,7 +32,7 @@ labwc_pid="$!"
 attempt=0
 while [ "${attempt}" -lt 80 ]; do
 	if /usr/bin/wlr-randr --output "${TDVP_K230_OUTPUT}" \
-		--transform "${TDVP_K230_OUTPUT_TRANSFORM}"; then
+		--transform "${TDVP_K230_OUTPUT_TRANSFORM}" >>"${log_file}" 2>&1; then
 		break
 	fi
 	attempt=$((attempt + 1))
@@ -33,7 +44,37 @@ if [ "${attempt}" -eq 80 ]; then
 	exit 1
 fi
 
+# wlr-randr acknowledges the transform before GTK has necessarily received
+# the resulting monitor reconfiguration. Require three observable,
+# consecutive output samples with the requested transform, then retain a
+# small final settle interval before GtkGreet creates its login window.
+stable_samples=0
+settle_attempt=0
+while [ "${settle_attempt}" -lt 30 ]; do
+	output_state="$(/usr/bin/wlr-randr 2>>"${log_file}" || true)"
+	if printf '%s\n' "${output_state}" | grep -Fq "${TDVP_K230_OUTPUT}" && \
+		printf '%s\n' "${output_state}" | grep -Fq 'Enabled: yes' && \
+		printf '%s\n' "${output_state}" | grep -Fq "Transform: ${TDVP_K230_OUTPUT_TRANSFORM}"; then
+		stable_samples=$((stable_samples + 1))
+		if [ "${stable_samples}" -ge 3 ]; then
+			break
+		fi
+	else
+		stable_samples=0
+	fi
+	settle_attempt=$((settle_attempt + 1))
+	sleep 0.1
+done
+
+if [ "${stable_samples}" -lt 3 ]; then
+	echo "tdvp-greeter: output ${TDVP_K230_OUTPUT} did not settle at transform ${TDVP_K230_OUTPUT_TRANSFORM}" \
+		>>"${log_file}"
+	exit 1
+fi
+
+sleep 0.5
+
 /usr/bin/gtkgreet \
 	--layer-shell \
 	--command /usr/local/bin/tdvp-labwc-session \
-	--style /etc/greetd/gtkgreet.css
+	--style /etc/greetd/gtkgreet.css >>"${log_file}" 2>&1

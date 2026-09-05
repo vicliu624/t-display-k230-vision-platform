@@ -16,6 +16,7 @@ Makefile text eol=lf
 
 /buildroot/tools/* text eol=lf
 /buildroot/k230-sdk-overlay/configs/* text eol=lf
+/buildroot/k230-sdk-overlay/package/**/src/** text eol=lf
 /user-space/**/src/autostart text eol=lf
 /user-space/**/src/environment text eol=lf
 /user-space/**/src/tdvp-* text eol=lf

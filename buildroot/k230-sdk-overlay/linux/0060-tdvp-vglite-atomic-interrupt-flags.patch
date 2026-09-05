@@ -1,0 +1,118 @@
+From 6c0f7a0c4eb1d3e2f7b8572091486c378d7f0060 Mon Sep 17 00:00:00 2001
+From: TDVP <tdvp@localhost>
+Date: Fri, 4 Sep 2026 19:45:00 +0800
+Subject: [PATCH] tdvp: vglite: make completion flags safe across IRQ and wait
+
+The vendor VGLite driver stores completion bits in a plain device-global u32.
+The hard IRQ handler updates it with `|=`, while process context tests it in a
+wait predicate, clears it at SUBMIT, and reads then clears it at WAIT.  The
+0056 command-engine lease prevents another file from consuming a command
+between SUBMIT and WAIT, but it cannot serialize an IRQ with process context.
+An IRQ that arrives between a process read and write can therefore be lost;
+the `|=` in the IRQ itself is also a non-atomic read-modify-write.
+
+Make only this completion accumulator atomic.  The IRQ ORs flags without
+sleeping, wait predicates use atomic reads, all reset/new-submit clears use
+atomic sets, and WAIT consumes the completed snapshot with atomic_xchg().
+An interrupt racing the exchange is either included in the returned snapshot
+or remains accumulated for the next observation; it is never overwritten by a
+plain process-context zero.  This preserves the vendor ABI and existing
+event-mask behavior, and deliberately does not add a mutex or spinlock to the
+hard IRQ path.
+
+This complements, rather than replaces, the existing 0056 submit-to-WAIT
+lease, 0058 aborted-submit recovery, and 0059 bounded WAIT watchdog.
+---
+ drivers/gpu/vglite/vg_lite_hal.c | 24 +++++++++++++++---------
+ 1 file changed, 15 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/gpu/vglite/vg_lite_hal.c b/drivers/gpu/vglite/vg_lite_hal.c
+index e0b64b7a00259..7a06a20c449bb 100644
+--- a/drivers/gpu/vglite/vg_lite_hal.c
++++ b/drivers/gpu/vglite/vg_lite_hal.c
+@@ -55,6 +55,7 @@
+ #include <linux/mman.h>
+ #include <linux/mm_types.h>
+ #include <linux/mutex.h>
++#include <linux/atomic.h>
+ #include <linux/semaphore.h>
+ #include <linux/io.h>
+ #include <linux/of_platform.h>
+@@ -140,6 +141,6 @@ struct vg_lite_device {
+ 	int irq_enabled;
+ 
+-	u32 int_flags;
++	atomic_t int_flags;
+ 
+ 	wait_queue_head_t int_queue;
+ 	void *device;
+@@ -437,6 +438,7 @@ int vg_lite_hal_wait_interrupt(u32 timeout, u32 mask, u32 *value)
+ 	unsigned long wait_jiffies;
+ 	long result = 0;
+ 	bool infinite_wait = timeout == VG_LITE_INFINITE;
++	u32 completed_flags;
+ 	bool timed_out = false;
+ #define IGNORE_INTERRUPT 1
+ #if IGNORE_INTERRUPT
+@@ -473,3 +475,4 @@ int vg_lite_hal_wait_interrupt(u32 timeout, u32 mask, u32 *value)
+ 		result = wait_event_interruptible_timeout(
+-			device->int_queue, device->int_flags & mask, wait_jiffies);
++			device->int_queue,
++			atomic_read(&device->int_flags) & mask, wait_jiffies);
+ 		if (result < 0) {
+@@ -507,14 +510,13 @@ int vg_lite_hal_wait_interrupt(u32 timeout, u32 mask, u32 *value)
+ 			"vg_lite: wait timed out after %u ms (mask=0x%08x idle=0x%08x int=0x%08x)\n",
+ 			infinite_wait ?
+ 			vg_lite_infinite_wait_watchdog_ms : timeout,
+-			mask, idle, device->int_flags);
++			mask, idle, atomic_read(&device->int_flags));
+ 	}
+ 
+-	/* Report the event(s) got. */
++	/* Atomically consume the event snapshot reported to this WAIT. */
++	completed_flags = atomic_xchg(&device->int_flags, 0);
+ 	if (value)
+-		*value = device->int_flags & mask;
+-
+-	device->int_flags = 0;
++		*value = completed_flags & mask;
+ 	return (result != 0);
+ }
+ 
+@@ -634,7 +636,7 @@ static bool vg_lite_abort_submission(void)
+ 		goto faulted;
+ 
+ 	/* A reset has stopped all outstanding DMA before this file is freed. */
+-	WRITE_ONCE(device->int_flags, 0);
++	atomic_set(&device->int_flags, 0);
+ 	if (vg_lite_kernel(VG_LITE_RESET, NULL) != VG_LITE_SUCCESS)
+ 		device->faulted = true;
+ 
+@@ -857,7 +859,7 @@ long drv_ioctl(/*struct inode *inode, */ struct file *file,
+ 	active_client = client;
+ 	/* A completed prior transaction cannot satisfy this submission's wait. */
+ 	if (arguments.command == VG_LITE_SUBMIT && submission_lease_acquired)
+-		device->int_flags = 0;
++		atomic_set(&device->int_flags, 0);
+ 	error = vg_lite_kernel(arguments.command, data);
+ 	arguments.error = error;
+ 	if (arguments.command == VG_LITE_INITIALIZE && error == VG_LITE_SUCCESS) {
+@@ -1007,7 +1009,7 @@ static irqreturn_t irq_handler(int irq, void *context)
+ 
+ 	if (flags) {
+ 		/* Combine with current interrupt flags. */
+-		device->int_flags |= flags;
++		atomic_or(flags, &device->int_flags);
+ 
+ 		/* Wake up any waiters. */
+ 		wake_up_interruptible(&device->int_queue);
+@@ -1048,6 +1050,7 @@ static int vg_lite_init(struct platform_device *pdev)
+ 
+ 	/* Initialize the wait queue. */
+ 	init_waitqueue_head(&device->int_queue);
++	atomic_set(&device->int_flags, 0);
+ 
+ 	/* Install IRQ. */
+ 	if (irq_line < 0) {
+-- 
+2.43.0

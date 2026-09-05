@@ -89,9 +89,27 @@ for expected_patch in \
 	0050-tdvp-hwmon-aht20-standard-binding.patch \
 	0051-tdvp-riscv-dts-canaan-add-external-i2s-amp.patch \
 	0052-tdvp-asoc-canaan-add-external-i2s-output-switch.patch \
-	0053-tdvp-cpu1-rtsmart-mailbox.patch; do
+	0053-tdvp-drm-canaan-page-flip-lifecycle.patch \
+	0054-tdvp-vglite-per-client-resource-ownership.patch \
+	0055-tdvp-vglite-no-reset-on-secondary-open.patch \
+	0056-tdvp-vglite-serialize-submit-through-wait.patch \
+	0057-tdvp-vglite-command-engine-guard-edges.patch \
+	0058-tdvp-vglite-abort-inflight-close-safely.patch \
+	0059-tdvp-vglite-bound-infinite-wait-watchdog.patch \
+	0060-tdvp-vglite-atomic-interrupt-flags.patch \
+	0061-tdvp-vglite-enforce-single-context-open.patch \
+	0062-tdvp-vglite-yield-after-early-completion.patch \
+	0063-tdvp-cpu1-rtsmart-mailbox.patch; do
 	[ -f "$OVERLAY_DIR/$expected_patch" ] || fail "overlay is missing $expected_patch"
-	[ -f "$PATCH_DIR/$expected_patch" ] || fail "SDK sync did not install $expected_patch"
+	# The vendor sync is intentionally additive so it retains SDK package
+	# recipes that TDVP does not own.  That also means a vendor file with the
+	# same patch name would otherwise survive unchanged: mere presence is not
+	# evidence that Buildroot will apply the staged, reviewed patch.  Replace
+	# every active TDVP/Lewis queue member explicitly, then assert byte identity
+	# before Buildroot is allowed to consume the queue.
+	install -m 0644 "$OVERLAY_DIR/$expected_patch" "$PATCH_DIR/$expected_patch"
+	cmp -s "$OVERLAY_DIR/$expected_patch" "$PATCH_DIR/$expected_patch" || \
+		fail "SDK sync did not install the active patch content: $expected_patch"
 done
 
 bash "$(dirname "$0")/validate-k230-sdk-linux-patches.sh" "$PATCH_DIR"

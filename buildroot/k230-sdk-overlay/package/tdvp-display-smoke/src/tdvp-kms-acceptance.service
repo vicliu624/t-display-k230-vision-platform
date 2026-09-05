@@ -1,8 +1,16 @@
 [Unit]
-Description=TDVP K230 KMS XR24 acceptance
-After=dev-dri-card0.device seatd.service
-Wants=dev-dri-card0.device seatd.service
+Description=TDVP K230 compatibility entrypoint for managed direct-KMS acceptance
+# The vendor DRM node exists but is not advertised to systemd as a generated
+# *.device unit. Depending on dev-dri-card0.device therefore creates a
+# spurious timeout even when ConditionPathExists succeeds and card0 is usable.
+After=seatd.service
+Wants=seatd.service
+ConditionPathExists=/dev/dri/card0
 
 [Service]
 Type=oneshot
-ExecStart=/usr/libexec/tdvp/tdvp-kms-acceptance
+TimeoutStartSec=60
+TimeoutStopSec=15
+Environment=TDVP_KMS_MAINTENANCE_SERVICE=1
+ExecStart=/usr/libexec/tdvp/tdvp-kms-maintenance
+ExecStopPost=/usr/libexec/tdvp/tdvp-kms-maintenance-recover

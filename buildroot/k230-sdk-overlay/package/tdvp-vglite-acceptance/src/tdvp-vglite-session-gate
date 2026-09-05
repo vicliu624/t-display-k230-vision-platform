@@ -1,0 +1,266 @@
+#!/bin/sh
+#
+# Run the bounded, client-side part of the K230 VGLite acceptance gate against
+# the already-running Labwc session. This program is deliberately unable to
+# enable VGLite, alter Labwc, open DRM, or select a renderer. Its first job is
+# to prove that the live compositor process was launched with the VGLite-only
+# policy before its SHM workload is treated as evidence.
+
+set -eu
+
+PROFILE_TOOL="${TDVP_RENDERER_PROFILE_TOOL:-/usr/local/bin/tdvp-renderer-profile}"
+BENCH_SESSION="${TDVP_WAYLAND_SHM_BENCH_SESSION:-/usr/bin/tdvp-wayland-shm-bench-session}"
+WATCHDOG_OBSERVER="${TDVP_VGLITE_WATCHDOG_OBSERVER:-/usr/bin/tdvp-vglite-watchdog-observer}"
+DIAGNOSTICS_REPORT="${TDVP_VGLITE_DIAGNOSTICS_REPORT:-/usr/bin/tdvp-vglite-diagnostics-report}"
+PROC_ROOT="${TDVP_PROC_ROOT:-/proc}"
+
+width=1232
+height=568
+damage_size=0
+frames=120
+max_frame_ms=1000
+shm_format=xr24
+# The K230 VGLite kernel explicitly supports one hardware context.  A
+# concurrent off-screen VGLite process can leave display corruption even when
+# it exits successfully, so this session gate never starts one while Labwc
+# owns VGLite. Keep the parser option solely to reject old invocations before
+# any workload is started.
+churn_iterations=0
+repeat=1
+expect_vglite_compositor=0
+diagnostics_log=
+diagnostics_start_lines=0
+
+usage() {
+	cat <<EOF
+Usage: $0 --expect-vglite-compositor [OPTIONS]
+
+Validate the live, same-user Labwc process before and after a bounded linear
+wl_shm workload. This command
+does not start, stop, restart, configure, or otherwise modify Labwc, DRM/KMS,
+or the renderer policy. Before starting the workload it also reads the 0059
+kernel watchdog parameter; it does not inject a timeout or write sysfs.
+
+The required --expect-vglite-compositor flag is an operator acknowledgement:
+run this only after VGLite was explicitly approved and the current graphical
+session was launched with that profile. Run it as the graphical login user,
+not root, and preserve stdout/stderr and the current tdvp-labwc.log as one
+Gate 1 record.
+
+Options:
+  --width N              wl_shm surface width (default: ${width})
+  --height N             wl_shm surface height (default: ${height})
+  --damage-size N        changed square size; 0 redraws full surface (default: ${damage_size})
+  --frames N             number of wl_shm frames (default: ${frames})
+  --max-frame-ms N       bounded Wayland progress timeout (default: ${max_frame_ms})
+  --format xr24|ar24     linear wl_shm format to exercise (default: ${shm_format})
+  --churn-iterations 0   required for this single-context gate; any non-zero
+                         value is rejected before a workload is started
+  --repeat N             run the selected SHM workload N times (default: ${repeat})
+  --diagnostics-log PATH read only records appended to this Labwc log while
+                         the gate runs, then require one successful VGLite
+                          finish record and one verified page-flip framebuffer
+                          transition; this does not enable diagnostics
+EOF
+}
+
+fail() {
+	printf '%s\n' "tdvp-vglite-session-gate: ERROR: $*" >&2
+	exit 1
+}
+
+require_positive_integer() {
+	case "$2" in
+		''|*[!0-9]*) fail "$1 must be a positive integer" ;;
+	esac
+	[ "$2" -gt 0 ] || fail "$1 must be a positive integer"
+}
+
+require_nonnegative_integer() {
+	case "$2" in
+		''|*[!0-9]*) fail "$1 must be a non-negative integer" ;;
+	esac
+}
+
+require_shm_format() {
+	case "$1" in
+	xr24|ar24) ;;
+	*) fail "--format must be xr24 or ar24" ;;
+	esac
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	--expect-vglite-compositor)
+		expect_vglite_compositor=1
+		;;
+	--width|--height|--frames|--max-frame-ms|--churn-iterations|--churn-frames|--churn-timeout-seconds|--repeat)
+		[ "$#" -ge 2 ] || fail "$1 requires a value"
+		case "$1" in
+		--width) width="$2" ;;
+		--height) height="$2" ;;
+		--frames) frames="$2" ;;
+		--max-frame-ms) max_frame_ms="$2" ;;
+		--churn-iterations) churn_iterations="$2" ;;
+		--churn-frames|--churn-timeout-seconds)
+			# Retain parsing for a precise compatibility error below.
+			churn_iterations=1
+			;;
+		--repeat) repeat="$2" ;;
+		esac
+		shift
+		;;
+	--damage-size)
+		[ "$#" -ge 2 ] || fail "--damage-size requires a value"
+		damage_size="$2"
+		shift
+		;;
+	--format)
+		[ "$#" -ge 2 ] || fail "--format requires a value"
+		shm_format="$2"
+		shift
+		;;
+	--diagnostics-log)
+		[ "$#" -ge 2 ] || fail "--diagnostics-log requires a value"
+		diagnostics_log="$2"
+		shift
+		;;
+	-h|--help)
+		usage
+		exit 0
+		;;
+	*)
+		fail "unknown option: $1"
+		;;
+	esac
+	shift
+done
+
+[ "$expect_vglite_compositor" -eq 1 ] || {
+	usage >&2
+	fail "--expect-vglite-compositor is required"
+}
+require_positive_integer width "$width"
+require_positive_integer height "$height"
+require_nonnegative_integer damage_size "$damage_size"
+require_positive_integer frames "$frames"
+require_positive_integer max_frame_ms "$max_frame_ms"
+require_shm_format "$shm_format"
+require_nonnegative_integer churn_iterations "$churn_iterations"
+require_positive_integer repeat "$repeat"
+[ "$churn_iterations" -eq 0 ] ||
+	fail "K230 VGLite is a single-context driver: do not run client churn while Labwc owns /dev/vg_lite"
+[ "$(id -u)" -ne 0 ] || fail "run as the graphical login user, not root"
+[ -x "$PROFILE_TOOL" ] || fail "renderer-profile helper is not executable: $PROFILE_TOOL"
+[ -x "$BENCH_SESSION" ] || fail "Wayland benchmark helper is not executable: $BENCH_SESSION"
+[ -x "$WATCHDOG_OBSERVER" ] || fail "VGLite watchdog observer is not executable: $WATCHDOG_OBSERVER"
+if [ -n "$diagnostics_log" ]; then
+	[ -f "$diagnostics_log" ] || fail "diagnostics log is not a regular file: $diagnostics_log"
+	[ -r "$diagnostics_log" ] || fail "diagnostics log is not readable: $diagnostics_log"
+	[ -x "$DIAGNOSTICS_REPORT" ] ||
+		fail "VGLite diagnostics report is not executable: $DIAGNOSTICS_REPORT"
+	diagnostics_start_lines="$(wc -l < "$diagnostics_log" | tr -d '[:space:]')"
+	require_nonnegative_integer "diagnostics log line count" "$diagnostics_start_lines"
+fi
+
+session_user="$(id -un)"
+profile_status="$($PROFILE_TOOL status 2>/dev/null || true)"
+[ "$profile_status" = 'configured=vglite effective=vglite vglite_enabled=yes breaker=clear' ] ||
+	fail "renderer policy is not an approved, unbroken VGLite profile: ${profile_status:-unavailable}"
+
+find_labwc_pid() {
+	pid=
+	for candidate in $(pgrep -u "$session_user" -x labwc 2>/dev/null || true); do
+		[ -z "$pid" ] || fail "multiple Labwc processes exist for user $session_user"
+		pid="$candidate"
+	done
+	[ -n "$pid" ] || fail "no live Labwc process exists for user $session_user"
+	printf '%s\n' "$pid"
+}
+
+env_value() {
+	tr '\000' '\n' < "$PROC_ROOT/$labwc_pid/environ" |
+		sed -n "s/^$1=//p" | sed -n '1p'
+}
+
+assert_live_vglite_labwc() {
+	labwc_pid="$(find_labwc_pid)"
+	[ -r "$PROC_ROOT/$labwc_pid/environ" ] ||
+		fail "cannot read Labwc environment for pid $labwc_pid"
+	[ "$(cat "$PROC_ROOT/$labwc_pid/comm" 2>/dev/null || true)" = labwc ] ||
+		fail "pid $labwc_pid is not Labwc"
+	labwc_uid="$(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+		"$PROC_ROOT/$labwc_pid/status" | sed -n '1p')"
+	[ "$labwc_uid" = "$(id -u)" ] ||
+		fail "Labwc pid $labwc_pid does not belong to the graphical login user"
+	[ "$(env_value WLR_RENDERER)" = vglite ] ||
+		fail "Labwc pid $labwc_pid does not export WLR_RENDERER=vglite"
+	[ "$(env_value TDVP_LABWC_VGLITE_FAILURE_RECOVERY)" = 1 ] ||
+		fail "Labwc pid $labwc_pid does not enable TDVP VGLite failure recovery"
+	[ "$(env_value WLR_SCENE_DISABLE_DIRECT_SCANOUT)" = 1 ] ||
+		fail "Labwc pid $labwc_pid does not disable direct scan-out for VGLite"
+	printf '%s\n' "$labwc_pid"
+}
+
+read_labwc_accounting() {
+	accounting_pid="$1"
+	accounting_stat="${PROC_ROOT}/${accounting_pid}/stat"
+	accounting_status="${PROC_ROOT}/${accounting_pid}/status"
+
+	[ -r "$accounting_stat" ] ||
+		fail "cannot read Labwc accounting state for pid $accounting_pid"
+	[ -r "$accounting_status" ] ||
+		fail "cannot read Labwc accounting status for pid $accounting_pid"
+	# /proc/<pid>/stat fields 14 and 15 are utime and stime. Labwc has already
+	# been checked through comm/status above, so its command name cannot make
+	# this field layout ambiguous here.
+	labwc_cpu_user_ticks="$(awk 'NF >= 24 && $14 ~ /^[0-9][0-9]*$/ { print $14; exit }' \
+		"$accounting_stat")"
+	labwc_cpu_system_ticks="$(awk 'NF >= 24 && $15 ~ /^[0-9][0-9]*$/ { print $15; exit }' \
+		"$accounting_stat")"
+	labwc_rss_kb="$(sed -n 's/^VmRSS:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*kB.*/\1/p' \
+		"$accounting_status" | sed -n '1p')"
+	require_nonnegative_integer "Labwc user CPU ticks" "$labwc_cpu_user_ticks"
+	require_nonnegative_integer "Labwc system CPU ticks" "$labwc_cpu_system_ticks"
+	# VmRSS is absent only for a kernel thread, which Labwc cannot be. Retain
+	# the explicit check so a restricted or malformed proc view is not silently
+	# reported as a zero-RSS performance sample.
+	require_nonnegative_integer "Labwc RSS kB" "$labwc_rss_kb"
+}
+
+labwc_pid="$(assert_live_vglite_labwc)"
+read_labwc_accounting "$labwc_pid"
+labwc_cpu_user_ticks_before="$labwc_cpu_user_ticks"
+labwc_cpu_system_ticks_before="$labwc_cpu_system_ticks"
+labwc_rss_kb_before="$labwc_rss_kb"
+"$WATCHDOG_OBSERVER" --expect-default-ms 5000
+printf '%s\n' \
+	"tdvp-vglite-session-gate: start operator_attestation=vglite-compositor user=$session_user labwc_pid=$labwc_pid profile='$profile_status' width=$width height=$height damage_size=$damage_size frames=$frames max_frame_ms=$max_frame_ms format=$shm_format vglite_client_churn=not-run-single-context repeat=$repeat diagnostics_log=${diagnostics_log:-not-requested} diagnostics_skip_lines=$diagnostics_start_lines labwc_cpu_user_ticks_before=$labwc_cpu_user_ticks_before labwc_cpu_system_ticks_before=$labwc_cpu_system_ticks_before labwc_rss_kb_before=$labwc_rss_kb_before"
+
+round=1
+while [ "$round" -le "$repeat" ]; do
+	printf '%s\n' \
+		"tdvp-vglite-session-gate: workload_round=$round/$repeat labwc_pid=$labwc_pid format=$shm_format damage_size=$damage_size frames=$frames"
+	"$BENCH_SESSION" --user "$session_user" --pid "$labwc_pid" -- \
+		--width "$width" --height "$height" --format "$shm_format" --damage-size "$damage_size" \
+		--frames "$frames" --max-frame-ms "$max_frame_ms"
+	verified_labwc_pid="$(assert_live_vglite_labwc)"
+	[ "$verified_labwc_pid" = "$labwc_pid" ] ||
+		fail "Labwc PID changed during Gate 1: expected=$labwc_pid actual=$verified_labwc_pid"
+	"$WATCHDOG_OBSERVER" --expect-default-ms 5000
+	profile_status="$($PROFILE_TOOL status 2>/dev/null || true)"
+	[ "$profile_status" = 'configured=vglite effective=vglite vglite_enabled=yes breaker=clear' ] ||
+		fail "renderer policy changed during the gate: ${profile_status:-unavailable}"
+	round=$((round + 1))
+done
+read_labwc_accounting "$labwc_pid"
+[ "$labwc_cpu_user_ticks" -ge "$labwc_cpu_user_ticks_before" ] ||
+	fail "Labwc user CPU ticks moved backwards during Gate 1"
+[ "$labwc_cpu_system_ticks" -ge "$labwc_cpu_system_ticks_before" ] ||
+	fail "Labwc system CPU ticks moved backwards during Gate 1"
+if [ -n "$diagnostics_log" ]; then
+	"$DIAGNOSTICS_REPORT" --log "$diagnostics_log" --skip-lines "$diagnostics_start_lines" \
+		--require-finish 1 --require-page-flip-transition 1
+fi
+printf '%s\n' \
+	"tdvp-vglite-session-gate: PASS operator_attestation=vglite-compositor user=$session_user labwc_pid=$labwc_pid profile='$profile_status' repeat=$repeat labwc_cpu_user_ticks_delta=$((labwc_cpu_user_ticks - labwc_cpu_user_ticks_before)) labwc_cpu_system_ticks_delta=$((labwc_cpu_system_ticks - labwc_cpu_system_ticks_before)) labwc_rss_kb_before=$labwc_rss_kb_before labwc_rss_kb_after=$labwc_rss_kb"

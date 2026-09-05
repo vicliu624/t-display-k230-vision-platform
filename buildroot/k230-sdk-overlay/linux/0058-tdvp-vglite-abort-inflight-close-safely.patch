@@ -1,0 +1,380 @@
+From 7d4e1f444f461dbe3833bd99a4640e7b6c2cd529 Mon Sep 17 00:00:00 2001
+From: TDVP Display Team <display@tdvp.local>
+Date: Fri, 4 Sep 2026 17:35:00 +0800
+Subject: [PATCH] gpu: vglite: recover an aborted command before freeing it
+
+The vendor VGLite driver owns one command engine, one interrupt-status word and
+a global initialization counter, but its release callback used to free a
+file's commands and mappings even while that file still owned a submitted
+command. That exposes use-after-free DMA when an application exits after
+SUBMIT but before WAIT.
+
+Hold the existing submit-to-wait lease as the ownership boundary. On an active
+file close, mask and synchronize the GPU IRQ, use the already-probed reset
+controller to stop DMA, then re-prime the engine. Only after the reset has
+completed can the file's allocations and mappings be reclaimed. If the reset
+controller itself fails, quarantine the device and intentionally retain those
+resources until reboot: freeing memory that an un-stopped engine might still
+access is never safe.
+
+Track successful INITIALIZE calls per file and retire their global references
+on an abnormal close. Without this, a process that exits without TERMINATE
+leaves s_reference nonzero; the next zero-to-one runtime-PM open resets and
+powers the engine but a later INITIALIZE incorrectly skips the required
+gpu(1) setup.
+
+The vendor gpu(1) retry loop is also bounded. Its old doubling delay could
+wrap and sleep indefinitely after a failed reset. Resource-destroying ioctls
+are rejected while a file owns an unfinished submission; the client may WAIT
+or explicitly RESET the shared engine instead.
+---
+--- a/drivers/gpu/vglite/vg_lite_kernel.h
++++ b/drivers/gpu/vglite/vg_lite_kernel.h
+@@ -445,6 +445,7 @@
+ };
+ 
+ enum vg_lite_error vg_lite_kernel(enum vg_lite_kernel_command command, void *data);
++enum vg_lite_error vg_lite_kernel_abort_contexts(unsigned int contexts);
+ 
+ #ifdef __cplusplus
+ }
+--- a/drivers/gpu/vglite/vg_lite_hal.c
++++ b/drivers/gpu/vglite/vg_lite_hal.c
+@@ -134,6 +134,8 @@
+ 	struct clk *clk;
+ 	struct reset_control *reset;
+ 	int created;
++	int irq;
++	bool faulted;
+ };
+ 
+ struct client_data {
+@@ -146,6 +148,7 @@
+ 	/* Serialize ioctl state for this file and record a submit-to-wait lease. */
+ 	struct mutex ioctl_lock;
+ 	bool submission_active;
++	unsigned int initialized_contexts;
+ };
+ 
+ /* Data and objects declarations. */
+@@ -197,6 +200,11 @@
+ 	int ret;
+ 
+ 	mutex_lock(&vg_lite_open_lock);
++	if (device->faulted) {
++		ret = -EIO;
++		goto out_unlock;
++	}
++
+ 	// Power-on
+ 	ret = pm_runtime_get_sync(device->dev);
+ 	if (ret < 0) {
+@@ -546,6 +554,54 @@
+ 	up(&vg_lite_submit_lock);
+ }
+ 
++/*
++ * The reset controller is the only reliable way to stop a command whose
++ * owner has disappeared. It is called with vg_lite_client_lock held, so no
++ * other file can submit or change the vendor active_client context during the
++ * recovery.
++ */
++static bool vg_lite_abort_submission(void)
++{
++	int ret;
++
++	if (IS_ERR_OR_NULL(device->reset))
++		goto faulted;
++
++	vg_lite_hal_poke(VG_LITE_INTR_ENABLE, 0);
++	synchronize_irq(device->irq);
++
++	mutex_lock(&vg_lite_open_lock);
++	ret = reset_control_reset(device->reset);
++	mutex_unlock(&vg_lite_open_lock);
++	if (ret < 0)
++		goto faulted;
++
++	/* A reset has stopped all outstanding DMA before this file is freed. */
++	WRITE_ONCE(device->int_flags, 0);
++	if (vg_lite_kernel(VG_LITE_RESET, NULL) != VG_LITE_SUCCESS)
++		device->faulted = true;
++
++	return true;
++
++faulted:
++	device->faulted = true;
++	return false;
++}
++
++static bool vg_lite_command_releases_resources(enum vg_lite_kernel_command command)
++{
++	switch (command) {
++	case VG_LITE_TERMINATE:
++	case VG_LITE_FREE:
++	case VG_LITE_UNMAP:
++	case VG_LITE_UNMAP_MEMORY:
++	case VG_LITE_CLOSE:
++		return true;
++	default:
++		return false;
++	}
++}
++
+ int drv_open(struct inode *inode, struct file *file)
+ {
+ 	struct client_data *data;
+@@ -575,15 +631,42 @@
+ int drv_release(struct inode *inode, struct file *file)
+ {
+ 	struct client_data *data = (struct client_data *)file->private_data;
++	bool resources_safe_to_free = true;
++	enum vg_lite_error abort_error = VG_LITE_SUCCESS;
+ 
+ 	mutex_lock(&data->ioctl_lock);
+ 	mutex_lock(&vg_lite_client_lock);
+ 	active_client = data;
+-	vg_lite_hal_free_os_heap();
++	if (data->submission_active) {
++		resources_safe_to_free = vg_lite_abort_submission();
++		/* A faulted device rejects new work before this token can be reused. */
++		vg_lite_release_submission_lease(data);
++	}
++
++	if (resources_safe_to_free) {
++		abort_error =
++			vg_lite_kernel_abort_contexts(data->initialized_contexts);
++		data->initialized_contexts = 0;
++		if (abort_error != VG_LITE_SUCCESS)
++			device->faulted = true;
++		vg_lite_hal_free_os_heap();
++	}
+ 	active_client = NULL;
+ 	mutex_unlock(&vg_lite_client_lock);
+-	vg_lite_release_submission_lease(data);
+ 	mutex_unlock(&data->ioctl_lock);
++
++	if (!resources_safe_to_free) {
++		/*
++		 * reset_control_reset() failed, so hardware might still DMA from these
++		 * lists. Keep this final PM reference and the allocation metadata alive
++		 * until reboot instead of turning a recoverable GPU fault into a UAF.
++		 */
++		dev_err(device->dev,
++			"vg_lite: reset failed while closing an active submission; device quarantined\n");
++		file->private_data = NULL;
++		return 0;
++	}
++
+ 	kfree(data);
+ 	file->private_data = NULL;
+ 	vg_lite_hal_close();
+@@ -635,6 +718,9 @@
+ 	if (!client)
+ 		return -1;
+ 
++	if (READ_ONCE(client->device->faulted))
++		return -EIO;
++
+ 	if (ioctl_code != VG_LITE_IOCTL)
+ 		return -1;
+ 
+@@ -660,6 +746,38 @@
+ 	}
+ 
+ 	mutex_lock(&client->ioctl_lock);
++	if (client->device->faulted) {
++		arguments.error = VG_LITE_GENERIC_IO;
++		goto out_unlock_client;
++	}
++
++	if (client->submission_active &&
++		vg_lite_command_releases_resources(arguments.command)) {
++		/* The command engine may still be reading this file's memory. */
++		arguments.error = VG_LITE_TIMEOUT;
++		goto out_unlock_client;
++	}
++
++	if (arguments.command == VG_LITE_TERMINATE &&
++		!client->initialized_contexts) {
++		arguments.error = VG_LITE_NO_CONTEXT;
++		goto out_unlock_client;
++	}
++
++	if (arguments.command == VG_LITE_RESET && client->submission_active) {
++		bool stopped;
++
++		mutex_lock(&vg_lite_client_lock);
++		active_client = client;
++		stopped = vg_lite_abort_submission();
++		active_client = NULL;
++		mutex_unlock(&vg_lite_client_lock);
++		vg_lite_release_submission_lease(client);
++		arguments.error = stopped && !client->device->faulted ?
++			VG_LITE_SUCCESS : VG_LITE_GENERIC_IO;
++		goto out_unlock_client;
++	}
++
+ 	if (arguments.command == VG_LITE_SUBMIT) {
+ 		if (client->submission_active) {
+ 			/* One file cannot replace its own unfinished command. */
+@@ -685,6 +803,12 @@
+ 		device->int_flags = 0;
+ 	error = vg_lite_kernel(arguments.command, data);
+ 	arguments.error = error;
++	if (arguments.command == VG_LITE_INITIALIZE && error == VG_LITE_SUCCESS) {
++		client->initialized_contexts++;
++	} else if (arguments.command == VG_LITE_TERMINATE &&
++		   error == VG_LITE_SUCCESS) {
++		client->initialized_contexts--;
++	}
+ 	active_client = NULL;
+ 	mutex_unlock(&vg_lite_client_lock);
+ 
+@@ -847,10 +971,12 @@
+ 	struct device *dev;
+ 
+ 	/* Create device structure. */
+-	device = kmalloc(sizeof(*device), GFP_KERNEL);
+-	memset(device, 0, sizeof(struct vg_lite_device));
++	device = kzalloc(sizeof(*device), GFP_KERNEL);
++	if (!device)
++		return -ENOMEM;
+ 	get_device(&pdev->dev);
+ 	device->dev = &pdev->dev;
++	device->irq = irq_line;
+ 	device->clk = devm_clk_get(&pdev->dev, "vglite");
+ 	device->reset = devm_reset_control_get(&pdev->dev, NULL);
+ 	pm_runtime_enable(device->dev);
+--- a/drivers/gpu/vglite/vg_lite_kernel.c
++++ b/drivers/gpu/vglite/vg_lite_kernel.c
+@@ -47,7 +47,7 @@
+ 
+ static void soft_reset(void);
+ 
+-static void gpu(int enable)
++static enum vg_lite_error gpu(int enable)
+ {
+ 	union vg_lite_hw_clock_control value;
+ 	uint32_t reset_timer = 2;
+@@ -69,16 +69,19 @@
+ 		vg_lite_hal_poke(VG_LITE_HW_CLOCK_CONTROL, value.data);
+ 		vg_lite_hal_delay(5);
+ 
+-		do {
++		while (!VG_LITE_KERNEL_IS_GPU_IDLE()) {
++			if (reset_timer >= reset_timer_limit)
++				return VG_LITE_TIMEOUT;
++
+ 			/* Perform a soft reset. */
+ 			soft_reset();
+ 			vg_lite_hal_delay(reset_timer);
+-			/* If reset failed, try again with a longer wait.
+-			 * Need to check why if dead lopp happens here.
+-			 */
+ 			reset_timer *= 2;
+-		} while (!VG_LITE_KERNEL_IS_GPU_IDLE());
++		}
++
++		return VG_LITE_SUCCESS;
+ 	} else {
++		/* Do not claim shutdown succeeded while the engine is still active. */
+ 		while (!VG_LITE_KERNEL_IS_GPU_IDLE() &&
+ 		       (reset_timer <
+ 			reset_timer_limit) // Force shutdown if timeout.
+@@ -87,6 +90,9 @@
+ 			reset_timer *= 2;
+ 		}
+ 
++		if (!VG_LITE_KERNEL_IS_GPU_IDLE())
++			return VG_LITE_TIMEOUT;
++
+ 		/* Set idle speed. */
+ 		value.data = vg_lite_hal_peek(VG_LITE_HW_CLOCK_CONTROL);
+ 		value.control.scale = 1;
+@@ -102,6 +108,8 @@
+ 		vg_lite_hal_poke(VG_LITE_HW_CLOCK_CONTROL, value.data);
+ 		vg_lite_hal_delay(1);
+ 	}
++
++	return VG_LITE_SUCCESS;
+ }
+ 
+ /* Initialize some customized modeuls [DDRLess]. */
+@@ -155,8 +163,12 @@
+ 		/* Initialize the SOC. */
+ 		vg_lite_hal_initialize();
+ 
+-		/* Enable the GPU. */
+-		gpu(1);
++		error = gpu(1);
++		if (error != VG_LITE_SUCCESS) {
++			s_reference--;
++			vg_lite_hal_deinitialize();
++			return error;
++		}
+ 	}
+ 
+ 	/* Fill in hardware capabilities. */
+@@ -363,7 +375,10 @@ static enum vg_lite_error do_terminate(struct vg_lite_kernel_terminate *data)
+ {
+-	terminate_vglite(data);
+-	terminate_3rd(data);
+-
+-	return VG_LITE_SUCCESS;
++	enum vg_lite_error error;
++
++	error = terminate_vglite(data);
++	if (error != VG_LITE_SUCCESS)
++		return error;
++
++	return terminate_3rd(data);
+ }
+ 
+@@ -369,5 +384,29 @@
+ }
+ 
++/*
++ * A process can disappear after INITIALIZE without giving userspace a chance
++ * to provide its context again to VG_LITE_TERMINATE. The file owner has
++ * already stopped the engine and reclaimed the file-local allocations, so
++ * only the global initialization references remain to be retired here.
++ */
++enum vg_lite_error vg_lite_kernel_abort_contexts(unsigned int contexts)
++{
++	enum vg_lite_error error = VG_LITE_SUCCESS;
++
++	while (contexts--) {
++		if (!s_reference)
++			return VG_LITE_NO_CONTEXT;
++
++		if (--s_reference == 0) {
++			error = gpu(0);
++			vg_lite_hal_deinitialize();
++			break;
++		}
++	}
++
++	return error;
++}
++
+ static enum vg_lite_error do_allocate(struct vg_lite_kernel_allocate *data)
+ {
+ 	enum vg_lite_error error;
+@@ -442,8 +478,12 @@
+ 
+ static enum vg_lite_error do_reset(void)
+ {
++	enum vg_lite_error error;
++
+ 	/* Disable and enable the GPU. */
+-	gpu(1);
++	error = gpu(1);
++	if (error != VG_LITE_SUCCESS)
++		return error;
+ 	vg_lite_hal_poke(VG_LITE_INTR_ENABLE, 0xFFFFFFFF);
+ 
+ 	return VG_LITE_SUCCESS;
+
+-- 
+2.43.0

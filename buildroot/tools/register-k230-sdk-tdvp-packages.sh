@@ -83,6 +83,7 @@ register_package vicliu-pocket-linux-hardware 1
 register_package tdvp-display-smoke 1
 register_package tdvp-keyboard-layout 1
 register_package tdvp-wayland-acceptance 1
+register_package tdvp-wayland-tools 1
 register_package tdvp-vglite-acceptance 1
 
 # The vendor SDK sync target may replace package/Config.in with the upstream

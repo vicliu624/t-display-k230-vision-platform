@@ -2,5 +2,5 @@
 vt = 1
 
 [default_session]
-command = "/usr/local/bin/tdvp-greeter-session"
-user = "greeter"
+command = "/usr/local/bin/tdvp-labwc-session"
+user = "tdvp"
