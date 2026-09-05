@@ -400,6 +400,8 @@ require_content "${DESKTOP_SOURCE}/tdvp-renderer-profile" 'diagnostics_owner="${
 require_file "${PROJECT_DIR}/buildroot/tools/test-tdvp-renderer-profile.sh"
 require_file "${PROJECT_DIR}/buildroot/tools/test-tdvp-labwc-session-recovery.sh"
 require_file "${PROJECT_DIR}/buildroot/tools/test-tdvp-renderer-stack-lock.sh"
+require_executable "${PROJECT_DIR}/buildroot/tools/verify-k230-sdk-pageflip-contract.sh"
+require_file "${PROJECT_DIR}/buildroot/tools/test-verify-k230-sdk-pageflip-contract.sh"
 require_file "${PROJECT_DIR}/buildroot/tools/test-tdvp-hardware-audit-vglite.sh"
 require_content "${PROJECT_DIR}/buildroot/tools/tdvp-hardware-audit.sh" 'Labwc XDG_RUNTIME_DIR='
 require_content "${PROJECT_DIR}/buildroot/tools/tdvp-hardware-audit.sh" 'discovered from Labwc'
