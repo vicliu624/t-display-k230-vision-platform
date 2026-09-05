@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+
+usage() {
+	cat >&2 <<'EOF'
+usage: tdvp-kms-maintenance-recover
+
+Recovery hook for tdvp-kms-maintenance.service. It is invoked by systemd only.
+EOF
+}
+
+if [ "$#" -eq 1 ] && { [ "$1" = "--help" ] || [ "$1" = "-h" ]; }; then
+	usage
+	exit 0
+fi
+if [ "$#" -ne 0 ]; then
+	usage
+	exit 2
+fi
+if [ "${TDVP_KMS_MAINTENANCE_SERVICE:-}" != "1" ]; then
+	printf '%s\n' \
+		'tdvp-kms-maintenance-recover: refusing direct invocation; systemd owns recovery' >&2
+	exit 1
+fi
+
+state_dir="${TDVP_KMS_STATE_DIR:-/run/tdvp/acceptance}"
+restore_marker="$state_dir/kms-restore-greetd"
+log_file="$state_dir/kms-maintenance.log"
+
+# ExecStopPost invokes this independently of the SSH client that started the
+# maintenance service.  Only restore greetd when this transaction stopped it.
+[ -e "$restore_marker" ] || exit 0
+
+printf '%s\n' 'tdvp-kms-maintenance: restoring greetd' >>"$log_file"
+if systemctl start --no-block greetd >>"$log_file" 2>&1; then
+	rm -f "$restore_marker"
+	printf '%s\n' 'tdvp-kms-maintenance: greetd restart queued' >>"$log_file"
+else
+	printf '%s\n' 'tdvp-kms-maintenance: failed to queue greetd restart' >>"$log_file"
+	exit 1
+fi

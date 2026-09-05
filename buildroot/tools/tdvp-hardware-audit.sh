@@ -65,6 +65,210 @@ else
 	printf 'systemctl unavailable\n'
 fi
 
+section 'VGLite / DRM / Labwc recovery evidence'
+# This section is deliberately forensic.  It must be possible to run it after
+# a frozen desktop becomes reachable again without restarting a service,
+# opening DRM master, touching /dev/vg_lite, changing sysfs, or consuming a
+# VGLite completion.  The fields distinguish an old unbounded-wait kernel from
+# the 0059/0060 candidate and preserve the evidence needed to explain a
+# compositor fallback or a failure to reach one.
+show_command cat /proc/sys/kernel/random/boot_id
+show_command cat /proc/uptime
+show_command cat /proc/loadavg
+show_command cat /proc/meminfo
+for node in /dev/vg_lite /dev/dri/card0; do
+	if [ -e "$node" ]; then
+		show_command ls -l "$node"
+	else
+		printf '%s=[absent]\n' "$node"
+	fi
+done
+for parameter in \
+	/sys/module/vglite/parameters/infinite_wait_watchdog_ms \
+	/sys/module/vg_lite/parameters/infinite_wait_watchdog_ms; do
+	if [ -r "$parameter" ]; then
+		printf '%s=' "$parameter"
+		cat "$parameter" || true
+	else
+		printf '%s=[absent]\n' "$parameter"
+	fi
+done
+if [ -x /usr/bin/tdvp-vglite-watchdog-observer ]; then
+	show_command /usr/bin/tdvp-vglite-watchdog-observer
+else
+	printf 'tdvp-vglite-watchdog-observer=[absent]\n'
+fi
+if [ -x /usr/local/bin/tdvp-renderer-profile ]; then
+	show_command /usr/local/bin/tdvp-renderer-profile status
+else
+	printf 'tdvp-renderer-profile=[absent]\n'
+fi
+
+# Plane/CRTC fence properties alone do not establish that a usable explicit-
+# synchronization backing exists.  This observer opens card0 read-only,
+# rejects DRM master, and only reads caps/properties/blobs, so it remains safe
+# in this forensic entrypoint while Labwc owns the desktop.
+section 'Passive KMS format/modifier/fence capability evidence'
+if [ -x /usr/bin/tdvp-kms-capability-observer ]; then
+	show_command /usr/bin/tdvp-kms-capability-observer --device /dev/dri/card0
+else
+	printf 'tdvp-kms-capability-observer=[absent]\n'
+fi
+
+if [ -r /etc/greetd/config.toml ]; then
+	show_command cat /etc/greetd/config.toml
+fi
+if command -v systemctl >/dev/null 2>&1; then
+	printf '%-34s ' 'greetd.service'
+	systemctl is-active greetd.service 2>&1 || true
+	show_command systemctl status --no-pager greetd.service
+fi
+
+if command -v pgrep >/dev/null 2>&1; then
+	printf '%s\n' '-- Labwc processes --'
+	show_command pgrep -a -x labwc
+	for pid in $(pgrep -x labwc 2>/dev/null || true); do
+		[ -d "/proc/$pid" ] || continue
+		printf '\n-- Labwc PID %s --\n' "$pid"
+		show_command readlink "/proc/$pid/exe"
+		show_command readlink "/proc/$pid/cwd"
+		show_command cat "/proc/$pid/stat"
+		show_command cat "/proc/$pid/status"
+		if [ -r "/proc/$pid/wchan" ]; then
+			show_command cat "/proc/$pid/wchan"
+		fi
+		if [ -r "/proc/$pid/stack" ]; then
+			show_command cat "/proc/$pid/stack"
+		fi
+		if [ -r "/proc/$pid/environ" ]; then
+			printf '%s\n' '$ filtered Labwc renderer environment'
+			tr '\000' '\n' < "/proc/$pid/environ" | \
+				grep -E '^(WLR_|TDVP_)' || printf '[no WLR_/TDVP_ variables]\n'
+			# greetd's desktop launcher deliberately falls back to a private
+			# $HOME/.cache runtime directory when the login stack did not create
+			# /run/user/UID. Reading the live compositor environment is the only
+			# reliable way for this forensic tool to find its two rotating logs;
+			# keep it read-only and accept only an absolute directory value.
+			runtime_dir="$(tr '\000' '\n' < "/proc/$pid/environ" | \
+				sed -n 's/^XDG_RUNTIME_DIR=//p' | sed -n '1p')"
+			case "$runtime_dir" in
+				/*)
+					printf 'Labwc XDG_RUNTIME_DIR=%s\n' "$runtime_dir"
+					for log in "$runtime_dir/tdvp-labwc.log" \
+						"$runtime_dir/tdvp-labwc.log.previous"; do
+						[ -r "$log" ] || continue
+						printf '\n-- %s (last 240 lines; discovered from Labwc) --\n' "$log"
+						tail -n 240 "$log" 2>&1 || true
+					done
+					;;
+				'')
+					printf 'Labwc XDG_RUNTIME_DIR=[missing]\n'
+					;;
+				*)
+					printf 'Labwc XDG_RUNTIME_DIR=[non-absolute value refused]\n'
+					;;
+			esac
+		fi
+	done
+else
+	printf 'pgrep=[absent]\n'
+fi
+
+# A frozen desktop can be caused by a test client which still owns a VGLite,
+# KMS or DMA-BUF file descriptor; inspecting Labwc alone would miss that
+# case.  Do not infer a process from its name only: report every process
+# which retains a graphics-related FD, plus commands whose names look like
+# local VGLite/KMS/Wayland tests.  This is intentionally procfs-only, so it
+# neither obtains DRM master nor signals a potentially wedged client.
+section 'Live graphics/test process evidence'
+report_graphics_process() {
+	proc="$1"
+	cmdline="$2"
+	graphics_fds="$3"
+	pid="${proc##*/}"
+	thread_count=0
+	for task in "$proc"/task/*; do
+		[ -d "$task" ] || continue
+		thread_count=$((thread_count + 1))
+	done
+	printf '\n-- suspect graphics/test PID %s (threads=%s) --\n' \
+		"$pid" "$thread_count"
+	printf 'cmdline=%s\n' "$cmdline"
+	printf 'graphics_fds=%s\n' "${graphics_fds:-[none; matched by test name]}"
+	show_command cat "$proc/stat"
+	show_command cat "$proc/status"
+	if [ -r "$proc/wchan" ]; then
+		show_command cat "$proc/wchan"
+	fi
+	if [ -r "$proc/syscall" ]; then
+		show_command cat "$proc/syscall"
+	fi
+	if [ -r "$proc/stack" ]; then
+		show_command cat "$proc/stack"
+	fi
+	for fd in "$proc"/fd/*; do
+		[ -L "$fd" ] || continue
+		fd_target="$(readlink "$fd" 2>/dev/null || true)"
+		case "$fd_target" in
+			/dev/dri/*|/dev/vg_lite|/dev/dma_heap/*|anon_inode:\[dmabuf\]*|anon_inode:\[sync_file\]*)
+				printf 'fd[%s]=%s\n' "${fd##*/}" "$fd_target"
+				fdinfo="$proc/fdinfo/${fd##*/}"
+				[ -r "$fdinfo" ] && show_command cat "$fdinfo"
+				;;
+		esac
+	done
+}
+
+graphics_or_test_count=0
+for proc in /proc/[0-9]*; do
+	[ -r "$proc/cmdline" ] || continue
+	cmdline="$(tr '\000' ' ' < "$proc/cmdline" 2>/dev/null || true)"
+	[ -n "$cmdline" ] || continue
+	graphics_fds=''
+	for fd in "$proc"/fd/*; do
+		[ -L "$fd" ] || continue
+		fd_target="$(readlink "$fd" 2>/dev/null || true)"
+		case "$fd_target" in
+			/dev/dri/*|/dev/vg_lite|/dev/dma_heap/*|anon_inode:\[dmabuf\]*|anon_inode:\[sync_file\]*)
+				graphics_fds="${graphics_fds}${graphics_fds:+,}${fd##*/}:${fd_target}"
+				;;
+		esac
+	done
+	if [ -n "$graphics_fds" ] || printf '%s\n' "$cmdline" | \
+		grep -Eiq '(^|[ /_-])(tdvp|vglite|vg_lite|wayland|wlroots|kms|drm|glmark|weston|egl|benchmark|bench|stress|test)([ /_.-]|$)'; then
+		report_graphics_process "$proc" "$cmdline" "$graphics_fds"
+		graphics_or_test_count=$((graphics_or_test_count + 1))
+	fi
+done
+printf 'graphics_or_test_processes=%s\n' "$graphics_or_test_count"
+
+# A normal systemd-logind session uses /run/user/UID. The per-Labwc capture
+# above covers greetd's private runtime directory; retain this broad fallback
+# for a compositor which exited before its environment could be inspected.
+printf '%s\n' '-- fallback /run Labwc session logs --'
+for log in /run/user/*/tdvp-labwc.log /run/user/*/tdvp-labwc.log.previous; do
+	[ -r "$log" ] || continue
+	printf '\n-- %s (last 240 lines) --\n' "$log"
+	tail -n 240 "$log" 2>&1 || true
+done
+if command -v journalctl >/dev/null 2>&1; then
+	printf '%s\n' '-- boot journal: Labwc/VGLite/DRM recovery (last 480 matches) --'
+	journalctl -b --no-pager -o short-monotonic 2>&1 | \
+		grep -Ei 'labwc|vglite|vg_lite|vg lite|drm|canaan|\bvo\b|page.?flip|gpu|hung task|blocked for more|watchdog|oom|rcu stall' | \
+		tail -n 480 || printf '[no matching journal entries]\n'
+fi
+if command -v dmesg >/dev/null 2>&1; then
+	printf '%s\n' '-- kernel: VGLite/DRM recovery (last 640 matches) --'
+	dmesg 2>&1 | \
+		grep -Ei 'vglite|vg_lite|\bdrm\b|canaan|\bvo\b|page.?flip|gpu|hung task|blocked for more|watchdog|oom|rcu stall' | \
+		tail -n 640 || printf '[no matching kernel entries]\n'
+fi
+if [ -r /proc/interrupts ]; then
+	printf '%s\n' '-- relevant interrupt counters --'
+	grep -Ei 'vglite|vg_lite|\bdrm\b|canaan|\bvo\b|gpu' /proc/interrupts || \
+		printf '[no named VGLite/DRM/VO interrupt counters]\n'
+fi
+
 section 'Device nodes'
 for pattern in \
 	'/dev/dri/*' \

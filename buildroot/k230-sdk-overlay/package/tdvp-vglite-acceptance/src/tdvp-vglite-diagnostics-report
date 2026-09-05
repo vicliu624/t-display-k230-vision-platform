@@ -1,0 +1,360 @@
+#!/bin/sh
+#
+# Summarise the structured TDVP_VGLITE_DIAG records emitted by the wlroots
+# VGLite renderer. This is deliberately a read-only parser: it neither opens
+# VGLite/DRM nor controls Labwc, so it can safely be used after a Gate 1 run.
+
+set -eu
+
+log_file=
+required_finish=1
+required_page_flip_transition=0
+skip_lines=0
+
+usage() {
+	cat <<EOF
+Usage: $0 --log PATH [--require-finish N] [--require-page-flip-transition N] [--skip-lines N]
+
+Read structured TDVP_VGLITE_DIAG records from a saved Labwc log and print
+upload/copy, render-pass, recovery, readback, DRM-commit, and page-flip totals.
+The log is never changed. A report fails if the input is malformed, has fewer
+than N vglite_finish records, or contains a failed VGLite state recovery,
+render pass, readback synchronization, or DRM commit.
+
+Options:
+  --log PATH           readable Labwc log to inspect (required)
+  --require-finish N   minimum vglite_finish record count (default: ${required_finish})
+  --require-page-flip-transition N
+                        minimum valid queued-to-current framebuffer transition
+                        count whose submitted buffer consumed a successful
+                        VGLite finish (default: ${required_page_flip_transition})
+  --skip-lines N       ignore N existing log lines before parsing (default: ${skip_lines})
+EOF
+}
+
+fail() {
+	printf '%s\n' "tdvp-vglite-diagnostics-report: ERROR: $*" >&2
+	exit 2
+}
+
+require_positive_integer() {
+	case "$2" in
+		''|*[!0-9]*) fail "$1 must be a positive integer" ;;
+	esac
+	[ "$2" -gt 0 ] || fail "$1 must be a positive integer"
+}
+
+require_nonnegative_integer() {
+	case "$2" in
+		''|*[!0-9]*) fail "$1 must be a non-negative integer" ;;
+	esac
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	--log)
+		[ "$#" -ge 2 ] || fail "--log requires a value"
+		log_file="$2"
+		shift
+		;;
+	--require-finish)
+		[ "$#" -ge 2 ] || fail "--require-finish requires a value"
+		required_finish="$2"
+		shift
+		;;
+	--require-page-flip-transition)
+		[ "$#" -ge 2 ] || fail "--require-page-flip-transition requires a value"
+		required_page_flip_transition="$2"
+		shift
+		;;
+	--skip-lines)
+		[ "$#" -ge 2 ] || fail "--skip-lines requires a value"
+		skip_lines="$2"
+		shift
+		;;
+	-h|--help)
+		usage
+		exit 0
+		;;
+	*)
+		fail "unknown option: $1"
+		;;
+	esac
+	shift
+done
+
+[ -n "$log_file" ] || {
+	usage >&2
+	fail "--log is required"
+}
+require_positive_integer "--require-finish" "$required_finish"
+require_nonnegative_integer "--require-page-flip-transition" "$required_page_flip_transition"
+require_nonnegative_integer "--skip-lines" "$skip_lines"
+[ -f "$log_file" ] || fail "log is not a regular file: $log_file"
+[ -r "$log_file" ] || fail "log is not readable: $log_file"
+
+awk -v source="$log_file" -v required_finish="$required_finish" \
+	-v required_page_flip_transition="$required_page_flip_transition" \
+	-v skip_lines="$skip_lines" '
+function is_uint(value) {
+	return value ~ /^[0-9]+$/
+}
+
+function is_sint(value) {
+	return value ~ /^-?[0-9]+$/
+}
+
+function is_number(value) {
+	return value ~ /^[0-9]+([.][0-9]+)?$/
+}
+
+function is_hex(value) {
+	return value ~ /^0[xX][0-9a-fA-F]+$/
+}
+
+function malformed(reason) {
+	invalid_records++
+	if (first_error == "") {
+		first_error = reason
+	}
+}
+
+function read_fields(    i, equals, key, value) {
+	stage = ""
+	damage_rects = copied_bytes = source_bytes = copy_calls = cache_flush_pending = ""
+	finish_buffer = elapsed_ms = result = pass_ok = ""
+	texture_clip_rects = texture_blit_attempts = texture_cache_flushes = ""
+	solid_clip_rects = solid_blit_attempts = ""
+	state_recovery_attempted = state_recovery_ok = ""
+	readback_result = renderer_quarantined = ""
+	commit_seq = iface = flags = submitted_fb = submitted_buffer = ""
+	drm_sequence = drm_timestamp = ""
+	current_fb = current_buffer = queued_fb = queued_buffer = ""
+
+	for (i = 1; i <= NF; i++) {
+		equals = index($i, "=")
+		if (equals == 0) {
+			continue
+		}
+		key = substr($i, 1, equals - 1)
+		value = substr($i, equals + 1)
+		if (key == "stage") stage = value
+		else if (key == "damage_rects") damage_rects = value
+		else if (key == "copied_bytes") copied_bytes = value
+		else if (key == "source_bytes") source_bytes = value
+		else if (key == "copy_calls") copy_calls = value
+		else if (key == "cache_flush_pending") cache_flush_pending = value
+		else if (key == "buffer") finish_buffer = value
+		else if (key == "elapsed_ms") elapsed_ms = value
+		else if (key == "result") {
+			result = value
+			if (stage == "texture_readback_finish") readback_result = value
+		}
+		else if (key == "pass_ok") pass_ok = value
+		else if (key == "texture_clip_rects") texture_clip_rects = value
+		else if (key == "texture_blit_attempts") texture_blit_attempts = value
+		else if (key == "texture_cache_flushes") texture_cache_flushes = value
+		else if (key == "solid_clip_rects") solid_clip_rects = value
+		else if (key == "solid_blit_attempts") solid_blit_attempts = value
+		else if (key == "state_recovery_attempted") state_recovery_attempted = value
+		else if (key == "state_recovery_ok") state_recovery_ok = value
+		else if (key == "renderer_quarantined") renderer_quarantined = value
+		else if (key == "commit_seq") commit_seq = value
+		else if (key == "iface") iface = value
+		else if (key == "flags") flags = value
+		else if (key == "submitted_fb") submitted_fb = value
+		else if (key == "submitted_buffer") submitted_buffer = value
+		else if (key == "drm_sequence") drm_sequence = value
+		else if (key == "drm_timestamp") drm_timestamp = value
+		else if (key == "current_fb") current_fb = value
+		else if (key == "current_buffer") current_buffer = value
+		else if (key == "queued_fb") queued_fb = value
+		else if (key == "queued_buffer") queued_buffer = value
+	}
+}
+
+NR <= skip_lines {
+	next
+}
+
+/TDVP_VGLITE_DIAG/ {
+	diagnostic_records++
+	read_fields()
+
+	if (stage == "texture_upload") {
+		if (!is_uint(damage_rects) || !is_uint(copied_bytes) || !is_uint(source_bytes) || !is_uint(copy_calls) ||
+			!is_uint(cache_flush_pending) || (cache_flush_pending != 0 && cache_flush_pending != 1)) {
+			malformed("texture_upload record is missing an unsigned metric")
+			next
+		}
+		texture_upload_records++
+		damage_rects_total += damage_rects
+		copied_bytes_total += copied_bytes
+		source_bytes_total += source_bytes
+		copy_calls_total += copy_calls
+		cache_flush_pending_total += cache_flush_pending
+		next
+	}
+
+	if (stage == "vglite_finish") {
+		if (finish_buffer == "" || !is_number(elapsed_ms) || !is_sint(result) || !is_uint(pass_ok) ||
+			!is_uint(texture_clip_rects) || !is_uint(texture_blit_attempts) ||
+			!is_uint(texture_cache_flushes) ||
+			!is_uint(solid_clip_rects) || !is_uint(solid_blit_attempts) ||
+			!is_uint(state_recovery_attempted) || !is_uint(state_recovery_ok)) {
+			malformed("vglite_finish record is missing a numeric metric")
+			next
+		}
+		if ((pass_ok != 0 && pass_ok != 1) ||
+			(state_recovery_attempted != 0 && state_recovery_attempted != 1) ||
+			(state_recovery_ok != 0 && state_recovery_ok != 1)) {
+			malformed("vglite_finish pass_ok and state recovery fields must be 0 or 1")
+			next
+		}
+		if (state_recovery_attempted == 0 && state_recovery_ok != 1) {
+			malformed("vglite_finish state_recovery_ok must be 1 when state_recovery_attempted is 0")
+			next
+		}
+		if (texture_cache_flushes > texture_blit_attempts) {
+			malformed("vglite_finish texture cache flushes exceed texture blits")
+			next
+		}
+		vglite_finish_records++
+		elapsed_ms_total += elapsed_ms
+		if (vglite_finish_records == 1 || elapsed_ms < elapsed_ms_min) elapsed_ms_min = elapsed_ms
+		if (vglite_finish_records == 1 || elapsed_ms > elapsed_ms_max) elapsed_ms_max = elapsed_ms
+		texture_clip_rects_total += texture_clip_rects
+		texture_blit_attempts_total += texture_blit_attempts
+		texture_cache_flushes_total += texture_cache_flushes
+		solid_clip_rects_total += solid_clip_rects
+		solid_blit_attempts_total += solid_blit_attempts
+		if (state_recovery_attempted == 1) state_recovery_attempts++
+		if (state_recovery_ok == 0) state_recovery_failures++
+		if (result != 0) result_nonzero++
+		if (pass_ok == 0) pass_ok_false++
+		if (result == 0 && pass_ok == 1 && state_recovery_ok == 1) {
+			successful_finish_buffers[finish_buffer]++
+		}
+		next
+	}
+
+	if (stage == "texture_readback_finish") {
+		if (!is_sint(readback_result) || readback_result == 0 || renderer_quarantined != "1") {
+			malformed("texture_readback_finish record is missing a failed-quarantine metric")
+			next
+		}
+		texture_readback_finish_records++
+		texture_readback_finish_failures++
+		next
+	}
+
+	if (stage == "drm_commit") {
+		if (!is_uint(commit_seq) ||
+			(iface != "atomic" && iface != "legacy-or-liftoff") ||
+			!is_hex(flags) ||
+			(result != "success" && result != "failure") ||
+			!is_number(elapsed_ms) || !is_uint(submitted_fb) ||
+			submitted_buffer == "") {
+			malformed("drm_commit record is missing a valid metric")
+			next
+		}
+		drm_commit_records++
+		drm_commit_elapsed_ms_total += elapsed_ms
+		if (drm_commit_records == 1 || elapsed_ms < drm_commit_elapsed_ms_min) {
+			drm_commit_elapsed_ms_min = elapsed_ms
+		}
+		if (drm_commit_records == 1 || elapsed_ms > drm_commit_elapsed_ms_max) {
+			drm_commit_elapsed_ms_max = elapsed_ms
+		}
+		if (result == "success") drm_commit_success++
+		else drm_commit_failure++
+		next
+	}
+
+	if (stage == "page_flip_event") {
+		if (!is_uint(commit_seq) || !is_uint(drm_sequence) || !is_number(drm_timestamp)) {
+			malformed("page_flip_event record is missing a valid metric")
+			next
+		}
+		page_flip_event_records++
+		next
+	}
+
+	if (stage == "queue" || stage == "page_flip_before" || stage == "page_flip_after") {
+		if (!is_uint(commit_seq) || !is_uint(submitted_fb) || submitted_buffer == "" ||
+			!is_uint(current_fb) || current_buffer == "" ||
+			!is_uint(queued_fb) || queued_buffer == "") {
+			malformed(stage " record is missing a valid framebuffer metric")
+			next
+		}
+		if (stage == "queue") {
+			queue_records++
+			next
+		}
+		if (stage == "page_flip_before") {
+			page_flip_before_records++
+			before_submitted_fb[commit_seq] = submitted_fb
+			before_queued_fb[commit_seq] = queued_fb
+			next
+		}
+		page_flip_after_records++
+		if (submitted_fb != 0) {
+			if (!(commit_seq in before_submitted_fb)) {
+				malformed("page_flip_after record has no preceding page_flip_before snapshot")
+				next
+			}
+			if (before_submitted_fb[commit_seq] != submitted_fb ||
+				before_queued_fb[commit_seq] != submitted_fb ||
+				current_fb != submitted_fb || queued_fb != 0) {
+				malformed("page_flip snapshot does not move the submitted framebuffer to current")
+				next
+			}
+			page_flip_transition_records++
+			if (successful_finish_buffers[submitted_buffer] <= page_flip_vglite_buffers[submitted_buffer]) {
+				malformed("page_flip submitted buffer has no unconsumed successful VGLite finish")
+				next
+			}
+			page_flip_vglite_buffers[submitted_buffer]++
+			page_flip_vglite_transition_records++
+		}
+		next
+	}
+
+	malformed("unrecognised TDVP_VGLITE_DIAG stage")
+}
+
+END {
+	if (diagnostic_records == 0) {
+		printf "%s\n", "tdvp-vglite-diagnostics-report: ERROR: no TDVP_VGLITE_DIAG records found in " source > "/dev/stderr"
+		exit 2
+	}
+	if (invalid_records != 0) {
+		printf "%s\n", "tdvp-vglite-diagnostics-report: ERROR: malformed diagnostic records=" invalid_records " first_error=" first_error > "/dev/stderr"
+		exit 2
+	}
+	if (vglite_finish_records < required_finish) {
+		printf "%s\n", "tdvp-vglite-diagnostics-report: ERROR: vglite_finish records=" vglite_finish_records " required=" required_finish > "/dev/stderr"
+		exit 2
+	}
+	if (page_flip_vglite_transition_records < required_page_flip_transition) {
+		printf "%s\n", "tdvp-vglite-diagnostics-report: ERROR: VGLite-linked page_flip transitions=" (page_flip_vglite_transition_records + 0) " required=" required_page_flip_transition > "/dev/stderr"
+		exit 2
+	}
+
+	printf "tdvp-vglite-diagnostics-report: source=%s skip_lines=%d records texture_upload=%d vglite_finish=%d texture_readback_finish=%d queue=%d drm_commit=%d page_flip_event=%d page_flip_before=%d page_flip_after=%d page_flip_transitions=%d page_flip_vglite_transitions=%d\n", source, skip_lines, texture_upload_records, vglite_finish_records, texture_readback_finish_records, queue_records, drm_commit_records, page_flip_event_records, page_flip_before_records, page_flip_after_records, page_flip_transition_records, page_flip_vglite_transition_records
+	if (texture_upload_records != 0) {
+		printf "tdvp-vglite-diagnostics-report: texture_upload damage_rects_total=%.0f damage_rects_avg=%.3f copied_bytes_total=%.0f copied_bytes_avg=%.3f source_bytes_total=%.0f source_bytes_avg=%.3f copy_calls_total=%.0f copy_calls_avg=%.3f cache_flush_pending_total=%.0f\n", damage_rects_total, damage_rects_total / texture_upload_records, copied_bytes_total, copied_bytes_total / texture_upload_records, source_bytes_total, source_bytes_total / texture_upload_records, copy_calls_total, copy_calls_total / texture_upload_records, cache_flush_pending_total
+	}
+	printf "tdvp-vglite-diagnostics-report: vglite_finish elapsed_ms_min=%.3f elapsed_ms_avg=%.3f elapsed_ms_max=%.3f texture_clip_rects_total=%.0f texture_clip_rects_avg=%.3f texture_blit_attempts_total=%.0f texture_blit_attempts_avg=%.3f texture_cache_flushes_total=%.0f texture_cache_flushes_avg=%.3f solid_clip_rects_total=%.0f solid_clip_rects_avg=%.3f solid_blit_attempts_total=%.0f solid_blit_attempts_avg=%.3f state_recovery_attempts=%d state_recovery_failures=%d\n", elapsed_ms_min, elapsed_ms_total / vglite_finish_records, elapsed_ms_max, texture_clip_rects_total, texture_clip_rects_total / vglite_finish_records, texture_blit_attempts_total, texture_blit_attempts_total / vglite_finish_records, texture_cache_flushes_total, texture_cache_flushes_total / vglite_finish_records, solid_clip_rects_total, solid_clip_rects_total / vglite_finish_records, solid_blit_attempts_total, solid_blit_attempts_total / vglite_finish_records, state_recovery_attempts, state_recovery_failures
+	if (drm_commit_records != 0) {
+		printf "tdvp-vglite-diagnostics-report: drm_commit elapsed_ms_min=%.3f elapsed_ms_avg=%.3f elapsed_ms_max=%.3f success=%d failure=%d\n", drm_commit_elapsed_ms_min, drm_commit_elapsed_ms_total / drm_commit_records, drm_commit_elapsed_ms_max, drm_commit_success, drm_commit_failure
+	}
+	printf "tdvp-vglite-diagnostics-report: page_flip events=%d before_snapshots=%d after_snapshots=%d verified_transitions=%d verified_vglite_transitions=%d\n", page_flip_event_records, page_flip_before_records, page_flip_after_records, page_flip_transition_records, page_flip_vglite_transition_records
+	printf "tdvp-vglite-diagnostics-report: failures result_nonzero=%d pass_ok_false=%d state_recovery_failure=%d texture_readback_finish_failure=%d drm_commit_failure=%d\n", result_nonzero, pass_ok_false, state_recovery_failures, texture_readback_finish_failures, drm_commit_failure
+	if (result_nonzero != 0 || pass_ok_false != 0 || state_recovery_failures != 0 || texture_readback_finish_failures != 0 || drm_commit_failure != 0) {
+		printf "%s\n", "tdvp-vglite-diagnostics-report: ERROR: VGLite state recovery, result, renderer pass, readback synchronization, or DRM commit reported a failure" > "/dev/stderr"
+		exit 1
+	}
+	printf "%s\n", "tdvp-vglite-diagnostics-report: PASS"
+}
+' "$log_file"

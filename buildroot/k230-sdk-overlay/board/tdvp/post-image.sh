@@ -9,6 +9,11 @@ SDK_BOARD_DIR="$(cd "$(dirname "${SDK_POST_IMAGE}")" && pwd)"
 IMAGE_GUARD="${SCRIPT_DIR}/verify-sdcard-image.sh"
 SDK_STAGE_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 SDK_STAGE_MANIFEST="${SDK_STAGE_DIR}/.tdvp/sdk-baseline-manifest"
+CPU1_BUILDER="${SCRIPT_DIR}/cpu1/build-rtsmart.sh"
+# Buildroot may strip development headers from TARGET_DIR before post-image.
+# Keep the firmware-side ABI source next to this board hook so packaging does
+# not depend on the target package installation order.
+CPU1_ABI_HEADER="${SCRIPT_DIR}/cpu1/tdvp_cpu1_abi.h"
 
 # Buildroot creates rootfs.ext2 before this hook with deterministic ext4
 # settings from the defconfig. This hook supplies deterministic boot ext4 and
@@ -26,6 +31,29 @@ cleanup_post_image_tmp() {
 	if [ -n "${TDVP_POST_IMAGE_TMP}" ] && [ -d "${TDVP_POST_IMAGE_TMP}" ]; then
 		rm -rf "${TDVP_POST_IMAGE_TMP}"
 	fi
+}
+
+build_cpu1_firmware() {
+	local firmware="${BINARIES_DIR}/tdvp-cpu1-rtsmart.bin"
+	local manifest="${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest"
+
+	[ -f "${CPU1_BUILDER}" ] || {
+		printf 'TDVP CPU1 packaging error: firmware builder is missing: %s\n' \
+			"${CPU1_BUILDER}" >&2
+		exit 1
+	}
+	[ -s "${CPU1_ABI_HEADER}" ] || {
+		printf 'TDVP CPU1 packaging error: staged ABI header is missing: %s\n' \
+			"${CPU1_ABI_HEADER}" >&2
+		exit 1
+	}
+	bash "${CPU1_BUILDER}" "${firmware}" "${manifest}" "${CPU1_ABI_HEADER}"
+	[ -s "${firmware}" ] && [ -s "${manifest}" ] || {
+		printf '%s\n' 'TDVP CPU1 packaging error: RT-Smart firmware build produced no payload' >&2
+		exit 1
+	}
+	mkdir -p "${BINARIES_DIR}/big-core"
+	install -m 0644 "${firmware}" "${BINARIES_DIR}/big-core/tdvp-cpu1-rtsmart.bin"
 }
 
 prepare_deterministic_sdk_packaging() {
@@ -56,6 +84,57 @@ prepare_deterministic_sdk_packaging() {
 		printf '%s\n' 'TDVP packaging error: could not neutralize the SDK release-alias hook' >&2
 		exit 1
 	fi
+
+	# The vendor helper otherwise overwrites bootcmd during env generation. CPU1
+	# is reset first from the fixed raw slot, while a failed coprocessor launch
+	# still falls through to Linux so recovery remains possible over SSH/serial.
+	sed -E -i \
+		's#bootcmd=run blinux;#bootcmd=run bootcmd_cpu1; run blinux;#g' \
+		"${TDVP_POST_IMAGE_TMP}/post-image.sh"
+	if ! grep -Fq 'bootcmd=run bootcmd_cpu1; run blinux;' \
+		"${TDVP_POST_IMAGE_TMP}/post-image.sh"; then
+		printf '%s\n' 'TDVP CPU1 packaging error: could not set CPU1-first U-Boot policy' >&2
+		exit 1
+	fi
+	{
+		printf '%s\n' 'cpu1_firmware_load=10000000'
+		printf '%s\n' 'cpu1_firmware_block=5000'
+		printf '%s\n' 'cpu1_firmware_blocks=a000'
+		printf '%s\n' 'bootcmd_cpu1=mmc dev ${mmc_boot_dev_num} && mmc read ${cpu1_firmware_load} ${cpu1_firmware_block} ${cpu1_firmware_blocks} && boot_baremetal 1 ${cpu1_firmware_load} 1400000;'
+	} >> "${TDVP_POST_IMAGE_TMP}/default.env"
+
+	# The SDK reserves 10--30 MiB for an optional RTT payload but leaves it
+	# commented out. Make it an explicit raw payload, not a GPT partition: the
+	# vendor blinux command intentionally keeps boot as partition number one.
+	awk '
+		/^[[:space:]]*#[[:space:]]*partition rtt[[:space:]]*\{/ {
+			print "\tpartition cpu1_rtsmart {"
+			print "\t\tin-partition-table = false"
+			print "\t\toffset = 10M"
+			print "\t\timage = \"big-core/tdvp-cpu1-rtsmart.bin\""
+			print "\t\tsize = 20M"
+			skip = 1
+			next
+		}
+		skip && /^[[:space:]]*#[[:space:]]*\}[[:space:]]*$/ {
+			print "\t}"
+			skip = 0
+			next
+		}
+		skip { next }
+		{ print }
+	' "${TDVP_POST_IMAGE_TMP}/genimage.cfg" > "${TDVP_POST_IMAGE_TMP}/genimage.cfg.next"
+	mv "${TDVP_POST_IMAGE_TMP}/genimage.cfg.next" "${TDVP_POST_IMAGE_TMP}/genimage.cfg"
+	for required_line in \
+		'partition cpu1_rtsmart {' \
+		'in-partition-table = false' \
+		'image = "big-core/tdvp-cpu1-rtsmart.bin"'; do
+		if ! grep -Fq "${required_line}" "${TDVP_POST_IMAGE_TMP}/genimage.cfg"; then
+			printf 'TDVP CPU1 packaging error: raw payload config is missing: %s\n' \
+				"${required_line}" >&2
+			exit 1
+		fi
+	done
 
 	awk \
 		-v disk_uuid="${TDVP_GPT_DISK_UUID}" \
@@ -142,6 +221,11 @@ for boot_payload in Image k230-canmv-rm69a10.dtb; do
 	fi
 done
 
+build_cpu1_firmware
+bash "${SCRIPT_DIR}/cpu1/verify-boot-contract.sh" \
+	"${BUILD_DIR:?Buildroot did not provide BUILD_DIR}/uboot-2022.10" \
+	"${BINARIES_DIR}/tdvp-cpu1-rtsmart.bin" \
+	"${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest"
 prepare_deterministic_sdk_packaging
 PATH="${TDVP_POST_IMAGE_TMP}:${PATH}" "${TDVP_POST_IMAGE_TMP}/post-image.sh" "$@"
 
@@ -162,7 +246,7 @@ if [ ! -s "${SDK_STAGE_MANIFEST}" ]; then
 		"${SDK_STAGE_MANIFEST}" >&2
 	exit 1
 fi
-for image in sysimage-sdcard.img sysimage-sdcard.img.gz; do
+for image in sysimage-sdcard.img sysimage-sdcard.img.gz tdvp-cpu1-rtsmart.bin tdvp-cpu1-rtsmart.manifest; do
 	if [ ! -s "${BINARIES_DIR}/${image}" ]; then
 		printf 'TDVP packaging error: required SD-card artifact is missing: %s\n' \
 			"${BINARIES_DIR}/${image}" >&2
@@ -177,6 +261,12 @@ bash "${IMAGE_GUARD}" "${BINARIES_DIR}"
 	printf 'profile=k230_canmv_t_display_rm69a10_labwc_desktop_defconfig\n'
 	printf 'sdk_commit=5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7\n'
 	printf 'linux_commit=7d4e1f444f461dbe3833bd99a4640e7b6c2cd529\n'
+	printf 'cpu1_execution_model=linux-cpu0+rtsmart-cpu1\n'
+	printf 'linux_physical_cpu=0\n'
+	printf 'cpu1_firmware_format=opensbi-fw-payload-raw\n'
+	printf 'cpu1_runtime_base=0x10000000\n'
+	printf 'cpu1_runtime_size=0x04000000\n'
+	printf 'cpu1_mailbox_physical=0x13ff0000\n'
 	printf 'gem_dma_contract=drm_gem_dma_helpers\n'
 	printf 'buildroot_reproducible=y\n'
 	printf 'desktop=labwc\n'
@@ -200,6 +290,8 @@ bash "${IMAGE_GUARD}" "${BINARIES_DIR}"
 	for file in \
 		"${BINARIES_DIR}/sysimage-sdcard.img" \
 		"${BINARIES_DIR}/sysimage-sdcard.img.gz" \
+		"${BINARIES_DIR}/tdvp-cpu1-rtsmart.bin" \
+		"${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest" \
 		"${BINARIES_DIR}/Image" \
 		"${BINARIES_DIR}/k230-canmv-rm69a10.dtb" \
 		"${BINARIES_DIR}/rootfs.ext2" \

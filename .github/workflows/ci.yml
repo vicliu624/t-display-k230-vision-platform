@@ -23,6 +23,8 @@ jobs:
       contents: write
     env:
       TDVP_CACHE_ROOT: ${{ github.workspace }}/.ci-cache
+      TDVP_CPU1_CACHE_ROOT: ${{ github.workspace }}/.ci-cache/cpu1
+      TDVP_CPU1_TOOLCHAIN_DIR: ${{ github.workspace }}/.ci-cache/cpu1/toolchain
       TDVP_K230_RELEASE_NAME: tdvp-k230-labwc-desktop-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
     steps:
       - name: Check out platform sources
@@ -40,6 +42,7 @@ jobs:
           path: |
             .ci-cache/dl
             .ci-cache/toolchain
+            .ci-cache/cpu1
           key: tdvp-k230-sdk-${{ runner.os }}-${{ hashFiles('buildroot/sdk-sources.lock') }}
           restore-keys: |
             tdvp-k230-sdk-${{ runner.os }}-
@@ -48,6 +51,19 @@ jobs:
         run: |
           chmod +x buildroot/tools/*.sh
           bash buildroot/tools/ci-prepare-host.sh
+
+      - name: Validate patch queue and CPU boot contracts
+        run: |
+          bash buildroot/tools/validate-k230-sdk-linux-patches.sh buildroot/k230-sdk-overlay/linux
+          bash buildroot/tools/test-reconcile-k230-sdk-linux-patches.sh
+          bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
+          bash buildroot/tools/test-tdvp-cpu1-boot-contract.sh
+          bash buildroot/tools/test-tdvp-cpu0-dts-queue.sh
+          bash buildroot/tools/test-tdvp-session-idle-contract.sh
+          bash buildroot/tools/test-verify-sdcard-image-volumepulse-guard.sh
+          bash buildroot/tools/test-tdvp-display-smoke-cleanup.sh
+          bash buildroot/tools/test-tdvp-vblank-observer-maintenance-master.sh
+          bash buildroot/tools/test-tdvp-kms-maintenance.sh
 
       - name: Stage pinned SDK worktree
         run: |

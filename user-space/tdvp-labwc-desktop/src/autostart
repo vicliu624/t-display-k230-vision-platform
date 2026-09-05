@@ -12,6 +12,34 @@ while [ "$attempt" -lt 40 ]; do
 	sleep 0.05
 done
 
+# Labwc deliberately runs this autostart script in a detached session.  The
+# authenticated launcher creates and exports this private directory before
+# Labwc starts; record this script's process-group leader so the launcher can
+# retire only this session's asynchronous desktop clients if the compositor
+# crashes or is restarted.  The greeter does not export this variable and is
+# deliberately outside this desktop-only lifecycle contract.
+tdvp_session_root="${XDG_RUNTIME_DIR}/tdvp-labwc-session"
+case "${TDVP_LABWC_SESSION_DIR:-}" in
+"${tdvp_session_root}"/[0-9]*)
+	tdvp_session_token="${TDVP_LABWC_SESSION_DIR##*/}"
+	case "${tdvp_session_token}" in
+		''|*[!0-9]*) ;;
+		*)
+			if [ -d "${TDVP_LABWC_SESSION_DIR}" ] && [ ! -L "${TDVP_LABWC_SESSION_DIR}" ]; then
+				# Labwc's async launcher creates a session leader and then forks
+				# the shell which executes this file.  `$$` is that shell, not
+				# necessarily the PGID that its background desktop children retain.
+				tdvp_autostart_pgid="$(ps -o pgid= -p "$$" | tr -d ' ')"
+				case "${tdvp_autostart_pgid}" in
+					''|*[!0-9]*) ;;
+					*) printf '%s\n' "${tdvp_autostart_pgid}" > "${TDVP_LABWC_SESSION_DIR}/autostart-pgid" ;;
+				esac
+			fi
+			;;
+	esac
+	;;
+esac
+
 # PCManFM creates the background layer, desktop icons and conventional
 # right-click desktop menu. Its configuration keeps the existing TDVP paper
 # artwork and does not alter the board-validated Labwc output mapping above.
@@ -26,6 +54,13 @@ done
 # Keep one deliberately compact top panel. wf-panel-pi is the maintained
 # Raspberry Pi desktop panel host; its TDVP system configuration preserves our
 # warm-paper/orange visual language rather than importing Raspberry Pi styling.
+# Labwc's autostart is a shell script: background children otherwise survive a
+# compositor restart, get reparented to PID 1, and reconnect to the next
+# Wayland socket. Retire only this user's previous panel wrapper and child
+# before starting the new session instance, so a login can never accumulate
+# duplicate top bars.
+/usr/bin/pkill -TERM -u "$(id -u)" -f '/usr/local/bin/tdvp-wf-panel-session' 2>/dev/null || true
+/usr/bin/pkill -TERM -u "$(id -u)" -f '^/usr/bin/wf-panel-pi --config /etc/xdg/wf-panel-pi/wf-panel-pi.ini$' 2>/dev/null || true
 /usr/local/bin/tdvp-wf-panel-session &
 
 # The touch control center is an optional, independent layer-shell client. It

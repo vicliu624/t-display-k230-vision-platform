@@ -1,6 +1,6 @@
 BR2_riscv=y
 BR2_RISCV_ISA_RVC=y
-BR2_RISCV_ISA_RVV=y
+# BR2_RISCV_ISA_RVV is not set
 BR2_TOOLCHAIN_EXTERNAL=y
 BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
 BR2_TOOLCHAIN_EXTERNAL_PATH="/opt/toolchain/Xuantie-900-gcc-linux-6.6.0-glibc-x86_64-V3.0.2/"
@@ -11,7 +11,8 @@ BR2_TOOLCHAIN_EXTERNAL_CUSTOM_GLIBC=y
 BR2_TOOLCHAIN_EXTERNAL_CXX=y
 BR2_TOOLCHAIN_EXTERNAL_FORTRAN=y
 BR2_TOOLCHAIN_EXTERNAL_OPENMP=y
-BR2_TARGET_OPTIMIZATION="-mcpu=c908v -mtune=c908 -mrvv-v0p10-compatible -mrvv-auto-vectorize"
+# CPU1 owns RVV; Linux userspace executes on the scalar CPU0.
+BR2_TARGET_OPTIMIZATION="-mcpu=c908 -mtune=c908"
 BR2_DL_DIR="$(TOPDIR)/../../dl"
 # Release candidates must be generated from one stable ext4 worktree/output
 # location. This removes build timestamps and host identity from Buildroot,
@@ -20,8 +21,9 @@ BR2_REPRODUCIBLE=y
 # Several desktop and media dependencies contain large C/C++ or Rust build
 # graphs. The automatic value expands to every host CPU (17 on the release
 # builder) and can cause the kernel to kill compiler processes. Keep all
-# Buildroot package backends within the validated four-job ceiling;
-# TDVP_BUILD_JOBS uses the same ceiling.
+# Buildroot package backends remain within the validated four-job ceiling.
+# TDVP_BUILD_JOBS only controls the top-level make invocation (capped by the
+# wrapper at 16); it does not raise this package-backend concurrency limit.
 BR2_JLEVEL=4
 BR2_TARGET_GENERIC_HOSTNAME="tdisplay-k230"
 BR2_TARGET_GENERIC_ISSUE="T-Display K230 Labwc Desktop"
@@ -99,10 +101,11 @@ BR2_PACKAGE_OPENSSH_SERVER=y
 BR2_PACKAGE_OPENSSH_KEY_UTILS=y
 BR2_PACKAGE_OPENSSH_SANDBOX=y
 BR2_PACKAGE_LIBDRM=y
-# The kernel already carries the K230 VGLite driver.  Install only its matched
-# userspace library and a bounded off-screen acceptance probe; Labwc remains on
-# Pixman until that probe has passed on hardware and the wlroots renderer fork
-# is ready.
+# The kernel already carries the K230 VGLite driver. Install its matched
+# userspace library and a bounded off-screen acceptance probe, but keep the
+# default greeter and desktop on Pixman until the KMS page-flip lifecycle and
+# a clean VGLite build provenance have passed hardware validation. VGLite is
+# an explicit staging profile, never an undocumented silent fallback.
 BR2_PACKAGE_VG_LITE=y
 BR2_PACKAGE_TDVP_VGLITE_ACCEPTANCE=y
 BR2_PACKAGE_MESA3D=y
@@ -162,6 +165,7 @@ BR2_PACKAGE_TDVP_GREETD=y
 BR2_PACKAGE_TDVP_GTKGREET=y
 BR2_PACKAGE_TDVP_GREETER=y
 BR2_PACKAGE_TDVP_WAYLAND_ACCEPTANCE=y
+BR2_PACKAGE_TDVP_WAYLAND_TOOLS=y
 BR2_PACKAGE_TDVP_DISPLAY_SMOKE=y
 BR2_PACKAGE_TDVP_KEYBOARD_LAYOUT=y
 BR2_PACKAGE_TDVP_KPU_ACCEPTANCE=y
@@ -175,9 +179,9 @@ BR2_PACKAGE_WIRELESS_TOOLS_LIB=y
 BR2_PACKAGE_NETWORK_MANAGER=y
 BR2_PACKAGE_NETWORK_MANAGER_CLI=y
 BR2_PACKAGE_NM_CONNECTION_EDITOR=y
-BR2_PACKAGE_WIRELESS_REGDB=y
 BR2_PACKAGE_BLUEZ5_UTILS=y
 BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y
+BR2_PACKAGE_WIRELESS_REGDB=y
 # A desktop image needs the standard process-management utilities rather than
 # forcing every integration script to reimplement pgrep/pkill using ps output.
 BR2_PACKAGE_PROCPS_NG=y

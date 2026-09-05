@@ -1,0 +1,133 @@
+From 9af441ecd36bbee66d4df46baa7b482872d989f2 Mon Sep 17 00:00:00 2001
+From: TDVP Display Team <display@tdvp.local>
+Date: Thu, 4 Sep 2026 03:05:00 +0800
+Subject: [PATCH] output: recover an experimental VGLite render failure with Pixman
+
+The TDVP session wrapper can deliberately restart an experimental VGLite
+desktop with Pixman after Labwc exits non-zero, but upstream Labwc discards
+the result of the normal frame commit. A VGLite finish or KMS commit failure
+therefore keeps the compositor alive and repeatedly retries an undefined
+frame, never reaching the session circuit breaker.
+
+When the TDVP_LABWC_VGLITE_FAILURE_RECOVERY environment gate is exactly `1`,
+count consecutive failed frame commits per output. A successful commit resets
+the count. Three consecutive failures terminate Labwc's event loop cleanly
+with EXIT_FAILURE. The next process is not an in-frame renderer switch: the
+TDVP session wrapper records its VGLite breaker then starts a new, fresh
+Pixman renderer session. Pixman and normal Labwc sessions retain their
+upstream behavior because the gate is unset.
+
+---
+ include/labwc.h |  2 ++
+ src/main.c      |  2 +-
+ src/output.c    | 50 +++++++++++++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 52 insertions(+), 2 deletions(-)
+
+diff --git a/include/labwc.h b/include/labwc.h
+index 6fe53fb..b901c17 100644
+--- a/include/labwc.h
++++ b/include/labwc.h
+@@ -392,6 +392,7 @@ struct server {
+ 	struct sfdo *sfdo;
+ 
+ 	pid_t primary_client_pid;
++	int exit_status;
+ };
+ 
+ #define LAB_NR_LAYERS (4)
+@@ -424,6 +425,7 @@ struct output {
+ 
+ 	bool leased;
+ 	bool gamma_lut_changed;
++	unsigned int consecutive_render_failures;
+ };
+ 
+ #undef LAB_NR_LAYERS
+diff --git a/src/main.c b/src/main.c
+index 403589f..ba3ee41 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -235,5 +235,5 @@ main(int argc, char *argv[])
+ 
+ 	server_finish(&server);
+ 
+-	return 0;
++	return server.exit_status;
+ }
+diff --git a/src/output.c b/src/output.c
+index e72d14c..7fe25fe 100644
+--- a/src/output.c
++++ b/src/output.c
+@@ -8,6 +8,8 @@
+ 
+ #define _POSIX_C_SOURCE 200809L
+ #include <assert.h>
++#include <stdlib.h>
++#include <string.h>
+ #include <strings.h>
+ #include <wlr/backend/drm.h>
+ #include <wlr/backend/wayland.h>
+@@ -33,6 +35,48 @@
+ #include "view.h"
+ #include "xwayland.h"
+ 
++#define TDVP_VGLITE_RENDER_FAILURE_LIMIT 3U
++
++static bool
++tdvp_vglite_failure_recovery_enabled(void)
++{
++	const char *setting = getenv("TDVP_LABWC_VGLITE_FAILURE_RECOVERY");
++
++	return setting && strcmp(setting, "1") == 0;
++}
++
++static void
++output_handle_render_failure(struct output *output)
++{
++	if (!tdvp_vglite_failure_recovery_enabled()) {
++		return;
++	}
++
++	output->consecutive_render_failures++;
++	wlr_log(WLR_ERROR,
++		"TDVP VGLite render failure on output %s: consecutive=%u limit=%u",
++		output->wlr_output->name, output->consecutive_render_failures,
++		TDVP_VGLITE_RENDER_FAILURE_LIMIT);
++	if (output->consecutive_render_failures < TDVP_VGLITE_RENDER_FAILURE_LIMIT) {
++		return;
++	}
++
++	/*
++	 * A renderer cannot be replaced while it owns the current scene textures and
++	 * output buffers. End the event loop cleanly with a non-zero status so the
++	 * TDVP session wrapper can persist its VGLite circuit breaker, then start a
++	 * new Pixman session with a fresh wlroots renderer.
++	 */
++	struct server *server = output->server;
++	if (server->exit_status != EXIT_SUCCESS) {
++		return;
++	}
++	server->exit_status = EXIT_FAILURE;
++	wlr_log(WLR_ERROR,
++		"TDVP VGLite failure limit reached; terminating Labwc for Pixman recovery");
++	wl_display_terminate(server->wl_display);
++}
++
+ bool
+ output_get_tearing_allowance(struct output *output)
+ {
+@@ -149,7 +193,11 @@ output_frame_notify(struct wl_listener *listener, void *data)
+ 
+ 		pending->tearing_page_flip = output_get_tearing_allowance(output);
+ 
+-		lab_wlr_scene_output_commit(scene_output, pending);
++		if (lab_wlr_scene_output_commit(scene_output, pending)) {
++			output->consecutive_render_failures = 0;
++		} else {
++			output_handle_render_failure(output);
++		}
+ 	}
+ 
+ 	struct timespec now = { 0 };
+-- 
+2.47.1

@@ -1,0 +1,43 @@
+From: TDVP Platform <platform@tdvp.invalid>
+Date: Thu, 3 Sep 2026 16:15:00 +0800
+Subject: [PATCH] piglit: avoid the util-linux/Wayland Kconfig dependency cycle
+
+Piglit needs util-linux's real dmesg command at runtime. Selecting the
+util-linux package expresses that runtime requirement backwards: optional
+util-linux programs can select Linux PAM, while a Wayland desktop with
+swaylock depends on PAM and selects Wayland. Piglit's Wayland capability then
+closes a Kconfig cycle even when Piglit itself is not selected.
+
+Require the two existing util-linux symbols instead. This is the usual Kconfig
+representation for a dependency with its own non-trivial dependency graph.
+The TDVP profile already selects util-linux and its command suite, so the
+resulting product selection is unchanged and the diagnostic is removed.
+
+Signed-off-by: TDVP Platform <platform@tdvp.invalid>
+---
+ package/piglit/Config.in | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/package/piglit/Config.in b/package/piglit/Config.in
+index 94486d5a1a..cf8b1e30ab 100644
+--- a/package/piglit/Config.in
++++ b/package/piglit/Config.in
+@@ -9,6 +9,8 @@ config BR2_PACKAGE_PIGLIT
+ 	depends on BR2_TOOLCHAIN_USES_GLIBC || BR2_TOOLCHAIN_USES_MUSL # python-numpy
+ 	depends on BR2_TOOLCHAIN_GCC_AT_LEAST_9 # python-numpy
+ 	depends on BR2_HOST_GCC_AT_LEAST_9 # host-python-numpy
++	depends on BR2_PACKAGE_UTIL_LINUX # runtime
++	depends on BR2_PACKAGE_UTIL_LINUX_BINARIES # requires real dmesg tool
+ 	select BR2_PACKAGE_LIBDRM if BR2_PACKAGE_HAS_LIBGL
+ 	select BR2_PACKAGE_LIBPNG
+ 	select BR2_PACKAGE_LIBXKBCOMMON if BR2_PACKAGE_WAYLAND
+@@ -20,9 +22,7 @@ config BR2_PACKAGE_PIGLIT
+ 	select BR2_PACKAGE_PYTHON3_BZIP2
+ 	select BR2_PACKAGE_PYTHON3_PYEXPAT
+ 	select BR2_PACKAGE_PYTHON3_XZ
+ 	select BR2_PACKAGE_PYTHON3_ZLIB
+-	select BR2_PACKAGE_UTIL_LINUX # runtime
+-	select BR2_PACKAGE_UTIL_LINUX_BINARIES # requires real dmesg tool
+ 	select BR2_PACKAGE_WAFFLE # wflinfo, libwaffle-1
+ 	select BR2_PACKAGE_XLIB_LIBX11 if BR2_PACKAGE_XORG7
+ 	select BR2_PACKAGE_XLIB_LIBXEXT if BR2_PACKAGE_XORG7

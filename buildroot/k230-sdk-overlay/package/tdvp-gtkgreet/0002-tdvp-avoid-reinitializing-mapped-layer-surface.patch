@@ -1,0 +1,32 @@
+From: TDVP Platform <platform@tdvp.invalid>
+Subject: [PATCH] gtkgreet: do not reinitialize an existing layer window
+
+gtkgreet's monitor configure path can be invoked more than once for the same
+GtkWindow after the K230 output's initial 90-degree transform is committed.
+gtk-layer-shell explicitly requires gtk_layer_init_for_window() to run before
+the window is mapped; a second call therefore emits a critical assertion and
+leaves the greeter surface unusable. Keep the layer-shell greeter (it is the
+correct no-decoration, full-output role), but only create that role once.
+
+gtk_layer_is_layer_window() has been public since gtk-layer-shell 0.5 and is
+provided by the locked 0.8 dependency.
+
+Signed-off-by: TDVP Platform <platform@tdvp.invalid>
+---
+ gtkgreet/window.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/gtkgreet/window.c b/gtkgreet/window.c
+index 4095f8a..44b3099 100644
+--- a/gtkgreet/window.c
++++ b/gtkgreet/window.c
+@@ -295,7 +295,8 @@ void window_swap_focus(struct Window *win, struct Window *old) {
+ 
+ void window_configure(struct Window *w) {
+ #ifdef LAYER_SHELL
+-    if (gtkgreet->use_layer_shell) {
++    if (gtkgreet->use_layer_shell &&
++            !gtk_layer_is_layer_window(GTK_WINDOW(w->window))) {
+         window_setup_layershell(w);
+     }
+ #endif

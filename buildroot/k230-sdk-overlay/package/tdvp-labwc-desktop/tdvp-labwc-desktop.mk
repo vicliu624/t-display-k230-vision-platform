@@ -8,25 +8,11 @@ TDVP_LABWC_DESKTOP_SITE = $(TOPDIR)/package/tdvp-labwc-desktop/src
 TDVP_LABWC_DESKTOP_SITE_METHOD = local
 TDVP_LABWC_DESKTOP_LICENSE = MIT
 TDVP_LABWC_DESKTOP_LICENSE_FILES = LICENSE
-TDVP_LABWC_DESKTOP_DEPENDENCIES = \
-	dbus \
-	foot \
-	labwc \
-	pcmanfm \
-	pulseaudio \
-	seatd \
-	wayland \
-	wofi \
-	wf-panel-pi \
-	wfplug-batt \
-	wfplug-clock \
-	wfplug-netman \
-	wfplug-power \
-	wfplug-volumepulse \
-	wfplug-menu \
-	wlr-randr \
-	swayidle \
-	wlopm
+# This package installs the desktop policy and only compiles two small helpers.
+# The complete runtime desktop is selected in Config.in below; listing it here
+# would make a policy-only edit rebuild or download the whole desktop stack.
+# libglib2 is the only non-toolchain library used by TDVP's build commands.
+TDVP_LABWC_DESKTOP_DEPENDENCIES = libglib2
 
 define TDVP_LABWC_DESKTOP_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -std=c11 -O2 -Wall -Wextra \
@@ -43,10 +29,14 @@ endef
 define TDVP_LABWC_DESKTOP_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-labwc-session \
 		$(TARGET_DIR)/usr/local/bin/tdvp-labwc-session
+	$(INSTALL) -D -m 0755 $(@D)/tdvp-renderer-profile \
+		$(TARGET_DIR)/usr/local/bin/tdvp-renderer-profile
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-terminal \
 		$(TARGET_DIR)/usr/local/bin/tdvp-terminal
 	$(INSTALL) -D -m 0644 $(@D)/environment \
 		$(TARGET_DIR)/etc/tdvp/labwc/environment
+	$(INSTALL) -D -m 0644 $(@D)/renderer-profile \
+		$(TARGET_DIR)/etc/tdvp/labwc/renderer-profile
 	$(INSTALL) -D -m 0644 $(@D)/tdvp-local-admin-path.sh \
 		$(TARGET_DIR)/etc/profile.d/tdvp-local-admin-path.sh
 	$(INSTALL) -D -m 0644 $(@D)/70-tdvp-touch.rules \

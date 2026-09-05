@@ -1,0 +1,137 @@
+#!/bin/sh
+#
+# Exercise the kernel VGLite recovery path for a client which disappears after
+# VG_LITE_SUBMIT and before VG_LITE_WAIT. This command is intentionally opt-in:
+# it never starts, stops, signals, or reconfigures Labwc, but it must only run
+# when no same-user Labwc process owns the single VGLite hardware context.
+
+set -eu
+
+PROBE="${TDVP_VGLITE_PROBE:-/usr/bin/tdvp-vglite-probe}"
+VGLITE_DEVICE="${TDVP_VGLITE_DEVICE:-/dev/vg_lite}"
+PROC_ROOT="${TDVP_PROC_ROOT:-/proc}"
+timeout_seconds=15
+allow_inflight_close_recovery=0
+
+usage() {
+	cat <<EOF
+Usage: $0 --allow-inflight-close-recovery [--timeout-seconds N] [--probe PATH]
+
+Inject one off-screen VGLite command that is submitted then exits before WAIT
+or normal VGLite cleanup. The kernel must recover the active command during
+file release. This gate immediately starts a normal off-screen VGLite probe;
+both children must finish within their bounded deadlines.
+
+This command never opens DRM itself, obtains DRM master, creates a framebuffer,
+mode-sets, commits, page-flips, or signals Labwc. Run it only as the graphical
+login user after Labwc has stopped or while Labwc deliberately uses Pixman.
+It rejects the obsolete --expect-vglite-compositor option and is not a normal
+desktop smoke test.
+EOF
+}
+
+fail() {
+	printf '%s\n' "tdvp-vglite-inflight-close-gate: ERROR: $*" >&2
+	exit 1
+}
+
+require_positive_integer() {
+	case "$2" in
+		''|*[!0-9]*) fail "$1 must be a positive integer" ;;
+	esac
+	[ "$2" -gt 0 ] || fail "$1 must be a positive integer"
+}
+
+refuse_live_vglite_labwc() {
+	for pid in $(pgrep -u "$(id -u)" -x labwc 2>/dev/null || true); do
+		[ -r "${PROC_ROOT}/${pid}/environ" ] || continue
+		if tr '\000' '\n' < "${PROC_ROOT}/${pid}/environ" |
+			grep -Fx 'WLR_RENDERER=vglite' >/dev/null 2>&1; then
+			fail "K230 VGLite is a single-context driver: refusing in-flight-close while Labwc pid ${pid} owns VGLite"
+		fi
+	done
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--expect-vglite-compositor)
+			fail "--expect-vglite-compositor is obsolete: this maintenance test refuses a live VGLite compositor"
+			;;
+		--allow-inflight-close-recovery)
+			allow_inflight_close_recovery=1
+			;;
+		--timeout-seconds)
+			[ "$#" -ge 2 ] || fail "--timeout-seconds requires a value"
+			timeout_seconds="$2"
+			shift
+			;;
+		--probe)
+			[ "$#" -ge 2 ] || fail "--probe requires a value"
+			PROBE="$2"
+			shift
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			fail "unknown option: $1"
+			;;
+	esac
+	shift
+done
+
+[ "$allow_inflight_close_recovery" -eq 1 ] || {
+	usage >&2
+	fail "--allow-inflight-close-recovery is required"
+}
+require_positive_integer timeout_seconds "$timeout_seconds"
+[ "$(id -u)" -ne 0 ] || fail "run as the graphical login user, not root"
+[ -x "$PROBE" ] || fail "probe is not executable: $PROBE"
+[ -r "$VGLITE_DEVICE" ] || fail "cannot read VGLite device: $VGLITE_DEVICE"
+[ -w "$VGLITE_DEVICE" ] || fail "cannot write VGLite device: $VGLITE_DEVICE"
+command -v setsid >/dev/null 2>&1 || fail "setsid is required for bounded child cleanup"
+refuse_live_vglite_labwc
+
+run_bounded() {
+	label="$1"
+	shift
+	setsid "$@" &
+	child_pid=$!
+	deadline=$(( $(date +%s) + timeout_seconds ))
+
+	while kill -0 "$child_pid" 2>/dev/null; do
+		if [ "$(date +%s)" -ge "$deadline" ]; then
+			printf '%s\n' \
+			"tdvp-vglite-inflight-close-gate: TIMEOUT phase=$label pid=$child_pid deadline_seconds=$timeout_seconds process_group_termination_requested=yes" >&2
+			kill -TERM -"$child_pid" 2>/dev/null || true
+			return 124
+		fi
+		sleep 1
+	done
+	wait "$child_pid"
+}
+
+printf '%s\n' \
+	"tdvp-vglite-inflight-close-gate: start mode=isolated-no-live-vglite-owner recovery_acknowledged=yes timeout_seconds=$timeout_seconds"
+
+if run_bounded inflight-close "$PROBE" --frames 1 --source-width 64 --source-height 64 \
+	--target-format bgrx --blit-api normal --inject-inflight-close; then
+	:
+else
+	status=$?
+	[ "$status" -eq 124 ] && fail "in-flight close injection timed out"
+	fail "in-flight close injection failed status=$status"
+fi
+
+if run_bounded recovery-probe "$PROBE" --frames 4 --source-width 64 --source-height 64 \
+	--target-format bgrx --blit-api normal; then
+	:
+else
+	status=$?
+	[ "$status" -eq 124 ] && fail "post-recovery probe timed out"
+	fail "post-recovery probe failed status=$status"
+fi
+
+printf '%s\n' \
+	"tdvp-vglite-inflight-close-gate: PASS mode=isolated-no-live-vglite-owner recovery_acknowledged=yes"
