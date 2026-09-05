@@ -262,7 +262,8 @@ require_content "${VGLITE_DIAGNOSTICS_REPORT}" 'texture_readback_finish'
 require_content "${VGLITE_DIAGNOSTICS_REPORT}" 'readback_result == 0'
 require_content "${VGLITE_DIAGNOSTICS_REPORT}" 'page_flip_vglite_transition_records'
 require_content "${VGLITE_DIAGNOSTICS_REPORT}" 'tdvp-vglite-diagnostics-report: PASS'
-require_content "${VGLITE_DIAGNOSTICS_REPORT}" 'neither opens VGLite/DRM nor controls Labwc'
+require_content "${VGLITE_DIAGNOSTICS_REPORT}" 'read-only parser: it neither opens'
+require_content "${VGLITE_DIAGNOSTICS_REPORT}" 'VGLite/DRM nor controls Labwc'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-vglite-acceptance/tdvp-vglite-acceptance.mk" 'tdvp-vglite-diagnostics-report'
 require_file "${PROJECT_DIR}/buildroot/tools/test-tdvp-vglite-diagnostics-report.sh"
 require_file "${WAYLAND_SHM_BENCH}"
@@ -779,7 +780,8 @@ require_content "${STAGED_OVERLAY}/package/tdvp-vglite-acceptance/src/tdvp-vglit
 require_content "${STAGED_OVERLAY}/package/tdvp-vglite-acceptance/src/tdvp-vglite-diagnostics-report" 'texture_readback_finish'
 require_content "${STAGED_OVERLAY}/package/tdvp-vglite-acceptance/src/tdvp-vglite-diagnostics-report" 'readback_result == 0'
 require_content "${STAGED_OVERLAY}/package/tdvp-vglite-acceptance/src/tdvp-vglite-diagnostics-report" 'page_flip_vglite_transition_records'
-require_content "${STAGED_OVERLAY}/package/tdvp-vglite-acceptance/src/tdvp-vglite-diagnostics-report" 'neither opens VGLite/DRM nor controls Labwc'
+require_content "${STAGED_OVERLAY}/package/tdvp-vglite-acceptance/src/tdvp-vglite-diagnostics-report" 'read-only parser: it neither opens'
+require_content "${STAGED_OVERLAY}/package/tdvp-vglite-acceptance/src/tdvp-vglite-diagnostics-report" 'VGLite/DRM nor controls Labwc'
 require_content "${STAGED_OVERLAY}/package/tdvp-vglite-acceptance/tdvp-vglite-acceptance.mk" 'tdvp-vglite-diagnostics-report'
 	require_file "${STAGED_OVERLAY}/package/nm-connection-editor/0002-tdvp-wayland-drop-unused-gdkx-header.patch"
 	require_content "${STAGED_OVERLAY}/package/nm-connection-editor/0002-tdvp-wayland-drop-unused-gdkx-header.patch" 'Drop the unused include'

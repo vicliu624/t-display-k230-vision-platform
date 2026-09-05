@@ -308,6 +308,30 @@ require_rootfs_content() {
 	rm -rf "${temporary_dir}"
 }
 
+reject_rootfs_content() {
+	local path="$1"
+	local text="$2"
+	local temporary_dir
+	local temporary_file
+
+	# Dump first: piping a large binary to grep -q can hide a read failure.
+	temporary_dir="$(mktemp -d)"
+	temporary_file="${temporary_dir}/rootfs-content"
+	if ! debugfs -R "dump ${path} ${temporary_file}" "${ROOTFS}" >/dev/null 2>&1 ||
+		[ ! -f "${temporary_file}" ]; then
+		rm -rf "${temporary_dir}"
+		printf 'TDVP image guard: cannot extract rootfs content: %s\n' "${path}" >&2
+		exit 1
+	fi
+	if grep -aFq -- "${text}" "${temporary_file}"; then
+		rm -rf "${temporary_dir}"
+		printf 'TDVP image guard: rootfs %s unexpectedly contains forbidden content: %s\n' \
+			"${path}" "${text}" >&2
+		exit 1
+	fi
+	rm -rf "${temporary_dir}"
+}
+
 compare_bootfs_payload() {
 	local path="$1"
 	local expected="$2"
@@ -581,6 +605,8 @@ require_fs_path "${ROOTFS}" '/usr/bin/yavta'
 require_fs_path "${ROOTFS}" '/usr/bin/sudo'
 require_fs_path "${ROOTFS}" '/usr/bin/tdvp-wayland-acceptance'
 require_fs_path "${ROOTFS}" '/usr/bin/tdvp-vglite-probe'
+require_fs_path "${ROOTFS}" '/usr/bin/tdvp-display-smoke'
+require_rootfs_content '/usr/bin/tdvp-display-smoke' 'guard vblank sequence %u did not advance after detach sequence %u'
 require_fs_path "${ROOTFS}" '/usr/lib/libvg_lite.so'
 require_fs_path "${ROOTFS}" '/usr/lib/udev/rules.d/60-tdvp-vg-lite.rules'
 require_rootfs_fixed_line '/usr/lib/udev/rules.d/60-tdvp-vg-lite.rules' 'SUBSYSTEM=="vg_lite_class", KERNEL=="vg_lite", GROUP="render", MODE="0660"'
@@ -602,6 +628,10 @@ require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-session-idle'
 require_rootfs_content '/etc/xdg/labwc/autostart' 'tdvp-session-idle'
 require_rootfs_content '/usr/local/bin/tdvp-session-lock' 'readonly SWAYLOCK=/usr/bin/swaylock'
 require_rootfs_content '/usr/local/bin/tdvp-session-lock' '"${SWAYLOCK}" -f'
+require_rootfs_content '/usr/local/bin/tdvp-session-powerctl' 'readonly DEFAULT_LOCK_AFTER_SECONDS=300'
+require_rootfs_content '/usr/local/bin/tdvp-session-powerctl' 'readonly DEFAULT_BLANK_AFTER_SECONDS=30'
+require_rootfs_content '/usr/local/bin/tdvp-session-idle' 'timeout "${lock_after_seconds}" "${SESSION_LOCK}"'
+require_rootfs_content '/usr/local/bin/tdvp-session-idle' 'blank_after_total_seconds=$((lock_after_seconds + blank_after_seconds))'
 require_rootfs_content '/usr/local/bin/tdvp-session-idle' 'readonly WLOPM=/usr/bin/wlopm'
 require_rootfs_content '/usr/local/bin/tdvp-session-idle' "\"\${WLOPM} --off '*'\""
 require_rootfs_content '/usr/local/bin/tdvp-session-idle' "\"\${WLOPM} --on '*'\""
@@ -813,6 +843,7 @@ require_rootfs_content '/usr/local/libexec/vicliu-pocket-linux-hardware/tdvp-exp
 require_rootfs_content '/usr/local/libexec/vicliu-pocket-linux-hardware/tdvp-expand-rootfs' 'blockdev'
 require_rootfs_content '/usr/lib/systemd/system/tdvp-rootfs-expand.service' 'Before=greetd.service'
 require_rootfs_content '/usr/lib/wf-panel-pi/libvolumepulse.so' 'audio-volume-change'
+reject_rootfs_content '/usr/lib/wf-panel-pi/libvolumepulse.so' 'systemctl --user -q is-active pipewire-pulse.service'
 require_rootfs_content '/usr/lib/wf-panel-pi/libvolumepulse.so' 'libcanberra'
 reject_rootfs_line '/etc/fstab' '^[^#].*[[:space:]]/data[[:space:]]'
 require_rootfs_content '/usr/share/X11/xkb/symbols/tdvp' 'key <I472>'

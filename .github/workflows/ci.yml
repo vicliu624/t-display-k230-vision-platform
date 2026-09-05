@@ -58,6 +58,11 @@ jobs:
           bash buildroot/tools/test-reconcile-k230-sdk-linux-patches.sh
           bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
           bash buildroot/tools/test-tdvp-cpu1-boot-contract.sh
+          bash buildroot/tools/test-tdvp-session-idle-contract.sh
+          bash buildroot/tools/test-verify-sdcard-image-volumepulse-guard.sh
+          bash buildroot/tools/test-tdvp-display-smoke-cleanup.sh
+          bash buildroot/tools/test-tdvp-vblank-observer-maintenance-master.sh
+          bash buildroot/tools/test-tdvp-kms-maintenance.sh
 
       - name: Stage pinned SDK worktree
         run: |
