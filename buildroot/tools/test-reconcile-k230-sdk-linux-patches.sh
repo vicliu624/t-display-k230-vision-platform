@@ -28,26 +28,10 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "${PATCH_DIR}" "${OVERLAY_DIR}"
-mkdir -p "${OVERLAY_DIR}/vendor"
-
-write_valid_patch() {
-	cat > "$1" <<'EOF'
-diff --git a/test-file b/test-file
---- a/test-file
-+++ b/test-file
-@@ -1 +1 @@
--before
-+after
-EOF
-}
-
-# Keep the fixture aligned to the real overlay's active names while using
-# minimal valid patch payloads.  This isolates stale-name reconciliation from
-# the separate content validation covered by the production overlay checks.
-while IFS= read -r -d '' overlay_patch; do
-	write_valid_patch "${OVERLAY_DIR}/$(basename "${overlay_patch}")"
-done < <(find "${OVERLAY_SOURCE}" -maxdepth 1 -type f -name '*.patch' -print0)
-write_valid_patch "${OVERLAY_DIR}/vendor/0019-dts-add-nonai2d.patch"
+# Use the reviewed payloads so production reconciliation validates the real
+# queue as well as removing retired names. A synthetic patch can hide a
+# structural error in an active patch before Buildroot consumes it.
+cp -a "${OVERLAY_SOURCE}/." "${OVERLAY_DIR}/"
 
 # Simulate an SDK output directory reused from the pre-VGLite CPU1 branch.
 # The old 0053 and current 0063 payloads are deliberately byte-identical;
@@ -80,4 +64,4 @@ for active_patch in \
 	}
 done
 
-printf '%s\n' 'test-reconcile-k230-sdk-linux-patches: PASS stale CPU1 patch removed'
+printf '%s\n' 'test-reconcile-k230-sdk-linux-patches: PASS real queue validated; stale CPU1 patch removed'

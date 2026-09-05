@@ -195,5 +195,5 @@ index c226967c989af..e0b64b7a00259 100644
 +}
  
  enum vg_lite_error vg_lite_hal_operation_cache(void *handle,
---
+-- 
 2.43.0

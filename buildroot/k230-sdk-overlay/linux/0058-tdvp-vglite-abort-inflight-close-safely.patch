@@ -28,6 +28,7 @@ wrap and sleep indefinitely after a failed reset. Resource-destroying ioctls
 are rejected while a file owns an unfinished submission; the client may WAIT
 or explicitly RESET the shared engine instead.
 ---
+diff --git a/drivers/gpu/vglite/vg_lite_kernel.h b/drivers/gpu/vglite/vg_lite_kernel.h
 --- a/drivers/gpu/vglite/vg_lite_kernel.h
 +++ b/drivers/gpu/vglite/vg_lite_kernel.h
 @@ -445,6 +445,7 @@
@@ -38,6 +39,7 @@ or explicitly RESET the shared engine instead.
  
  #ifdef __cplusplus
  }
+diff --git a/drivers/gpu/vglite/vg_lite_hal.c b/drivers/gpu/vglite/vg_lite_hal.c
 --- a/drivers/gpu/vglite/vg_lite_hal.c
 +++ b/drivers/gpu/vglite/vg_lite_hal.c
 @@ -134,6 +134,8 @@
@@ -246,6 +248,7 @@ or explicitly RESET the shared engine instead.
  	device->clk = devm_clk_get(&pdev->dev, "vglite");
  	device->reset = devm_reset_control_get(&pdev->dev, NULL);
  	pm_runtime_enable(device->dev);
+diff --git a/drivers/gpu/vglite/vg_lite_kernel.c b/drivers/gpu/vglite/vg_lite_kernel.c
 --- a/drivers/gpu/vglite/vg_lite_kernel.c
 +++ b/drivers/gpu/vglite/vg_lite_kernel.c
 @@ -47,7 +47,7 @@
@@ -375,6 +378,5 @@ or explicitly RESET the shared engine instead.
  	vg_lite_hal_poke(VG_LITE_INTR_ENABLE, 0xFFFFFFFF);
  
  	return VG_LITE_SUCCESS;
-
 -- 
 2.43.0
