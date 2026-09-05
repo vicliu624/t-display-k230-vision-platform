@@ -58,6 +58,7 @@ jobs:
           bash buildroot/tools/test-reconcile-k230-sdk-linux-patches.sh
           bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
           bash buildroot/tools/test-tdvp-cpu1-boot-contract.sh
+          bash buildroot/tools/test-tdvp-cpu0-dts-queue.sh
           bash buildroot/tools/test-tdvp-session-idle-contract.sh
           bash buildroot/tools/test-verify-sdcard-image-volumepulse-guard.sh
           bash buildroot/tools/test-tdvp-display-smoke-cleanup.sh

@@ -32,10 +32,11 @@ diff --git a/arch/riscv/boot/dts/canaan/k230.dtsi b/arch/riscv/boot/dts/canaan/k
 diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
 --- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
 +++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
-@@ -20,5 +20,5 @@
+@@ -35,6 +35,6 @@
  &uart0 { status = "okay"; };
+ &uart2 { status = "okay"; };
 -&uart3 { status = "okay"; };
 +&uart3 { status = "disabled"; }; /* RT-Smart console owns UART3. */
- &mmc_sd1 {
+ &spi0 {
  	status = "okay";
- 	no-1-8-v;
+ 	pinctrl-names = "default";

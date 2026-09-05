@@ -40,7 +40,7 @@ vglite_completion_idle_yield_patch_sha256 = e8f06d7721703f6a80ea442a29530a86941d
 cpu1_mailbox_patch = buildroot/k230-sdk-overlay/linux/0063-tdvp-cpu1-rtsmart-mailbox.patch
 cpu1_mailbox_patch_sha256 = 902867d70a488119bb23a8cb2548a37c0dd3ff80a0f970ced777268d7abbf5c1
 cpu0_scalar_patch = buildroot/k230-sdk-overlay/linux/0064-tdvp-riscv-dts-use-scalar-cpu0.patch
-cpu0_scalar_patch_sha256 = ed9f387af8c434686ca180810fbf6b6a07805ab14884e9374b50b6fbc9e795f4
+cpu0_scalar_patch_sha256 = 8c24150fc99ed092e8587208a9d65bd08a3e023787b7be1ea0fb384d3f6921eb
 
 [cpu1_rtsmart]
 source = https://github.com/Xinyuan-LilyGO/T-Display-K230_canmv_rt.git
