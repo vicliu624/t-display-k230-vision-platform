@@ -61,6 +61,7 @@ jobs:
           bash buildroot/tools/test-tdvp-cpu1-build-env.sh
           bash buildroot/tools/test-tdvp-cpu0-dts-queue.sh
           bash buildroot/tools/test-tdvp-session-idle-contract.sh
+          bash buildroot/tools/test-tdvp-image-source-contract.sh
           bash buildroot/tools/test-verify-sdcard-image-volumepulse-guard.sh
           bash buildroot/tools/test-tdvp-display-smoke-cleanup.sh
           bash buildroot/tools/test-tdvp-vblank-observer-maintenance-master.sh

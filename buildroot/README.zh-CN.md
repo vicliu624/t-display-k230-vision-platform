@@ -16,7 +16,9 @@ bash buildroot/tools/build-k230-sdk-rm69a10.sh "$HOME/work/tdvp-k230-labwc"
 bash buildroot/tools/assert-k230-sdk-rm69a10-baseline.sh "$HOME/work/tdvp-k230-labwc"
 ```
 
-在 WSL 中执行这些命令，并让工作目录位于 ext4 文件系统。项目检出目录可以位于
+在 Linux/ext4 工作目录中执行这些命令，可以使用原生 Linux、容器或 WSL。
+若要对齐 CI，应使用 Ubuntu 24.04 x86_64，以及 `.github/workflows/ci.yml` 调用的
+主机准备脚本；旧版 WSL 上构建成功不等于已在 CI 用户空间中验证。项目检出目录可以位于
 Windows 文件系统；`$HOME/work/tdvp-k230-labwc` 是唯一可丢弃的构建输入目录。
 不要在 vendor SDK 内直接执行 `make`，也不要把 `output/<profile>` 目录当作工作目录
 参数传入。
@@ -55,6 +57,28 @@ package 图、复制后的 package 源码或必需桌面输入与项目源码不
 TDVP_STAGE_DRY_RUN=1 \
   bash buildroot/tools/prepare-k230-sdk-worktree.sh "$HOME/work/tdvp-k230-labwc"
 ```
+
+### 编译前检查交付规则
+
+```sh
+bash buildroot/tools/test-tdvp-image-source-contract.sh
+bash buildroot/tools/test-tdvp-session-idle-contract.sh
+bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
+```
+
+源码契约测试从 greeter 和桌面 package recipe 提取安装路径，把真实源码文件复制到
+临时 ext4 文件系统，并执行生产镜像校验器中对应的断言和文件提取函数。它会汇总全部
+不匹配项，并验证错误的登录命令、用户和会话启动脚本会被拒绝。只需 Bash、Python 3
+和 e2fsprogs，不需要编译器、挂载、root 权限或已有 SDK 输出。
+
+它还会执行真实 post-image 清单生成器中的字面量元数据语句，并检查发布基线要求的
+字面量字段。wlroots／Labwc 提交号和 renderer 策略字段还会分别与真实 package recipe
+及交付环境配置比对，在完整构建前拦截清单字段缺失或内容漂移。
+
+该快速检查覆盖直接安装的桌面策略文件，不覆盖编译生成的程序、生成式系统配置、以变量
+生成的清单字段及产物哈希、完整
+分区内容或硬件行为。仍须保留独立的 CPU1 固件预检和最终完整镜像/发布校验。应分别
+记录这些阶段的结果，不能把其中一项通过表述为后续阶段也已通过。
 
 ## 固定输入
 
