@@ -1,0 +1,58 @@
+From: TDVP maintainers
+Subject: [PATCH] CPU1: preserve shell status in RT-Smart and OpenSBI recipes
+
+Make expands $? to prerequisite names before the shell sees the recipe.
+Escape it so a failed parser or SCons exits with its actual status, without
+continuing to copy a stale firmware binary.
+
+diff --git a/canmv_k230/src/rtsmart/Makefile b/canmv_k230/src/rtsmart/Makefile
+--- a/canmv_k230/src/rtsmart/Makefile
++++ b/canmv_k230/src/rtsmart/Makefile
+@@ -24,7 +24,7 @@
+ 	export MPP_SRC_DIR=$(SDK_RTSMART_SRC_DIR)/mpp; \
+ 	cp -f $(SDK_SRC_ROOT_DIR)/include/generated/autoconf.h $(SDK_RTSMART_SRC_DIR)/mpp/include/comm/k_autoconf_comm.h; \
+ 	cp -f $(SDK_SRC_ROOT_DIR)/include/generated/autoconf.h $(SDK_RTSMART_SRC_DIR)/rtsmart/kernel/bsp/maix3/k_autoconf_comm.h; \
+-	$(SDK_RTSMART_SRC_DIR)/parse_config || exit $?; \
++	$(SDK_RTSMART_SRC_DIR)/parse_config || exit $$?; \
+ 	cd $(SDK_RTSMART_SRC_DIR)/rtsmart/kernel/bsp/maix3; \
+ 	if [ ! -f configs/${SDK_DEFCONFIG} ]; then \
+ 		echo "Error: Configuration file '${SDK_DEFCONFIG}' not found."; \
+@@ -32,7 +32,7 @@
+ 		exit 1; \
+ 	fi; \
+ 	rm -rf rtconfig.h; \
+-	scons --useconfig=configs/${SDK_DEFCONFIG} || exit $?; \
++	scons --useconfig=configs/${SDK_DEFCONFIG} || exit $$?; \
+ 	cd -; \
+ 	touch .parse_config
+ 
+@@ -67,7 +67,7 @@
+ 	export MPP_SRC_DIR=$(SDK_RTSMART_SRC_DIR)/mpp; \
+ 	cd $(SDK_RTSMART_SRC_DIR)/rtsmart/kernel/bsp/maix3; \
+ 	rm -f rtthread.{elf,bin}; \
+-	scons -j$(NCPUS) || exit $?; \
++	scons -j$(NCPUS) || exit $$?; \
+ 	cp rtthread.bin ${SDK_BUILD_IMAGES_DIR}/rtsmart; \
+ 	cd -;
+ 
+diff --git a/canmv_k230/src/opensbi/Makefile b/canmv_k230/src/opensbi/Makefile
+--- a/canmv_k230/src/opensbi/Makefile
++++ b/canmv_k230/src/opensbi/Makefile
+@@ -7,7 +7,7 @@
+ .PHONY: all clean distclean
+ 
+ .parse_config:
+-	@$(SDK_OPENSBI_SRC_DIR)/parse_config || exit $?
++	@$(SDK_OPENSBI_SRC_DIR)/parse_config || exit $$?
+ 	@touch .parse_config
+ 
+ build: .parse_config
+@@ -19,7 +19,7 @@
+ 	cp $(SDK_BUILD_IMAGES_DIR)/rtsmart/rtthread.bin $(SDK_OPENSBI_SRC_DIR)/opensbi/;
+ 	@cd $(SDK_OPENSBI_SRC_DIR)/opensbi; \
+ 	export PLATFORM=kendryte/fpgac908; \
+-	$(MAKE) -j$(NCPUS) FW_FDT_PATH=hw.dtb FW_PAYLOAD_PATH=rtthread.bin O=$(SDK_OPENSBI_BUILD_DIR) OPENSBI_QUIET=1 CROSS_COMPILE=$(CROSS_COMPILE) || exit $?; \
++	$(MAKE) -j$(NCPUS) FW_FDT_PATH=hw.dtb FW_PAYLOAD_PATH=rtthread.bin O=$(SDK_OPENSBI_BUILD_DIR) OPENSBI_QUIET=1 CROSS_COMPILE=$(CROSS_COMPILE) || exit $$?; \
+ 	cp $(SDK_OPENSBI_BUILD_DIR)/platform/kendryte/fpgac908/firmware/fw_payload.bin ${SDK_OPENSBI_BUILD_DIR}/opensbi.bin; \
+ 	cd -
+ 

@@ -320,6 +320,16 @@ BUILD_ENV=(
 	FORCE_UNSAFE_CONFIGURE=1
 )
 
+# Keep the standalone CPU1 preflight and Buildroot's post-image hook on the
+# same explicit source/toolchain cache despite the otherwise clean host env.
+for cpu1_variable in TDVP_CPU1_CACHE_ROOT TDVP_CPU1_TOOLCHAIN_DIR \
+	TDVP_CPU1_OPENSBI_TOOLCHAIN_DIR TDVP_CPU1_OPENSBI_CROSS_COMPILE \
+	TDVP_CPU1_SOURCE_DIR TDVP_CPU1_PYTHON TDVP_CPU1_JOBS; do
+	if [ -n "${!cpu1_variable:-}" ]; then
+		BUILD_ENV+=("${cpu1_variable}=${!cpu1_variable}")
+	fi
+done
+
 run_make() {
 	"${BUILD_ENV[@]}" make -C "$WORKTREE" "CONF=$PROFILE" "$@"
 }

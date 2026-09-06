@@ -147,6 +147,14 @@ git -C "${CPU1_CHECKOUT_DIR}" fetch --depth=1 --filter=blob:limit=1048576 \
 git -C "${CPU1_CHECKOUT_DIR}" checkout --detach --force "${CPU1_COMMIT}"
 git -C "${CPU1_CHECKOUT_DIR}" read-tree -mu HEAD
 
+# Apply the CPU1-only fixes to the pinned checkout on every build. Never
+# enable USB/MTP merely to satisfy DFS's optional notification dependency.
+for cpu1_patch in "${SCRIPT_DIR}"/patches/*.patch; do
+	require_file "${cpu1_patch}"
+	git -C "${CPU1_CHECKOUT_DIR}" apply --check "${cpu1_patch}"
+	git -C "${CPU1_CHECKOUT_DIR}" apply "${cpu1_patch}"
+done
+
 # parse_config is an executable at the root of the RT-Smart source directory.
 # Some Git sparse-checkout implementations keep the parent directory but omit
 # that file-only pattern.  Restore exactly the pinned blob when that happens,
