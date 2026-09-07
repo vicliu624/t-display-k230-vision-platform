@@ -60,6 +60,11 @@ for file in "${SYSIMAGE}" "${SPL}" "${UBOOT_ENV}" "${UBOOT}" "${BOOTFS}" "${ROOT
 	fi
 done
 
+# Verify firmware ownership against the exact DTB later compared byte-for-byte
+# with boot.ext4. Raw offset checks alone cannot detect a mixed CPU0/CPU1 image.
+bash "$(dirname "$0")/cpu1/vision/verify-pair.sh" \
+	"${SELECTED_DTB}" "${BUILDROOT_HOST_DIR}/bin/fdtget" "${CPU1_MANIFEST}"
+
 # Check real ext4 metadata, not permissions in the unprivileged staging tree.
 bash "$(dirname "$0")/verify-auth-rootfs.sh" "${ROOTFS}"
 

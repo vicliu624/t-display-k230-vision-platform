@@ -17,3 +17,8 @@ for variant in baseline candidate; do
 done
 python3 "$project/buildroot/tools/tests/tdvp-cpu1-vision-dtb-test.py" \
     "$test_dir/baseline.dtb" "$test_dir/candidate.dtb"
+if [ -n "${2:-}" ]; then
+    bash "$project/buildroot/tools/test-tdvp-cpu1-pair.sh" "$test_dir/baseline.dtb" "$test_dir/candidate.dtb" "$2"
+else
+    bash "$project/buildroot/tools/test-tdvp-cpu1-pair.sh" "$test_dir/baseline.dtb" "$test_dir/candidate.dtb"
+fi

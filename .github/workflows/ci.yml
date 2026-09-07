@@ -103,7 +103,7 @@ jobs:
           kernel_source="$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/build/linux-$kernel_commit"
           bash buildroot/tools/test-tdvp-cpu1-power-amp.sh "$kernel_source" --patched
           bash buildroot/tools/test-tdvp-cpu1-clock-amp.sh "$kernel_source" --patched
-          bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh "$kernel_source"
+          bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh "$kernel_source" "${RUNNER_TEMP}/tdvp-cpu1-preflight/manifest"
 
       - name: Build the bootable SD image
         run: bash buildroot/tools/build-k230-sdk-rm69a10.sh "$TDVP_WORKTREE"

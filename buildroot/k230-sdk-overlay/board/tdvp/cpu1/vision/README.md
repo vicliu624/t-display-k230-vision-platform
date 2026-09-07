@@ -21,6 +21,10 @@ counterpart for the revised service boundary and memory constraints.
 This directory is an **in-progress migration**. Merely building it does not
   switch the production image to CPU1 camera ownership. Do not boot the
   candidate CPU1 firmware with the existing CPU0 camera device tree.
+  `build-rtsmart.sh` now builds the AI/vision firmware through its normal
+  production entry point. Linux profile/bridge packaging has not yet switched;
+  `post-image.sh` and the image verifier reject that mixed pair before it can
+  be delivered. This intermediate revision is intentionally not releasable.
 
 The former `vpl-camera` Linux V4L2 desktop demo is retired: no menu entry or
 launcher is shipped, including in reused Buildroot targets. A replacement demo
@@ -63,7 +67,8 @@ complete the camera ownership migration described below.
   peripherals. Unsupported PLL state, timeout, failed readback, controller
   mapping, bus-speed setup or bus registration is latched and blocks MPP.
   The hook requires I2C4 master-only ownership. Its flag defaults off and the
-  unselected BSP entry is unchanged. The production build does not yet opt in.
+  unselected BSP entry is unchanged. The production firmware builder now opts
+  in together with the other paired sources; the Linux image switch is pending.
 - The paired component patch (`0002-rtsmart-defer-vision-components.patch`)
   prevents automatic MPP/GNNE/AI2D initialization before main. MPP is called
   explicitly after GRANT. The candidate now follows MPP with a strong,
@@ -340,6 +345,45 @@ controlled GNNE/AI2D/FFT initializers and asynchronous worker in ROMFS:
 This does not activate the production profile or deploy a board image; the
 remaining release requirements still apply.
 
+## Production firmware build and packaging-pair gate
+
+`build-rtsmart.sh` now invokes `stage-build.sh` to apply the three vision
+patches, install the curated kernel sources, select the explicit RT-Smart
+drivers and set the GC2093 CSI2/MMZ configuration through real SDK syncconfig.
+It rebuilds the sensor and media-clock archives (removing old archive members),
+links the MPI worker, generates its embedded ROMFS and links the RT-Smart
+kernel followed by OpenSBI. `verify-kernel.sh` requires the actual AI/vision
+symbols and rejects automatic AI startup and Linux-owned display/audio/SDMA
+initializers. The existing raw OpenSBI entry and 20 MiB slot checks remain.
+`mpp-source-paths.txt` limits the partial checkout to real build dependencies,
+not the SDK's unused audio/codec libraries and demos. Cached fixed commits do
+not require an origin refresh. Pristine BSP regression inputs are extracted
+with individual `git show` calls; `git archive` on the host Git version tried
+to prefetch unrelated large blobs even when given narrow pathspecs.
+
+The firmware manifest declares `resource_owner=cpu1-ai-vision`, ownership
+contract 2, the exact MMZ/transport ranges, GC2093 CSI2, GNNE/AI2D/FFT and the
+embedded worker hash. `verify-pair.sh` checks those fields against the actual
+Linux DTB, its disabled Linux owners, memory reservations, GPIO protection,
+DDR/PLL references and power-domain holds. Both post-image (before genimage)
+and standalone image verification call this gate. CI compares the DT candidate
+with the real preflight firmware manifest, rather than trusting a substitute
+manifest to represent the built payload. Twenty-three mixed/missing-contract
+cases are rejected by the packaging-pair regression.
+
+The first real production-entry raw payload built on Ubuntu 24.04 is 3,560,632
+bytes at entry `0x10000000`, SHA-256
+`6d0a09077b2d3138229a80b425ea0727f4d51b33a5984654d7ff2b8ba2ab1789`.
+It passed the boot guard against the built CPU0 U-Boot header and the candidate
+DTB pair guard. It is not a complete SD image, not deployed, and not hardware
+acceptance. The final entry also passed the complete CI preflight, then a
+same-SDK/output rebuild with the container network disabled. An obsolete
+sensor archive member deliberately inserted before rebuilding was removed.
+That reused-output check is now part of the committed CI preflight as well:
+it builds real firmware twice and still exercises all five RT-Smart/OpenSBI
+failure-propagation cases. This is not a claim of bit-reproducible CPU1 builds;
+upstream build timestamps/paths have not been audited for that property.
+
 The remaining release requirements are:
 
 1. Enable `tdvp,cpu1-gpio-mask = <0x00200000>` on GPIO0 and
@@ -359,12 +403,13 @@ The remaining release requirements are:
    reservations and real GPIO/power/clock suppliers, holds the named resources
    and drives ownership independently of frame opens. Validate its actual
    startup timing, PM/CCF holds and fault retention on the paired board image.
-3. Atomically add Linux MMZ/transport reservations and retire Linux camera,
-   ISP, KPU/AI2D bindings and the CPU0 ISP service. Add an ownership gate that
-   rejects mixed firmware/DT/profile combinations and checks GPIO protection.
-4. Wire the curated MPP and ROMFS build into `build-rtsmart.sh`, preserve the
-   raw OpenSBI entry/20 MiB slot guard, package the bridge and its `video` udev
-   rule, and strengthen DT reservation checks before installing the module.
+3. Activate the Linux ownership device tree and retire Linux camera, ISP,
+   KPU/AI2D bindings and the CPU0 ISP/KPU acceptance services. The new pair gate
+   already rejects a mixed firmware/DT; complete rootfs/profile checks with
+   that Linux switch rather than weakening the gate to accept the old image.
+4. Package the Linux bridge, boot loading and its `video` udev rule. Curated
+   MPP, ROMFS and raw OpenSBI building are now in the production CPU1 entry;
+   keep the raw entry/20 MiB slot and ownership guards intact.
 5. Validate sensor CSI2 mode/MCLK/reset on hardware, then physical frame bytes
    through the Linux bridge, slow-reader/close/reopen/error paths, and
    CPU1+Wayland/VGLite coexistence with rollback prepared.

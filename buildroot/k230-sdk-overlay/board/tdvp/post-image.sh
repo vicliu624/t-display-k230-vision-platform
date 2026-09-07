@@ -226,6 +226,11 @@ bash "${SCRIPT_DIR}/cpu1/verify-boot-contract.sh" \
 	"${BUILD_DIR:?Buildroot did not provide BUILD_DIR}/uboot-2022.10" \
 	"${BINARIES_DIR}/tdvp-cpu1-rtsmart.bin" \
 	"${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest"
+# A newly built AI owner must never be packaged with the former CPU0 camera
+# device tree. This gate runs before genimage, independently of old artifacts.
+bash "${SCRIPT_DIR}/cpu1/vision/verify-pair.sh" \
+	"${BINARIES_DIR}/k230-canmv-rm69a10.dtb" "${HOST_DIR}/bin/fdtget" \
+	"${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest"
 prepare_deterministic_sdk_packaging
 PATH="${TDVP_POST_IMAGE_TMP}:${PATH}" "${TDVP_POST_IMAGE_TMP}/post-image.sh" "$@"
 
@@ -271,6 +276,7 @@ bash "${IMAGE_GUARD}" "${BINARIES_DIR}"
 	printf 'cpu1_runtime_base=0x10000000\n'
 	printf 'cpu1_runtime_size=0x04000000\n'
 	printf 'cpu1_mailbox_physical=0x13ff0000\n'
+	printf 'cpu1_resource_owner=ai-vision\ncpu1_ownership_contract=2\n'
 	printf 'gem_dma_contract=drm_gem_dma_helpers\n'
 	printf 'buildroot_reproducible=y\n'
 	printf 'desktop=labwc\n'

@@ -103,13 +103,21 @@ if [ ! -d "${CPU1_CHECKOUT_DIR}/.git" ]; then
 	# file separately from a partial clone, making first-time CI builds slow.
 	git clone --filter=blob:limit=1048576 --no-checkout "${CPU1_REPOSITORY}" "${CPU1_CHECKOUT_DIR}"
 fi
+require_file "${SCRIPT_DIR}/vision/mpp-source-paths.txt"
+CPU1_MPP_PATHS=()
+while IFS= read -r mpp_path; do
+	mpp_path="${mpp_path%$'\r'}"
+	[[ "${mpp_path}" =~ ^[a-zA-Z0-9_./-]+$ ]] && [[ "${mpp_path}" != *..* ]] \
+		|| fail "invalid MPP source path: ${mpp_path}"
+	CPU1_MPP_PATHS+=("canmv_k230/src/rtsmart/mpp/${mpp_path}")
+done < "${SCRIPT_DIR}/vision/mpp-source-paths.txt"
 if git -C "${CPU1_CHECKOUT_DIR}" sparse-checkout -h >/dev/null 2>&1; then
 	git -C "${CPU1_CHECKOUT_DIR}" sparse-checkout init --no-cone
 	git -C "${CPU1_CHECKOUT_DIR}" sparse-checkout set --no-cone \
 		canmv_k230/Kconfig canmv_k230/Kconfig.canmv canmv_k230/Makefile canmv_k230/configs \
 		canmv_k230/boards/Kconfig canmv_k230/boards/k230_canmv_v3p0 canmv_k230/tools \
 		canmv_k230/src/applications canmv_k230/src/uboot canmv_k230/src/rtsmart/Makefile \
-		canmv_k230/src/rtsmart/Kconfig canmv_k230/src/rtsmart/mpp/Kconfig \
+		canmv_k230/src/rtsmart/Kconfig "${CPU1_MPP_PATHS[@]}" \
 		canmv_k230/src/rtsmart/parse_config canmv_k230/src/rtsmart/rtsmart \
 		canmv_k230/src/opensbi
 else
@@ -136,14 +144,19 @@ else
 			'/canmv_k230/src/uboot/' \
 			'/canmv_k230/src/rtsmart/Makefile' \
 			'/canmv_k230/src/rtsmart/Kconfig' \
-			'/canmv_k230/src/rtsmart/mpp/Kconfig' \
 			'/canmv_k230/src/rtsmart/parse_config' \
 			'/canmv_k230/src/rtsmart/rtsmart/' \
 			'/canmv_k230/src/opensbi/'
+		printf '/%s\n' "${CPU1_MPP_PATHS[@]}"
 	} > "${CPU1_SPARSE_FILE}"
 fi
-git -C "${CPU1_CHECKOUT_DIR}" fetch --depth=1 --filter=blob:limit=1048576 \
-	origin "${CPU1_COMMIT}"
+# A fixed commit already in this dedicated cache needs no origin refresh.
+# Checkout still lazily fetches any missing blobs; do not make every complete
+# cached build depend on an unrelated GitHub connection succeeding.
+if ! git -C "${CPU1_CHECKOUT_DIR}" cat-file -e "${CPU1_COMMIT}^{commit}" 2>/dev/null; then
+	git -C "${CPU1_CHECKOUT_DIR}" fetch --depth=1 --filter=blob:limit=1048576 \
+		origin "${CPU1_COMMIT}"
+fi
 git -C "${CPU1_CHECKOUT_DIR}" checkout --detach --force "${CPU1_COMMIT}"
 git -C "${CPU1_CHECKOUT_DIR}" read-tree -mu HEAD
 
@@ -228,8 +241,8 @@ if ! grep -Fq "tdvp_cpu1_service.c" "${SCONSCRIPT}"; then
 fi
 grep -Fq "tdvp_cpu1_service.c" "${SCONSCRIPT}" || fail "cannot add CPU1 service to RT-Smart SConscript"
 
-# Linux owns board peripherals. Retain the RT kernel/console, but exclude
-# device drivers which would initialize the shared SD, USB, GPU or buses.
+# Clear vendor peripheral defaults. The paired AI/vision staging below adds
+# only its explicit drivers; Linux retains SD, USB, GPU, display and other buses.
 CPU1_RT_CONFIG="${CPU1_SOURCE_DIR}/src/rtsmart/rtsmart/kernel/bsp/maix3/configs/k230_canmv_v3p0_defconfig"
 require_file "${CPU1_RT_CONFIG}"
 sed -E -i \
@@ -256,6 +269,7 @@ for setting in \
 		printf '%s\n' "${setting}" >> .config
 	fi
 done
+bash "${SCRIPT_DIR}/vision/stage-build.sh" prepare "${CPU1_SOURCE_DIR}"
 run_sdk_make .autoconf
 if grep -q '^CONFIG_GEN_SECURITY_IMG=y' .config; then
 	fail "secure CPU1 images require the upstream gmssl signing environment"
@@ -288,10 +302,13 @@ rm -f "${SDK_RTSMART_SRC_DIR}/.parse_config" "${SDK_OPENSBI_SRC_DIR}/.parse_conf
 run_sdk_make -C "${SDK_RTSMART_SRC_DIR}" .parse_config CROSS_COMPILE="${CPU1_CROSS_COMPILE}"
 CPU1_RT_HEADER="${APPLICATION_DIR}/../rtconfig.h"
 require_file "${CPU1_RT_HEADER}"
-if grep -Eq '^#define (RT_USING_(SDIO[01]?|MPP|GNNE|GPIO|I2C[0-4]?|SPI[012]?|WIFI|CANAAN_UART)|ENABLE_CHERRY_USB|ENABLE_CANMV_USB[^[:space:]]*)([[:space:]]|$)' "${CPU1_RT_HEADER}"; then
+if grep -Eq '^#define (RT_USING_(SDIO[01]?|I2C[0-3]|I2C4_SLAVE|SPI[012]?|WIFI|CANAAN_UART)|ENABLE_CHERRY_USB|ENABLE_CANMV_USB[^[:space:]]*)([[:space:]]|$)' "${CPU1_RT_HEADER}"; then
 	fail "RT-Smart configuration still enables Linux-owned peripheral drivers"
 fi
+TDVP_VISION_CROSS_COMPILE="${CPU1_CROSS_COMPILE}" \
+	bash "${SCRIPT_DIR}/vision/stage-build.sh" build "${CPU1_SOURCE_DIR}"
 run_sdk_make -C "${SDK_RTSMART_SRC_DIR}" kernel CROSS_COMPILE="${CPU1_CROSS_COMPILE}"
+bash "${SCRIPT_DIR}/vision/verify-kernel.sh" "${APPLICATION_DIR}/.." "${CPU1_CROSS_COMPILE}"
 # RT-Smart uses the upstream musl toolchain, whereas OpenSBI's Kendryte
 # platform requires the XuanTie Linux toolchain installed by the CI host.
 run_sdk_make -C "${SDK_OPENSBI_SRC_DIR}" all CROSS_COMPILE="${CPU1_OPENSBI_CROSS_COMPILE}"
@@ -319,6 +336,13 @@ install -m 0644 "${CPU1_FIRMWARE}" "${FIRMWARE_OUTPUT}"
 	printf 'firmware_format=opensbi-fw-payload-raw\n'
 	printf 'entry_point=%s\n' "${CPU1_ENTRY}"
 	printf 'mailbox_physical=0x13ff0000\n'
+	printf 'resource_owner=cpu1-ai-vision\n'
+	printf 'ownership_contract=2\n'
+	printf 'mmz_base=0x14000000\nmmz_size=0x08000000\n'
+	printf 'transport_base=0x1c000000\ntransport_size=0x02000000\n'
+	printf 'camera=gc2093-csi2\nai_engines=gnne,ai2d,fft\n'
+	printf 'worker_sha256='
+	sha256sum "${SDK_RTSMART_BUILD_DIR}/tdvp-vision/tdvp-vision-worker.elf" | awk '{print $1}'
 	printf 'firmware_size='
 	stat -c '%s' "${FIRMWARE_OUTPUT}"
 	printf 'firmware_sha256='
