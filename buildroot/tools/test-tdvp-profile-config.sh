@@ -17,21 +17,18 @@ for helper in fail require_line require_profile_config; do
     declare -F "$helper" >/dev/null
 done
 [ "${#required_config[@]}" -gt 0 ]
-[ "${#selected_config[@]}" -gt 0 ]
 
 require_profile_config "$profile" source
-grep -Eq '^[[:space:]]*select BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME$' \
-    "$project/buildroot/k230-sdk-overlay/package/tdvp-camera-isp/Config.in"
-! grep -Fqx 'BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME=y' "$profile"
-# The source config itself must not masquerade as a resolved configuration.
-if (require_profile_config "$profile" resolved) > "$temporary/rejected.log" 2>&1; then
-    echo 'FAIL: unresolved source config accepted as resolved' >&2
-    exit 1
-fi
-grep -Fq 'BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME=y' "$temporary/rejected.log"
-
 cp "$profile" "$temporary/resolved.config"
-printf '%s=y\n' "${selected_config[@]}" >> "$temporary/resolved.config"
+# A profile may have no additional hidden requirements after retiring ISP.
+# Keep this test valid if a future package introduces one again.
+if [ "${#selected_config[@]}" -gt 0 ]; then
+    if (require_profile_config "$profile" resolved) > "$temporary/rejected.log" 2>&1; then
+        echo 'FAIL: unresolved source config accepted as resolved' >&2
+        exit 1
+    fi
+    printf '%s=y\n' "${selected_config[@]}" >> "$temporary/resolved.config"
+fi
 require_profile_config "$temporary/resolved.config" resolved
 if [ "$#" -eq 1 ]; then
     require_profile_config "$1" resolved
@@ -50,12 +47,22 @@ for symbol in "${required_config[@]}" "${selected_config[@]}"; do
     grep -Fq "$symbol=y" "$temporary/rejected.log"
     rejections=$((rejections + 1))
 done
-sed '/^BR2_PACKAGE_TDVP_CAMERA_ISP=y$/d' "$profile" > "$temporary/mutated.config"
+sed '/^BR2_PACKAGE_TDVP_CPU1_VISION=y$/d' "$profile" > "$temporary/mutated.config"
 if (require_profile_config "$temporary/mutated.config" source) > "$temporary/rejected.log" 2>&1; then
-    echo 'FAIL: source profile without the camera package accepted' >&2
+    echo 'FAIL: source profile without the CPU1 bridge accepted' >&2
     exit 1
 fi
-grep -Fq 'BR2_PACKAGE_TDVP_CAMERA_ISP=y' "$temporary/rejected.log"
+grep -Fq 'BR2_PACKAGE_TDVP_CPU1_VISION=y' "$temporary/rejected.log"
+for symbol in BR2_PACKAGE_TDVP_CAMERA_ISP BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME \
+    BR2_PACKAGE_TDVP_KPU_ACCEPTANCE BR2_PACKAGE_VVCAM BR2_PACKAGE_AI2D_KPU \
+    BR2_PACKAGE_LIBMMZ BR2_PACKAGE_LIBNNCASE; do
+    cp "$temporary/resolved.config" "$temporary/mutated.config"
+    printf '%s=y\n' "$symbol" >> "$temporary/mutated.config"
+    if (require_profile_config "$temporary/mutated.config" resolved) > "$temporary/rejected.log" 2>&1; then
+        echo "FAIL: competing Linux owner accepted: $symbol" >&2
+        exit 1
+    fi
+done
 if (require_profile_config "$profile" invalid) > "$temporary/rejected.log" 2>&1; then
     echo 'FAIL: invalid assertion phase accepted' >&2
     exit 1

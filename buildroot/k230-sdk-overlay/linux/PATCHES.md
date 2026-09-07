@@ -272,6 +272,20 @@ supported. Existing GPU/display clock operations and renderer patches are
 unchanged. The candidate bridge separately holds PM/CCF resources before OFFER;
 this patch alone does not switch the production image or initialize AI engines.
 
+## Production CPU1 AI/vision ownership device tree
+
+`0071-tdvp-riscv-dts-cpu1-ai-vision-ownership.patch` appends the paired
+ownership include to the production RM69A10 DTS. It reserves CPU1 MMZ and
+transport, disables Linux GC2093/CSI/ISP/GNNE/AI2D and their dedicated clock
+providers, and wires the real shared-supplier holds to the CPU1 bridge.
+The include is checked byte-for-byte against the reviewed board source.
+The DT regression removes only this final include in a temporary baseline,
+then compares all 273 pre-existing nodes with the actual production candidate.
+The profile now selects `tdvp-cpu1-vision`, not Linux ISP/KPU packages.
+Fresh/reused targets and the actual ext4 image reject retired Linux owners.
+This is paired with contract-2 CPU1 firmware; do not deploy just this DTB.
+VGLite runtime patches are unchanged. A cross-build is not hardware acceptance.
+
 ## Required Checks
 
 ```sh

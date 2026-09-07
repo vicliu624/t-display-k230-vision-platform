@@ -238,6 +238,17 @@ PDM 的共享 gate 受锁保护，其 Linux 独占的小数分频寄存器保留
 未改写。候选桥接驱动另外在 OFFER 前持有 PM／CCF 资源；该补丁本身不切换
 生产镜像，也不代表 AI 引擎初始化或硬件验收完成。
 
+## 生产镜像的 CPU1 AI／视觉资源归属
+
+`0071-tdvp-riscv-dts-cpu1-ai-vision-ownership.patch` 在生产 RM69A10 DTS
+末尾加入成对的资源归属声明，预留 CPU1 MMZ 与传输区，关闭 Linux 的
+GC2093／CSI／ISP／GNNE／AI2D 及其专属时钟 provider，并为桥接驱动关联
+真实共享资源的保持接口。补丁中的 include 与已审查的 board 源文件逐字节比对。
+DT 回归只在临时基线中移除这条末尾 include，再与实际生产候选比较 273 个既有节点。
+产品配置选择 `tdvp-cpu1-vision`，不再选择 Linux ISP／KPU 包；新旧 target
+和最终 ext4 均检查旧所有者没有残留。它必须与 contract-2 CPU1 固件成对部署，
+不能单独替换 DTB。没有修改 VGLite runtime 补丁；交叉编译通过不代表硬件验收。
+
 ## Required Check
 
 ```sh

@@ -6,9 +6,20 @@ source_dir="$project/buildroot/k230-sdk-overlay/board/tdvp/cpu1/vision"
 test_dir="$(mktemp -d)"
 trap 'rm -rf -- "$test_dir"' EXIT
 dts_dir="$kernel/arch/riscv/boot/dts/canaan"
+production=0
+if grep -Fxq '#include "tdvp-cpu1-vision.dtsi"' "$dts_dir/k230-canmv-rm69a10.dts"; then
+    production=1
+    [ "$(grep -Fxc '#include "tdvp-cpu1-vision.dtsi"' "$dts_dir/k230-canmv-rm69a10.dts")" -eq 1 ]
+    cmp "$source_dir/tdvp-cpu1-vision.dtsi" "$dts_dir/tdvp-cpu1-vision.dtsi"
+    # Undo only the ownership include in a TEMPORARY baseline. The candidate
+    # is the actual production DTS, not a substitute constructed by the test.
+    sed '/^#include "tdvp-cpu1-vision.dtsi"$/d' "$dts_dir/k230-canmv-rm69a10.dts" > "$test_dir/baseline-source.dts"
+fi
 for variant in baseline candidate; do
     source="$dts_dir/k230-canmv-rm69a10.dts"
-    if [[ "$variant" == candidate ]]; then
+    if [[ "$production:$variant" == 1:baseline ]]; then
+        source="$test_dir/baseline-source.dts"
+    elif [[ "$production:$variant" == 0:candidate ]]; then
         source="$source_dir/k230-canmv-rm69a10-cpu1-vision.dts"
     fi
     "${CPP:-cpp}" -nostdinc -undef -D__DTS__ -x assembler-with-cpp -P \

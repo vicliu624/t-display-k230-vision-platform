@@ -1,4 +1,4 @@
-# CPU1 AI and vision migration — candidate implementation, not enabled in images
+# CPU1 AI and vision migration — production cutover, hardware acceptance pending
 
 The intended production split is:
 
@@ -18,13 +18,14 @@ sends bounded PCM chunks to CPU1 and receives text. No ASR model is implemented
 or accepted by these changes. See `docs/k230-offline-asr.md` and its Chinese
 counterpart for the revised service boundary and memory constraints.
 
-This directory is an **in-progress migration**. Merely building it does not
-  switch the production image to CPU1 camera ownership. Do not boot the
-  candidate CPU1 firmware with the existing CPU0 camera device tree.
-  `build-rtsmart.sh` now builds the AI/vision firmware through its normal
-  production entry point. Linux profile/bridge packaging has not yet switched;
-  `post-image.sh` and the image verifier reject that mixed pair before it can
-  be delivered. This intermediate revision is intentionally not releasable.
+This directory is an **in-progress migration**. The production firmware builder
+now includes AI/vision; the Linux product profile selects the asynchronous
+bridge and patch 0071 installs the reviewed ownership DT. Linux ISP/KPU
+packages and direct runtime services are retired. Packaging rejects mixed
+firmware/DT pairs and competing Linux owners in both target and final ext4.
+The complete Buildroot/SD image and paired hardware acceptance are still
+pending. Do not deploy an individual kernel, DTB or CPU1 payload from this
+checkpoint on a device running the other half of an older ownership model.
 
 The former `vpl-camera` Linux V4L2 desktop demo is retired: no menu entry or
 launcher is shipped, including in reused Buildroot targets. A replacement demo
@@ -68,7 +69,7 @@ complete the camera ownership migration described below.
   mapping, bus-speed setup or bus registration is latched and blocks MPP.
   The hook requires I2C4 master-only ownership. Its flag defaults off and the
   unselected BSP entry is unchanged. The production firmware builder now opts
-  in together with the other paired sources; the Linux image switch is pending.
+  in together with the other paired sources and the Linux ownership DT.
 - The paired component patch (`0002-rtsmart-defer-vision-components.patch`)
   prevents automatic MPP/GNNE/AI2D initialization before main. MPP is called
   explicitly after GRANT. The candidate now follows MPP with a strong,
@@ -342,8 +343,8 @@ controlled GNNE/AI2D/FFT initializers and asynchronous worker in ROMFS:
 - RT-Smart ELF: `3f1f2ead7d105ab92d788d19836e751b3f51d5b801a3dd9c8b9e95f20b890810`.
 - RT-Smart binary: `c262d2652aacc4b473bf5e795409d93ab7ac63f3f34720109d19dbdf45a44780`.
 
-This does not activate the production profile or deploy a board image; the
-remaining release requirements still apply.
+This earlier candidate build was not a production image or a deployment;
+the production cutover and remaining release requirements are described below.
 
 ## Production firmware build and packaging-pair gate
 
@@ -368,7 +369,7 @@ Linux DTB, its disabled Linux owners, memory reservations, GPIO protection,
 DDR/PLL references and power-domain holds. Both post-image (before genimage)
 and standalone image verification call this gate. CI compares the DT candidate
 with the real preflight firmware manifest, rather than trusting a substitute
-manifest to represent the built payload. Twenty-three mixed/missing-contract
+manifest to represent the built payload. Thirty-one mixed/missing/duplicate-contract
 cases are rejected by the packaging-pair regression.
 
 The first real production-entry raw payload built on Ubuntu 24.04 is 3,560,632
@@ -384,42 +385,63 @@ it builds real firmware twice and still exercises all five RT-Smart/OpenSBI
 failure-propagation cases. This is not a claim of bit-reproducible CPU1 builds;
 upstream build timestamps/paths have not been audited for that property.
 
-The remaining release requirements are:
+## Linux production cutover and validation
 
-1. Enable `tdvp,cpu1-gpio-mask = <0x00200000>` on GPIO0 and
-   `tdvp,cpu1-vision-domains` on the power provider in the ownership device
-   tree. The software guards are implemented, but their physical coexistence
-   behavior has not been tested. Simply disabling Linux CSI/I2C is insufficient.
-2. Enable `tdvp,cpu1-i2c4-clock-sharing` on CMU and retire Linux camera/AI
-   clock providers without gating active CPU1 clocks,
-   preserve Linux display/VGLite clocks, and validate CPU1 power/clock setup
-   before sensor and KPU access. Do not import the full CanMV board initializer:
-   it configures functions outside CPU1's ownership. `rt_hw_i2c_init` is a
-   BOARD initializer: install both deferral patches, hook/header, startup and
-   clock sources, and select `RT_USING_TDVP_CPU1_VISION` together. The hook's
-   semaphore/100 MHz preparation follows GRANT and precedes controller access.
-   The camera helper now prepares its dedicated clocks, but first requires
-   shared domains/DDR/PLLs to be ready. Linux's half now validates BOTH
-   reservations and real GPIO/power/clock suppliers, holds the named resources
-   and drives ownership independently of frame opens. Validate its actual
-   startup timing, PM/CCF holds and fault retention on the paired board image.
-3. Activate the Linux ownership device tree and retire Linux camera, ISP,
-   KPU/AI2D bindings and the CPU0 ISP/KPU acceptance services. The new pair gate
-   already rejects a mixed firmware/DT; complete rootfs/profile checks with
-   that Linux switch rather than weakening the gate to accept the old image.
-4. Package the Linux bridge, boot loading and its `video` udev rule. Curated
-   MPP, ROMFS and raw OpenSBI building are now in the production CPU1 entry;
-   keep the raw entry/20 MiB slot and ownership guards intact.
-5. Validate sensor CSI2 mode/MCLK/reset on hardware, then physical frame bytes
-   through the Linux bridge, slow-reader/close/reopen/error paths, and
-   CPU1+Wayland/VGLite coexistence with rollback prepared.
-6. Complete exclusive CPU1 AI ownership, including KPU/GNNE, AI2D, FFT, their
-   interrupts and AI memory allocations, verified clock/power preparation and
-   error propagation. Remove Linux bindings/direct-runtime acceptance paths.
-   Integrate CPU1 nncase, fixed-model execution, FFT reference checks and typed
-   asynchronous results. Driver registration and a frame test are not AI
-   subsystem acceptance. Shared SRAM/DMA/PLL users must be inventoried before
-   reallocating or resetting them; do not take Linux display/VGLite resources.
-7. Run the production staging/ownership/image checks, build the complete PR
-   image, and perform hardware acceptance. Until then this is not a new
-   validated CPU1-camera image, even if all host tests are green.
+Patch 0071 applies the same ownership include to the actual selected RM69A10
+DTS; `test-tdvp-cpu1-vision-dtb.sh` verifies byte identity and compares a
+temporary pre-ownership baseline with the real production DTS. The Linux
+fragment disables GNNE/AI2D and the legacy sensor driver. The product profile
+removes Linux ISP, KPU/nncase/MMZ selections and the hardware package no longer
+re-selects the retired KPU sample transitively.
+
+The local `tdvp-cpu1-vision` package builds the existing Linux bridge, installs
+its ABI into the SDK staging headers, loads it at boot, and grants group
+`video` access to `/dev/tdvp-vision` through the exact misc-device udev rule.
+No Camera menu entry is added. Shared clocks/power stay under the coordinated
+Linux supplier holds; the bridge is not a second ISP, AI or display driver.
+
+After the additive vendor rootfs copy, post-build retires the explicit old
+ISP/KPU files, services and modules, then regenerates module dependencies
+using Buildroot's host depmod. All paths must resolve inside the build target.
+`verify-rootfs.sh` checks the bridge/module alias, boot loading, access rule
+and video group, and rejects retired owners. `verify-rootfs-image.sh` reads
+the actual ext4 payload and extracts its entire module subtree for those
+checks, catching nested/compressed stale modules independently of modules.dep.
+
+Ubuntu 24.04 validation with networking disabled has passed:
+- Fresh production SDK staging, package registration/reconciliation and real
+  Buildroot Kconfig resolution (74 required-selection negative cases).
+- Production ownership DTB: 273 existing nodes, 28 invalid candidates and four
+  competing clock writers checked, plus paired-firmware manifest refusals.
+- Real Linux Image/modules/DTB cross-build with Linux GNNE/AI2D disabled and
+  the unchanged bridge linked with modpost and W=1.
+- The actual package install recipe, all 17 retired path refusals, cleanup
+  twice on a reused target, and a small ext4 regression carrying the real
+  compiled module. Injecting the old ISP into that ext4 is rejected.
+- Existing renderer stack/session, idle/PAM and desktop image-source tests.
+
+The recorded cross-built artifact hashes are:
+- Linux Image: `725ed5b3d4ba611450413051148025a672b8cf4e7784f17628b0f473a9a44319`.
+- Production RM69A10 DTB: `c41affc9c1970da8d20c7cba7169374674b264bd25ab60de2f5032d774b6ca2e`.
+- Bridge module: `8656614bf499cf0440fec008b4be4f853eed28da671de7d7317d48c67bb9d42c`.
+
+These are component validation artifacts, not a complete SD image, deployment
+or proof of sensor/KPU function. VGLite runtime implementation is unchanged.
+
+## Remaining release requirements
+
+1. Validate the installed GPIO semaphore, power retention and shared CMU/DDR/
+   PLL holds on the paired board, including startup timing and fault retention.
+   Do not turn an ownership fault into a shared-resource reset or hot regrant.
+2. Validate GC2093 CSI2/MCLK/reset and physical frame bytes through the Linux
+   bridge, slow-reader/close/reopen/error paths, and VGLite coexistence, with
+   an atomic paired rollback prepared.
+3. Complete CPU1 nncase/fixed-model execution and typed asynchronous results;
+   check AI memory/SRAM use, interrupt/error behavior and FFT numerical
+   references. Registered drivers and a frame test are not AI subsystem
+   acceptance. No ASR model has been selected or verified.
+4. Update Linux hardware status reporting to describe CPU1 ownership and live
+   service state, not the retired Linux ISP/KPU devices or old pass markers.
+   Do not report an initialized engine as a successful inference.
+5. Build and verify the complete Buildroot/PR SD image, then perform hardware
+   acceptance. Until then this is not a validated replacement image.

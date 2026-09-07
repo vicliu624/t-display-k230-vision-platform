@@ -64,7 +64,8 @@ for active_patch in \
 	0067-tdvp-gpio-cpu1-shared-port-arbitration.patch \
 	0068-tdvp-power-retain-cpu1-vision-domains.patch \
 	0069-tdvp-clock-cpu1-i2c4-arbitration.patch \
-	0070-tdvp-cpu1-runtime-supplier-readiness.patch; do
+	0070-tdvp-cpu1-runtime-supplier-readiness.patch \
+	0071-tdvp-riscv-dts-cpu1-ai-vision-ownership.patch; do
 	cmp -s "${OVERLAY_DIR}/${active_patch}" "${PATCH_DIR}/${active_patch}" || {
 		printf '%s\n' "test-reconcile-k230-sdk-linux-patches: FAIL active patch differs: ${active_patch}" >&2
 		exit 1

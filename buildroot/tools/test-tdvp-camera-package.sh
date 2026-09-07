@@ -13,14 +13,15 @@ actual_dts_hash="$(sha256sum "$overlay/linux/0066-tdvp-riscv-dts-enable-gc2093-m
     sha256sum -c SHA256SUMS
 )
 profile="$overlay/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig"
-grep -Fxq 'BR2_PACKAGE_TDVP_CAMERA_ISP=y' "$profile"
+grep -Fxq '# BR2_PACKAGE_TDVP_CAMERA_ISP is not set' "$profile"
+grep -Fxq 'BR2_PACKAGE_TDVP_CPU1_VISION=y' "$profile"
 grep -Fxq '# BR2_PACKAGE_VVCAM is not set' "$profile"
-grep -Fxq 'BR2_STRIP_EXCLUDE_FILES="isp_media_server"' "$profile"
+! grep -Fq 'BR2_STRIP_EXCLUDE_FILES="isp_media_server"' "$profile"
 grep -Fxq 'DevicePolicy=closed' "$source_dir/tdvp-camera-isp.service"
 ! grep -Eq '^DeviceAllow=.*(/dev/mem|char-)' "$source_dir/tdvp-camera-isp.service"
 grep -Fq '/etc/init.d/S31canaan_isp' "$overlay/board/tdvp/post-build.sh"
-grep -Fq 'verify-camera-rootfs.sh' "$overlay/board/tdvp/post-build.sh"
-grep -Fq 'verify-camera-dtb.sh' "$overlay/board/tdvp/verify-sdcard-image.sh"
+grep -Fq 'cpu1/vision/retire-linux-owners.sh' "$overlay/board/tdvp/post-build.sh"
+grep -Fq 'cpu1/vision/verify-rootfs-image.sh' "$overlay/board/tdvp/verify-sdcard-image.sh"
 # The transitional Linux driver diagnostics are not a desktop preview demo.
 bash "$project/buildroot/tools/test-tdvp-camera-demo-retired.sh"
 "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -O2 \
@@ -42,4 +43,4 @@ for cycle in 1 2; do
     make --no-print-directory -f "$test_dir/Makefile" TOPDIR="$test_dir/top" "$test_dir/build/prepare" >/dev/null
     grep -Fq 'tdvp_gc2093_open' "$test_dir/build/vvcam/src/gc2093.c"
 done
-echo 'TDVP camera package: PASS production prepare hook twice, source hashes and image/service contract'
+echo 'TDVP legacy camera reference: PASS prepare hook/source hashes; production selects CPU1 instead'

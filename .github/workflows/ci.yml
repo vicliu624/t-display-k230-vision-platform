@@ -110,6 +110,9 @@ jobs:
 
       - name: Verify image and collect the release bundle
         run: |
+          bash buildroot/tools/test-tdvp-cpu1-linux-package.sh \
+            "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/target/lib/modules/6.6.36/updates/tdvp_cpu1_vision.ko" \
+            "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/host/sbin/depmod"
           bash buildroot/tools/test-tdvp-uart1-dtb.sh \
             "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/images/k230-canmv-rm69a10.dtb" \
             "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/host/bin"

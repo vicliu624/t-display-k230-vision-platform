@@ -1,0 +1,1 @@
+SUBSYSTEM=="misc", KERNEL=="tdvp-vision", GROUP="video", MODE="0660"

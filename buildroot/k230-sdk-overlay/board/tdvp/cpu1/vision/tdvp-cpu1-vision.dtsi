@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
-/* Candidate only: requires Linux 0067-0070 and the paired CPU1 vision image.
+/* Paired ownership: requires Linux 0067-0070 and the CPU1 contract-2 image.
  * Include AFTER the complete RM69A10 board DTS (including CPU0 GC2093 setup).
  * Do not apply this as a live overlay or boot it with compute-only CPU1.
  */

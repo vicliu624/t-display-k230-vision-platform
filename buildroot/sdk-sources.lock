@@ -52,6 +52,8 @@ cpu1_clock_amp_patch = buildroot/k230-sdk-overlay/linux/0069-tdvp-clock-cpu1-i2c
 cpu1_clock_amp_patch_sha256 = 87b4411d1cff39365bd6b49bfa41906d323a600c7ebb33bf1a012bc7eb8ceb25
 cpu1_supplier_readiness_patch = buildroot/k230-sdk-overlay/linux/0070-tdvp-cpu1-runtime-supplier-readiness.patch
 cpu1_supplier_readiness_patch_sha256 = 2b1fa3f9a19d985d7c14b69bdd194ce6e95976c366595a54ad93bbba71c77ec7
+cpu1_ai_vision_dts_patch = buildroot/k230-sdk-overlay/linux/0071-tdvp-riscv-dts-cpu1-ai-vision-ownership.patch
+cpu1_ai_vision_dts_patch_sha256 = 1963409b27e8c42ee02af37f576c9fbe81f9cfae0821b1b273c4f390e47887fb
 nrf52840_uart1_patch_sha256 = 76aa2e07a908b07e32617a68c061fc8fc37cdbe1f680ebf766fb47578c925ddc
 
 [cpu1_rtsmart]

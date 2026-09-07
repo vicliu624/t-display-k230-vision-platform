@@ -105,13 +105,14 @@ while IFS= read -r -d '' file; do
 done < <(find "${TARGET_DIR}/etc" -type f -print0)
 
 # Vendor rootfs overlay is copied after packages, also on incremental builds.
-# Retire its unsupervised ISP; TDVP owns the scalar runtime and GC2093 modules.
+# Retire CPU0 ISP/KPU owners after that additive copy, including reused targets.
 rm -f \
 	"${TARGET_DIR}/etc/init.d/S31canaan_isp" \
 	"${TARGET_DIR}/etc/init.d/S40network" \
     "${TARGET_DIR}/etc/init.d/S41adb_mtp" \
     "${TARGET_DIR}/etc/init.d/S50telnet"
-bash "$(dirname "$0")/verify-camera-rootfs.sh" "${TARGET_DIR}"
+bash "${SCRIPT_DIR}/cpu1/vision/retire-linux-owners.sh" "${TARGET_DIR}" "${HOST_DIR}/sbin/depmod"
+bash "${SCRIPT_DIR}/cpu1/vision/verify-rootfs.sh" "${TARGET_DIR}"
 
 # The product image uses OpenSSH for recovery. The root password comes from
 # BR2_TARGET_GENERIC_ROOT_PASSWD, and the final target writes the matching

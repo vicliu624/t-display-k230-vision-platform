@@ -57,8 +57,7 @@ require_absent_content() {
 }
 
 packages=(
-	tdvp-camera-isp
-	tdvp-camera-isp-runtime
+	tdvp-cpu1-vision
 	gtk-layer-shell
 	labwc
 	swaylock
@@ -87,7 +86,6 @@ packages=(
 	tdvp-dejavu-fonts
 	tdvp-display-smoke
 	tdvp-keyboard-layout
-	tdvp-kpu-acceptance
 	tdvp-labwc-desktop
 	tdvp-wayland-acceptance
 	tdvp-wayland-tools
@@ -96,7 +94,9 @@ packages=(
 )
 
 required_config=(
-	BR2_PACKAGE_TDVP_CAMERA_ISP
+	BR2_PACKAGE_TDVP_CPU1_VISION
+	BR2_PACKAGE_KMOD
+	BR2_PACKAGE_KMOD_TOOLS
 	BR2_PACKAGE_HOST_DTC
 	BR2_INIT_SYSTEMD
 	BR2_PACKAGE_SYSTEMD
@@ -161,7 +161,6 @@ required_config=(
 	BR2_PACKAGE_TDVP_GREETD
 	BR2_PACKAGE_TDVP_GTKGREET
 	BR2_PACKAGE_TDVP_GREETER
-	BR2_PACKAGE_TDVP_KPU_ACCEPTANCE
 	BR2_PACKAGE_VICLIU_POCKET_LINUX_HARDWARE
 	BR2_PACKAGE_TDVP_DISPLAY_SMOKE
 	BR2_PACKAGE_TDVP_KEYBOARD_LAYOUT
@@ -175,7 +174,6 @@ required_config=(
 # they need not be written in the source defconfig, but must be enabled in the
 # resolved build configuration. Do not weaken the final image requirement.
 selected_config=(
-	BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME
 )
 
 require_profile_config() {
@@ -185,6 +183,11 @@ require_profile_config() {
 
 	for symbol in "${required_config[@]}"; do
 		require_line "${config_file}" "${symbol}=y"
+	done
+	for symbol in BR2_PACKAGE_TDVP_CAMERA_ISP BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME \
+		BR2_PACKAGE_TDVP_KPU_ACCEPTANCE BR2_PACKAGE_VVCAM BR2_PACKAGE_AI2D_KPU \
+		BR2_PACKAGE_LIBMMZ BR2_PACKAGE_LIBNNCASE; do
+		! grep -Fqx "${symbol}=y" "${config_file}" || fail "retired Linux AI/ISP selection: ${symbol}=y"
 	done
 	case "${phase}" in
 		source) ;;
@@ -357,7 +360,8 @@ require_file "${STAGED_OVERLAY}/linux/0067-tdvp-gpio-cpu1-shared-port-arbitratio
 require_file "${STAGED_OVERLAY}/linux/0068-tdvp-power-retain-cpu1-vision-domains.patch"
 require_file "${STAGED_OVERLAY}/linux/0069-tdvp-clock-cpu1-i2c4-arbitration.patch"
 require_file "${STAGED_OVERLAY}/linux/0070-tdvp-cpu1-runtime-supplier-readiness.patch"
-require_line "${STAGED_OVERLAY}/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" 'BR2_PACKAGE_TDVP_CAMERA_ISP=y'
+require_file "${STAGED_OVERLAY}/linux/0071-tdvp-riscv-dts-cpu1-ai-vision-ownership.patch"
+require_line "${STAGED_OVERLAY}/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" 'BR2_PACKAGE_TDVP_CPU1_VISION=y'
 require_line "${STAGED_OVERLAY}/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" '# BR2_PACKAGE_VVCAM is not set'
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c"
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c" 'INIT_APP_EXPORT(tdvp_cpu1_service_init);'
@@ -955,6 +959,8 @@ require_content "${IMAGES}/tdvp-image-manifest" 'display_manager=greetd'
 require_content "${IMAGES}/tdvp-image-manifest" 'greeter=gtkgreet'
 require_content "${IMAGES}/tdvp-image-manifest" 'session=tdvp-labwc-session'
 require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_execution_model=linux-cpu0+rtsmart-cpu1'
+require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_resource_owner=ai-vision'
+require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_ownership_contract=2'
 require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_mailbox_physical=0x13ff0000'
 require_content "${IMAGES}/tdvp-image-manifest" 'linux_physical_cpu=0'
 require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_firmware_format=opensbi-fw-payload-raw'

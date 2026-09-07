@@ -1,0 +1,17 @@
+/etc/init.d/S31canaan_isp
+/usr/bin/isp_media_server
+/usr/lib/libvvcam.so
+/usr/libexec/tdvp-gc2093-chip-id
+/usr/libexec/tdvp-camera-device
+/usr/libexec/tdvp-camera-capture-check
+/usr/libexec/tdvp-camera-modules
+/usr/lib/udev/rules.d/70-tdvp-camera.rules
+/usr/lib/systemd/system/tdvp-camera-modules.service
+/usr/lib/systemd/system/tdvp-camera-isp.service
+/etc/systemd/system/multi-user.target.wants/tdvp-camera-isp.service
+/etc/systemd/system/multi-user.target.wants/tdvp-camera-modules.service
+/usr/local/bin/tdvp-kpu-smoke
+/usr/lib/systemd/system/tdvp-kpu-acceptance.service
+/etc/systemd/system/multi-user.target.wants/tdvp-kpu-acceptance.service
+/etc/tdvp/kpu
+/root/app/ai2d_kpu

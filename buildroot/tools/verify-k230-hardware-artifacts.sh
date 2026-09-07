@@ -39,10 +39,13 @@ reject_buildroot_selection() {
 }
 
 require_file "$OUTPUT_DIR/.config"
-require_buildroot_selection BR2_PACKAGE_TDVP_CAMERA_ISP
-require_buildroot_selection BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME
-reject_buildroot_selection BR2_PACKAGE_VVCAM
-bash "$(dirname "$0")/../k230-sdk-overlay/board/tdvp/verify-camera-rootfs.sh" "$TARGET_DIR"
+require_buildroot_selection BR2_PACKAGE_TDVP_CPU1_VISION
+for symbol in BR2_PACKAGE_TDVP_CAMERA_ISP BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME \
+	BR2_PACKAGE_TDVP_KPU_ACCEPTANCE BR2_PACKAGE_VVCAM BR2_PACKAGE_AI2D_KPU \
+	BR2_PACKAGE_LIBMMZ BR2_PACKAGE_LIBNNCASE; do
+	reject_buildroot_selection "$symbol"
+done
+bash "$(dirname "$0")/../k230-sdk-overlay/board/tdvp/cpu1/vision/verify-rootfs.sh" "$TARGET_DIR"
 for symbol in \
 	BR2_INIT_SYSTEMD \
 	BR2_PACKAGE_SYSTEMD \
@@ -85,7 +88,7 @@ for symbol in \
 	BR2_PACKAGE_FOOT \
 	BR2_PACKAGE_WVKBD \
 	BR2_PACKAGE_TDVP_LABWC_DESKTOP \
-	BR2_PACKAGE_TDVP_KPU_ACCEPTANCE \
+	BR2_PACKAGE_KMOD_TOOLS \
 	BR2_PACKAGE_VICLIU_POCKET_LINUX_HARDWARE \
 	BR2_PACKAGE_TDVP_DISPLAY_SMOKE \
 	BR2_PACKAGE_TDVP_KEYBOARD_LAYOUT \
@@ -103,36 +106,17 @@ kernel_config="$(find "$OUTPUT_DIR/build" -maxdepth 2 -path '*/.config' -path '*
 }
 
 for option in CONFIG_K230_GNNE_DRIVER CONFIG_K230_AI2D_DRIVER; do
-	grep -Fqx "${option}=y" "$kernel_config" || {
-		printf 'TDVP K230 preflight: %s is not enabled in %s\n' "$option" "$kernel_config" >&2
+	if grep -Eq "^${option}=[ym]$" "$kernel_config"; then
+		printf 'TDVP K230 preflight: competing Linux driver %s remains in %s\n' "$option" "$kernel_config" >&2
 		exit 1
-	}
+	fi
 done
 
-for asset in ai2d_kpu.elf test.kmodel ai2d_input.bin input.bin result.bin; do
-	require_file "$TARGET_DIR/root/app/ai2d_kpu/$asset"
-done
-[ -x "$TARGET_DIR/root/app/ai2d_kpu/ai2d_kpu.elf" ] || {
-	printf 'TDVP K230 preflight: ai2d_kpu.elf is not executable\n' >&2
-	exit 1
-}
-
-require_file "$TARGET_DIR/usr/local/bin/tdvp-kpu-smoke"
-[ -x "$TARGET_DIR/usr/local/bin/tdvp-kpu-smoke" ] || {
-	printf '%s\n' 'TDVP K230 preflight: tdvp-kpu-smoke is not executable' >&2
-	exit 1
-}
 require_file "$TARGET_DIR/usr/local/bin/vpl-hwctl"
 [ -x "$TARGET_DIR/usr/local/bin/vpl-hwctl" ] || {
 	printf '%s\n' 'TDVP K230 preflight: vpl-hwctl is not executable' >&2
 	exit 1
 }
-require_file "$TARGET_DIR/usr/lib/systemd/system/tdvp-kpu-acceptance.service"
-[ -L "$TARGET_DIR/etc/systemd/system/multi-user.target.wants/tdvp-kpu-acceptance.service" ] || {
-	printf '%s\n' 'TDVP K230 preflight: KPU acceptance service is not enabled' >&2
-	exit 1
-}
-
 require_file "$TARGET_DIR/usr/bin/wvkbd-mobintl"
 [ -x "$TARGET_DIR/usr/bin/wvkbd-mobintl" ] || {
 	printf '%s\n' 'TDVP K230 preflight: wvkbd-mobintl is not executable' >&2
@@ -174,32 +158,22 @@ dtb="$IMAGE_DIR/k230-canmv-rm69a10.dtb"
 	printf 'TDVP K230 preflight: RM69A10 board DTB is missing: %s\n' "$dtb" >&2
 	exit 1
 }
-bash "$(dirname "$0")/../k230-sdk-overlay/board/tdvp/verify-camera-dtb.sh" "$dtb" "$OUTPUT_DIR/host/bin/fdtget"
-for compatible in k230-gnne k230-ai2d; do
-	strings "$dtb" | grep -Fxq "$compatible" || {
-		printf 'TDVP K230 preflight: %s is missing from %s\n' "$compatible" "$dtb" >&2
-		exit 1
-	}
-done
+bash "$(dirname "$0")/../k230-sdk-overlay/board/tdvp/cpu1/vision/verify-pair.sh" \
+	"$dtb" "$OUTPUT_DIR/host/bin/fdtget" "$IMAGE_DIR/tdvp-cpu1-rtsmart.manifest"
 
 {
 	printf 'TDVP K230 hardware build preflight\n'
 	printf 'product_profile=systemd-seatd-labwc-standard-desktop\n'
 	printf 'kernel_config=%s\n' "$kernel_config"
 	printf 'dtb=%s\n' "$dtb"
-	printf 'CONFIG_K230_GNNE_DRIVER=y\n'
-	printf 'CONFIG_K230_AI2D_DRIVER=y\n'
-	for asset in ai2d_kpu.elf test.kmodel ai2d_input.bin input.bin result.bin; do
-		printf 'asset_sha256[%s]=' "$asset"
-		sha256sum "$TARGET_DIR/root/app/ai2d_kpu/$asset" | awk '{print $1}'
-	done
-	printf 'kpu_smoke=/usr/local/bin/tdvp-kpu-smoke\n'
-	printf 'kpu_service=tdvp-kpu-acceptance.service\n'
+	printf 'ai_owner=cpu1-rtsmart\n'
+	printf 'camera_owner=cpu1-rtsmart\n'
+	printf 'linux_bridge=/dev/tdvp-vision\n'
 	printf 'hardware_status_tool=/usr/local/bin/vpl-hwctl\n'
 	printf 'onscreen_keyboard=/usr/bin/wvkbd-mobintl\n'
 	printf 'panel=wf-panel-pi\n'
 	printf 'background=pcmanfm\n'
-	printf 'runtime_acceptance=requires_target_device_nodes_and_kmodel_execution\n'
+	printf 'runtime_acceptance=requires_paired_board_frames_and_CPU1_model_execution\n'
 } > "$REPORT"
 
 printf 'TDVP K230 preflight passed: %s\n' "$REPORT"

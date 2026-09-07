@@ -28,6 +28,12 @@ while IFS= read -r field; do
         echo "FAIL missing manifest field accepted: $field" >&2; exit 1
     fi
     rejections=$((rejections+1))
+    cp "$test_dir/manifest" "$test_dir/mutated.manifest"
+    printf '%s=conflicting\n' "${field%%=*}" >> "$test_dir/mutated.manifest"
+    if bash "$guard" "$candidate" "$fdtget" "$test_dir/mutated.manifest" > "$test_dir/rejected.log" 2>&1; then
+        echo "FAIL conflicting duplicate manifest key accepted: $field" >&2; exit 1
+    fi
+    rejections=$((rejections+1))
 done < "$test_dir/manifest"
 for mutation in \
     's /soc/gnne@80400000 status okay' \
