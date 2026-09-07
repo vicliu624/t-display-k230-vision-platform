@@ -10,6 +10,7 @@ _Static_assert(sizeof(i2c_buses) / sizeof(i2c_buses[0]) == 1,
                "CPU1 vision must not register Linux I2C controllers");
 
 extern int tdvp_cpu1_i2c4_clock_prepare(void);
+extern int tdvp_cpu1_vision_ownership_status(void);
 static int tdvp_i2c4_attempted;
 static int tdvp_i2c4_status = -RT_EBUSY;
 
@@ -18,12 +19,14 @@ int tdvp_cpu1_i2c4_init_status(void)
     return tdvp_i2c4_status;
 }
 
-static int tdvp_cpu1_i2c4_board_init(void)
+int tdvp_cpu1_i2c4_board_init(void)
 {
     struct chip_i2c_bus *bus = &i2c_buses[0];
     int result;
 
     if (tdvp_i2c4_attempted) return tdvp_i2c4_status;
+    result = tdvp_cpu1_vision_ownership_status();
+    if (result) return result; /* No attempt, mapping or register access. */
     tdvp_i2c4_attempted = 1;
     if ((uintptr_t)bus->i2c.regs != 0x91409000UL || bus->slave) {
         result = -RT_EINVAL;
@@ -44,7 +47,7 @@ static int tdvp_cpu1_i2c4_board_init(void)
     }
     result = rt_i2c_bus_device_register(&bus->parent, bus->device_name);
 done:
-    /* BOARD init failures are not fatal to RT-Thread itself. MPP must check
+    /* Explicit init failures are not fatal to RT-Thread itself. MPP checks
      * this latched status before touching media hardware. No retry/reset or
      * shared clock rollback after a partially completed initialization.
      */

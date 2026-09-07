@@ -3,20 +3,17 @@
  */
 #include <rtthread.h>
 
-#ifdef RT_USING_MPP
-extern int tdvp_cpu1_vision_init_status(void);
-extern int tdvp_cpu1_vision_launch(void);
+#if defined(RT_USING_MPP) && !defined(RT_USING_TDVP_CPU1_VISION)
+#error "TDVP media requires the paired vision ownership startup gate"
+#endif
+#ifdef RT_USING_TDVP_CPU1_VISION
+extern int tdvp_cpu1_vision_startup(void);
 #endif
 
 int main(void)
 {
-#ifdef RT_USING_MPP
-    /* MPP readiness is distinct from mailbox readiness. Never imply that
-     * registering the media drivers is already successful frame capture.
-     */
-    int status = tdvp_cpu1_vision_init_status();
-    rt_kprintf("TDVP CPU1 vision driver status: %d\n", status);
-    return status ? status : tdvp_cpu1_vision_launch();
+#ifdef RT_USING_TDVP_CPU1_VISION
+    return tdvp_cpu1_vision_startup();
 #else
     return 0;
 #endif

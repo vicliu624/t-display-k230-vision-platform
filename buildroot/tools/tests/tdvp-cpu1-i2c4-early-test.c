@@ -12,6 +12,7 @@
 static uint32_t cmu[32], before[32], pll[4], semaphore;
 static unsigned int maps, unmaps, locks, releases, clock_writes, pll_reads;
 static int scenario, held, irq_off, initialized, registered, speed_calls;
+static int ownership;
 static uint64_t timer;
 struct i2c_regs { uint32_t ic_enable_status; };
 static struct i2c_regs controller;
@@ -124,6 +125,7 @@ static int rt_i2c_bus_device_register(struct rt_i2c_bus_device *bus, const char 
     return scenario == 19 ? -124 : 0;
 }
 int rt_kprintf(const char *format, ...) { (void)format; return 0; }
+int tdvp_cpu1_vision_ownership_status(void) { return ownership ? 0 : -RT_EBUSY; }
 #include "tdvp_cpu1_i2c4_board.h"
 #include "production-i2c-entry.h"
 
@@ -166,10 +168,16 @@ int main(int argc, char **argv)
     if (scenario == 17) expected = -123;
     if (scenario == 19) expected = -124;
     assert(tdvp_cpu1_i2c4_init_status() == -RT_EBUSY);
-    assert(rt_hw_i2c_init() == expected);
+    assert(rt_hw_i2c_init() == 0); /* BOARD entry must not touch ANY hardware. */
+    assert(!maps && !clock_writes && !initialized && !registered);
+    assert(tdvp_cpu1_i2c4_board_init() == -RT_EBUSY);
+    assert(!maps && !clock_writes && !initialized && !registered);
+    ownership = 1;
+    assert(tdvp_cpu1_i2c4_board_init() == expected);
     assert(tdvp_cpu1_i2c4_init_status() == expected);
     unsigned int saved_maps = maps, saved_writes = clock_writes, saved_locks = locks;
-    assert(rt_hw_i2c_init() == expected); /* no repeated map/register/reset */
+    assert(rt_hw_i2c_init() == 0);
+    assert(tdvp_cpu1_i2c4_board_init() == expected); /* no repeated map/register/reset */
     assert(maps == saved_maps && clock_writes == saved_writes && locks == saved_locks);
     assert(!held && !irq_off);
     assert(unmaps == (scenario == 24 || scenario == 25 ? 0U : (scenario >= 1 && scenario <= 3 ? (unsigned)scenario - 1 : 3U)));

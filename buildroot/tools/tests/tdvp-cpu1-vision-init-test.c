@@ -7,6 +7,8 @@ extern int mpp_init(void);
 extern int tdvp_cpu1_vision_init_status(void);
 static int fail_at;
 static int calls;
+static int ownership;
+int tdvp_cpu1_vision_ownership_status(void) { return ownership ? 0 : -7; }
 
 static int step(int expected)
 {
@@ -38,6 +40,8 @@ int main(int argc, char **argv)
     assert(fail_at >= 0 && fail_at <= 10);
     assert(tdvp_cpu1_vision_init_status() != 0);
     const int expected = fail_at ? -100 - fail_at : 0;
+    assert(mpp_init() == -7 && !calls); /* No ownership: no initialization attempt. */
+    ownership = 1;
     assert(mpp_init() == expected);
     assert(tdvp_cpu1_vision_init_status() == expected);
     assert(calls == (fail_at >= 9 ? 0 : (fail_at ? fail_at : 8)));

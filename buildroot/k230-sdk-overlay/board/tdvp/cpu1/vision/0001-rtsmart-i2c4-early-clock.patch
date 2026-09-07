@@ -1,5 +1,5 @@
 From: TDVP <tdvp@localhost>
-Subject: [PATCH] rtsmart: gate camera I2C4 board init on early clocks
+Subject: [PATCH] rtsmart: defer camera I2C4 until Linux grants ownership
 
 Opt in only for the paired CPU1 vision firmware and Linux ownership DT.
 The board hook and clock implementation are installed from vision sources.
@@ -18,7 +18,7 @@ diff --git a/Kconfig b/Kconfig
 +    depends on !RT_USING_I2C4_SLAVE
 +    default n
 +    help
-+      Prepare the shared I2C4 clock before BOARD-init register access.
++      Defer I2C4 to the ownership gate; prepare clocks before register access.
 +      Never enable with the Linux-owned camera device tree.
 +
  config CHIP_K230
@@ -38,7 +38,7 @@ diff --git a/drivers/interdrv/i2c/drv_i2c.c b/drivers/interdrv/i2c/drv_i2c.c
  int rt_hw_i2c_init(void)
  {
 +#ifdef RT_USING_TDVP_CPU1_VISION
-+    return tdvp_cpu1_i2c4_board_init();
++    return RT_EOK; /* The paired startup gate calls the hook after GRANT. */
 +#else
      int i;
  

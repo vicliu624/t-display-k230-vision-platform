@@ -2,16 +2,16 @@
 
 ## Scope
 
-This document defines the offline English speech-to-text foundation for the
-T-Display K230 V1.3 image. The intended recognizer is a streaming Zipformer
-transducer. Audio capture, feature extraction, encoder execution, decoding,
-and text delivery remain local to the device.
+This document describes planned offline speech-to-text, not an implemented
+image capability. Streaming Zipformer is an English-model candidate, subject
+to conversion, accuracy, memory and real-time validation. No release model
+has been selected.
 
-The K230 AI acceptance workload installed by the image is a prerequisite, not
-an ASR implementation. It proves that the selected Linux kernel, device tree,
-GNNE and AI2D character devices, nncase K230 runtime, and a pinned KModel can
-execute together on the physical device. A Zipformer model is accepted only
-after it passes its own conversion and real-time measurements.
+The architecture confirmed on 2026-09-07 gives CPU1/RT-Smart exclusive AI
+subsystem ownership: KPU, AI2D, FFT, AI memory and inference services. Linux
+uses asynchronous requests/results, with no production direct GNNE/AI2D
+execution path. Audio capture/playback initially remains on Linux. Earlier
+Linux KPU acceptance cannot establish CPU1 inference or ASR readiness.
 
 ## Hardware Contract
 
@@ -19,12 +19,13 @@ The ASR service requires all of the following:
 
 | Capability | Required evidence |
 | --- | --- |
-| KPU kernel interface | `/dev/k230-gnne` and `/dev/k230-ai2d` exist, and `vpl-hwctl status` reports `kpu_kernel_ready=1`. |
-| KPU runtime | The pinned nncase K230 workload exists and `kpu_reference_runtime_available=1`. |
-| KPU execution | `tdvp-kpu-acceptance.service` completes successfully and `kpu_acceptance_state=passed`. |
+| AI ownership | Matched Linux DT, CPU1 firmware and startup handoff; Linux does not bind AI accelerators; CPU1 owns their registers, interrupts and AI working memory. |
+| KPU runtime | Pinned CPU1 nncase runtime matches the model compiler; the Linux client receives explicit capability and fault reports. |
+| KPU execution | CPU1 executes a fixed model, checks outputs and returns results across cores; device registration alone is not inference. |
+| FFT | CPU1 hardware FFT/IFFT output matches a numerical reference; acoustic features additionally validate INT16 scaling and error. |
 | Audio capture | ALSA exposes a capture PCM device that records 16 kHz, mono, signed 16-bit little-endian PCM. |
 | Microphone route | The V1.3 ASoC graph, microphone power, clocking, and gain path have passed physical capture validation. |
-| CPU topology | CPU0 runs Linux. CPU1 is usable only after a firmware lifecycle and CPU0-to-CPU1 transport have physical acceptance; it is not assumed by the first ASR execution path. |
+| CPU topology | CPU0 runs Linux; CPU1 runs preprocessing, CPU model partitions, KPU calls, decoding and postprocessing. Audio/result transport needs physical acceptance. |
 
 The target service reports unavailable prerequisites directly. It does not
 substitute a CPU-only recognizer for a requested KPU session.
@@ -32,62 +33,49 @@ substitute a CPU-only recognizer for a requested KPU session.
 ## Execution Architecture
 
 ```text
-ALSA PCM capture (16 kHz, mono, S16_LE)
+CPU0/Linux ALSA PCM capture (16 kHz, mono, S16_LE)
         |
         v
-bounded capture ring
+bounded capture queue -> cross-core PCM -> CPU1 session
         |
-        +--> WebRTC VAD and optional WebRTC noise suppression
+        +--> CPU1 VAD and optional noise suppression (implementation unverified)
         |
         v
-log-Mel feature extractor
+CPU1 log-Mel features (hardware FFT use requires validation)
         |
         v
 Zipformer encoder chunks
         |
         +--> KPU KModel partitions through nncase
-        +--> CPU0 for unsupported or stateful operators
+        +--> CPU1 for CPU partitions and stateful computation
         |
         v
-RNN-T joiner and streaming decoder on CPU0
+RNN-T joiner and streaming decoder on CPU1
         |
         v
-partial and final UTF-8 transcript events
+cross-core partial/final UTF-8 transcript events -> Linux applications
 ```
 
-The decoder owns beam state and endpointing. KPU input and output buffers are
-owned by the inference worker. Audio callbacks never load models, allocate
-unbounded memory, invoke the decoder, or wait on KPU completion.
+The CPU1 decoder owns beam state and endpointing. The CPU1 inference service
+owns KPU buffers. Linux audio callbacks never load models, allocate unbounded
+memory, invoke the decoder or wait on KPU. Vision and speech share a bounded
+KPU scheduler; do not assume arbitrary inference preemption or permit vision
+to block audio chunks indefinitely.
 
 ## Software Boundaries
 
-The ASR subsystem is a standalone C++ component:
+These are logical boundaries, not existing implementation paths or APIs:
 
 ```text
-user-space/vicliu-pocket-linux-asr/
-├── include/vpl/asr/
-│   ├── recognizer.hpp
-│   ├── session.hpp
-│   ├── transcript.hpp
-│   └── availability.hpp
-├── src/
-│   ├── audio/alsa_capture.cpp
-│   ├── audio/ring_buffer.cpp
-│   ├── preprocess/noise_suppression.cpp
-│   ├── preprocess/vad.cpp
-│   ├── feature/log_mel.cpp
-│   ├── inference/kmodel_encoder.cpp
-│   ├── inference/nncase_runtime.cpp
-│   ├── decoder/transducer_decoder.cpp
-│   ├── session/recognizer_session.cpp
-│   └── service/asr_daemon.cpp
-└── tests/
+Linux: application API, permissions, ALSA, PCM queue, cross-core client, text events
+CPU1: preprocessing, features, model, nncase/KPU, decoding, endpointing, scheduler, AI memory
+Protocol: version, session ID, sequence, format, timestamp, pressure, cancel, faults, results
 ```
 
-`recognizer.hpp` is the product-facing API. Robot, terminal, and other
-applications receive transcript events from the service API; they do not
-include nncase headers or open ALSA devices. The service controls one active
-microphone capture owner and accepts bounded recognition sessions.
+The Linux client provides the product API. Applications receive transcripts
+without nncase headers or direct ALSA access. The Linux service owns microphone
+capture; the CPU1 AI service owns recognition computation. The C++ interface
+below remains a draft:
 
 ```cpp
 namespace vpl::asr {
@@ -119,10 +107,10 @@ versioned under a model manifest.
 
 ## KPU Partitioning
 
-The K230 SDK includes an nncase 2.11.0 K230 runtime and a verified example
-that constructs an AI2D schedule, loads a KModel through
-`nncase::runtime::interpreter`, then invokes its entry function. This proves
-the runtime integration route used by the image.
+Pin and validate the RT-Smart nncase runtime/compiler/model combination anew.
+An earlier Linux runtime version or workload is not CPU1 migration evidence.
+Tests must cover AI2D scheduling, KModel loading, actual KPU execution and
+output comparisons.
 
 It does not establish that a Zipformer graph, every convolution, every linear
 layer, attention/cache operation, or transducer joiner is accepted by that
@@ -137,8 +125,8 @@ compiler version. The encoder is therefore partitioned through evidence:
 
 Conv, matrix, linear, and activation operations are candidates for KPU
 partitioning. Dynamic beam search, token selection, endpoint state, and
-variable-length stream control remain CPU work unless a measured model
-partition proves otherwise.
+variable-length stream control remain CPU1 work unless a measured model
+partition proves otherwise. Never restore CPU0 direct KPU access.
 
 ## Model Conversion
 
@@ -190,20 +178,25 @@ The first product gate is:
 
 | Metric | Gate |
 | --- | --- |
-| Memory | less than 500 MiB resident memory for capture, model, and decoder together |
+| Memory | Validated separate CPU1 AI/MMZ, RT-Smart heap and Linux audio-queue budgets; record peak usage with vision active, without borrowing Linux CMA or unreserved memory |
 | Real-time factor | less than 1.0 for continuous English speech |
 | Partial-result latency | less than 500 ms after an audio chunk becomes available |
 | Correctness | deterministic target output comparison plus a versioned English WER set |
 
-No model is included in a release merely because it compiles.
+No model is included merely because it compiles. The vision candidate MMZ is
+128 MiB, shared with camera buffers, not a guaranteed ASR model capacity. The
+old 500 MiB ASR ceiling does not apply. Recalculate the layout before model
+selection and update Linux DT, CPU1 firmware and image guards together.
 
 ## Delivery Sequence
 
-1. Complete KPU and microphone physical acceptance.
+1. Complete CPU1 AI ownership, KPU/AI2D/FFT and cross-core physical acceptance,
+   plus Linux microphone capture acceptance.
 2. Validate the streaming Zipformer model and WER on PC Linux with a CPU
    reference implementation.
 3. Export and quantify fixed streaming encoder chunks.
-4. Convert and verify KPU partitions on K230.
+4. Execute and verify KPU partitions and CPU1 decoding on K230.
 5. Integrate the bounded C++ service and API with Robot.
-6. Measure uninterrupted 10-second and long-running voice sessions, then
-   publish model and performance manifests with the image.
+6. Measure uninterrupted 10-second and long-running sessions, including
+   vision/VGLite coexistence, latency, accuracy and memory, then publish the
+   model and performance manifests with the image.

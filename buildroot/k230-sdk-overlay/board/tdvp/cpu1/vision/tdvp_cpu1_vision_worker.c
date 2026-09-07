@@ -7,6 +7,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tdvp_cpu1_transport.h"
 #include "tdvp_cpu1_vision_layout.h"
+#include "tdvp_vision_owner_io.h"
 #include "mpi_sys_api.h"
 #include <errno.h>
 #include <stdio.h>
@@ -41,15 +42,39 @@ int main(void)
     struct tdvp_cpu1_capture capture = {0};
     struct tdvp_cpu1_transport transport;
     volatile struct tdvp_vision_control *control;
+    volatile struct tdvp_owner_control *ownership;
+    struct tdvp_owner_record owner_record;
     void *slots;
     uint64_t epoch = monotonic_ms(), peer_heartbeat = 0, peer_seen = 0;
+    uint64_t owner_heartbeat, owner_seen, owner_cookie, owner_linux_cookie;
     unsigned int failures = 0;
-    int terminal_fault = 0;
+    int terminal_fault = 0, stable_owner = 0;
 
     if (!epoch) {
         fputs("TDVP CPU1 vision: monotonic clock unavailable\n", stderr);
         return 1;
     }
+    ownership = kd_mpi_sys_mmap(TDVP_OWNER_BASE, TDVP_OWNER_WINDOW);
+    if (ownership && ownership != MAP_FAILED) {
+        for (unsigned int attempt = 0; attempt < 50; ++attempt) {
+            stable_owner = tdvp_owner_snapshot(&ownership->cpu1_side, &owner_record);
+            if (stable_owner) break;
+            idle_tick(); /* An in-flight kernel publication is not a failed boot. */
+        }
+    }
+    if (!ownership || ownership == MAP_FAILED ||
+        !stable_owner ||
+        owner_record.magic != TDVP_OWNER_MAGIC || owner_record.version != TDVP_OWNER_VERSION ||
+        owner_record.bytes != sizeof(owner_record) || owner_record.contract != TDVP_OWNER_CONTRACT ||
+        owner_record.state != TDVP_OWNER_READY || owner_record.fault ||
+        !owner_record.cookie || !owner_record.peer_cookie || !owner_record.heartbeat) {
+        fputs("TDVP CPU1 vision: kernel has not completed ownership-gated initialization\n", stderr);
+        return 1;
+    }
+    owner_cookie = owner_record.cookie;
+    owner_linux_cookie = owner_record.peer_cookie;
+    owner_heartbeat = owner_record.heartbeat;
+    owner_seen = epoch;
     control = kd_mpi_sys_mmap(TDVP_VISION_CONTROL_BASE, TDVP_VISION_CONTROL_SIZE);
     slots = kd_mpi_sys_mmap(TDVP_VISION_SHARED_BASE, TDVP_VISION_SLOT_COUNT * TDVP_VISION_SLOT_BYTES);
     if (!control || control == MAP_FAILED || !slots || slots == MAP_FAILED) {
@@ -78,6 +103,20 @@ int main(void)
                     now - peer_seen < PEER_TIMEOUT_MS;
         if (!now)
             terminal_fault = -EIO;
+        if (tdvp_owner_snapshot(&ownership->cpu1_side, &owner_record)) {
+            if (owner_record.magic != TDVP_OWNER_MAGIC || owner_record.version != TDVP_OWNER_VERSION ||
+                owner_record.bytes != sizeof(owner_record) || owner_record.contract != TDVP_OWNER_CONTRACT ||
+                owner_record.state != TDVP_OWNER_READY || owner_record.fault ||
+                owner_record.cookie != owner_cookie || owner_record.peer_cookie != owner_linux_cookie ||
+                owner_record.heartbeat < owner_heartbeat)
+                terminal_fault = -EPIPE;
+            else if (owner_record.heartbeat > owner_heartbeat) {
+                owner_heartbeat = owner_record.heartbeat;
+                owner_seen = now;
+            }
+        }
+        if (now < owner_seen || now - owner_seen >= TDVP_OWNER_PEER_MS)
+            terminal_fault = -ETIMEDOUT;
 
         if ((!requested || terminal_fault) && capture.running) {
             tdvp_cpu1_transport_state(&transport, TDVP_VISION_STATE_STOPPING, terminal_fault);

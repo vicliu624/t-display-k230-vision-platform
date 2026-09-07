@@ -26,6 +26,7 @@ extern int vicap_init(void);
 extern int tdvp_cpu1_vision_pins_init(void);
 extern int tdvp_cpu1_i2c4_init_status(void);
 extern int tdvp_cpu1_camera_clock_prepare(void);
+extern int tdvp_cpu1_vision_ownership_status(void);
 
 static int vision_status = -RT_EBUSY;
 static int attempted;
@@ -35,7 +36,7 @@ int tdvp_cpu1_vision_init_status(void)
     return vision_status;
 }
 
-/* Called once by the pinned SDK's component initializer. Failed partial
+/* Called explicitly after the Linux ownership grant, never at COMPONENT init. Failed partial
  * initialization is latched; the service must report failure, never retry
  * by re-registering already initialized media devices in place.
  */
@@ -46,6 +47,9 @@ int mpp_init(void)
 
     if (attempted)
         return vision_status;
+    result = tdvp_cpu1_vision_ownership_status();
+    if (result)
+        return result; /* Premature callers cannot touch hardware or consume the attempt. */
     attempted = 1;
     if ((result = tdvp_cpu1_i2c4_init_status()) != 0)
         goto failed;

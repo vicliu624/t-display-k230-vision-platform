@@ -1,11 +1,22 @@
-# CPU1 vision migration — candidate implementation, not enabled in images
+# CPU1 AI and vision migration — candidate implementation, not enabled in images
 
 The intended production split is:
 
-- CPU1: GC2093/CSI2, ISP/capture, private visual buffers, AI preprocessing,
-  KPU inference and postprocessing.
+- CPU1: the AI subsystem (KPU/GNNE, AI2D, FFT, AI working memory and interrupt/
+  driver ownership), GC2093/CSI2, ISP/capture, private visual buffers,
+  preprocessing, inference, CPU model partitions and postprocessing.
 - CPU0: Linux, applications, Wayland/VGLite, display, networking and presentation
   of asynchronous visual results.
+
+The complete AI ownership requirement was confirmed on 2026-09-07. Do not
+leave a second Linux AI driver/runtime owner or treat a camera-only firmware
+as its completion. Dedicated AI resources belong to CPU1; shared system
+PLLs, power controllers and DMA infrastructure need explicit allocation and
+coordination, not wholesale CPU1 reset/init. VGLite/display remain on CPU0.
+Audio capture/playback initially remains Linux-owned; a future ASR client
+sends bounded PCM chunks to CPU1 and receives text. No ASR model is implemented
+or accepted by these changes. See `docs/k230-offline-asr.md` and its Chinese
+counterpart for the revised service boundary and memory constraints.
 
 This directory is an **in-progress migration**. Merely building it does not
   switch the production image to CPU1 camera ownership. Do not boot the
@@ -45,20 +56,38 @@ complete the camera ownership migration described below.
   CMU register writes with hardware semaphore 0, retain the shared LS APB
   parent and reject Linux-owned declarations for I2C4 fields.
 - The paired RT-Smart BOARD hook (`0001-rtsmart-i2c4-early-clock.patch`)
-  prepares I2C4's exact 100 MHz functional clock before controller access,
+  defers all I2C4 access until the explicit ownership-gated startup. The hook
+  then prepares I2C4's exact 100 MHz functional clock before controller access,
   using hardware semaphore 0 and an independently mapped CMU. It observes,
   but never retunes, PLL0; it preserves the shared APB divider and all other
   peripherals. Unsupported PLL state, timeout, failed readback, controller
   mapping, bus-speed setup or bus registration is latched and blocks MPP.
   The hook requires I2C4 master-only ownership. Its flag defaults off and the
   unselected BSP entry is unchanged. The production build does not yet opt in.
+- The paired component patch (`0002-rtsmart-defer-vision-components.patch`)
+  prevents automatic MPP/GNNE/AI2D initialization before main. MPP is called
+  explicitly after GRANT. GNNE/AI2D automatic registration remains removed
+  until the dedicated AI clock/power/error-handling path is integrated; this
+  candidate does NOT yet execute a KPU model or initialize FFT.
+- A shared, versioned ownership policy and RT-Smart startup adapter. Linux
+  publishes OFFER only after preparing/retaining resources, CPU1 requires an
+  advancing heartbeat before writing HELLO, Linux validates the matching
+  live CPU1 cookie before GRANT, and CPU1 initializes only on that grant.
+  The Linux policy is tested but its kernel resource-preparation adapter is
+  still missing: the current bridge cannot issue a production grant.
+  Separate 128-byte records, sequence-checked snapshots and fences prevent
+  mixed publications; boot/peer timeouts and identity changes latch faults.
+  Startup is attempted once. Failure does not reset shared resources or free
+  possibly DMA-owned buffers. The worker also monitors the kernel ownership
+  heartbeat and stops on lost/invalid ownership.
 - Camera clock setup before MPP registration: explicitly prepare ISP CFG/core/
   HCLK, CSI2 pixel and sensor MCLK1 fields; verify clock writes and preserve
   CSI0/CSI1 and MCLK0/MCLK2 fields. Require powered DISP/ISP, DDR P1 access and
   the pinned board's PLL rates before writing. No shared PLL, power, DDR,
   I2C, GPU/VO clock or reset writes. The 23.76 MHz MCLK matches the selected
   GC2093 CSI2 mode table. This guard is not the missing Linux ownership-ready
-  handshake: firmware startup still must wait for that handshake before MPP.
+  handshake: the new startup adapter supplies CPU1's wait, but production
+  activation still requires Linux's validated resource-preparation/grant path.
 - A compiled candidate device-tree wrapper and ownership include, with the
   new MMZ/transport reservations and GPIO/power policies. Linux camera/AI
   devices and dedicated clock providers are disabled. This wrapper is NOT
@@ -74,6 +103,7 @@ complete the camera ownership migration described below.
 | `0x1c000000–0x1e000000` | New 32 MiB transport reservation |
 | `0x1c000000–0x1d800000` | Three 8 MiB frame slots within transport |
 | `0x1dff0000–0x1e000000` | Transport control window, final 64 KiB |
+| `0x1dff1000–0x1dff2000` | Ownership window inside control; first 256 bytes are the two owner records |
 | `0x20000000–0x40000000` | Existing 512 MiB Linux CMA, unchanged |
 
 All new regions must be reserved `no-map` in Linux before CPU1 starts. CPU1
@@ -83,6 +113,14 @@ Linux releases that sequence only after copying it. Three outstanding records
 cause new frames to be dropped. No timeout reclaims an unread slot. Invalid
 acknowledgements or sequence overflow fail closed. Epoch changes are not a
 license for in-place CPU1 reset while DMA or Linux readers are active.
+
+The ownership window is not the legacy user-writable ping mailbox. CPU1 maps
+it noncached but does not write until observing a live OFFER. Existing or
+malicious arbitrary physical writers are not authenticated by this protocol;
+matched image/DT reservations and kernel-only access remain mandatory. Linux
+must retain shared suppliers after any GRANT, including on timeout or module
+teardown, until a real quiesce/reboot policy permits release. The current
+candidate bridge's old remove/open lifecycle is not sufficient for this.
 
 The initial Linux read record is a 64-byte `tdvp_vision_frame_header` followed
 by packed NV12, exactly 3,110,400 payload bytes at the initial resolution.
@@ -103,6 +141,7 @@ bash buildroot/tools/test-tdvp-cpu1-gpio-amp.sh
 bash buildroot/tools/test-tdvp-cpu1-power-amp.sh /path/to/pristine/pinned/linux
 bash buildroot/tools/test-tdvp-cpu1-clock-amp.sh /path/to/pinned/linux
 bash buildroot/tools/test-tdvp-cpu1-i2c4-early.sh /path/to/pinned/maix3
+bash buildroot/tools/test-tdvp-cpu1-ownership.sh /path/to/pinned/maix3
 bash buildroot/tools/test-tdvp-cpu1-camera-clock.sh /path/to/pinned/maix3 /path/to/pinned/mpp
 bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh /path/to/fully/patched/linux
 bash buildroot/tools/test-tdvp-cpu1-capture.sh /path/to/pinned/canmv_k230/src/rtsmart/mpp
@@ -112,9 +151,18 @@ The capture test compiles against the actual pinned MPI headers with mocked
 operations: 25 lifecycle/failure cases. The transport test covers packed row
 copying, backpressure, leases, stale epochs, invalid releases and overflow.
 These tests do not prove physical cache coherency, camera operation or FPS.
+The ownership test executes the common policy and actual RT-Smart startup,
+including 12 startup scenarios: absent/stale/invalid offers, live startup,
+peer loss, each initialization/launch failure, grant loss during MPP and
+mapping failure. It patches actual pinned component sources with zero fuzz,
+compiles them and checks that automatic MPP/AI calls are absent while
+unselected source bodies remain unchanged. These tests do not prepare real
+Linux resources, authenticate a mismatched image, or prove hardware behavior.
 The early-I2C test applies the actual vision patch with zero fuzz to a temporary
 copy of the pinned BSP, extracts its real BOARD entry and executes it with the
-production clock helper and hook. Twenty-seven cases cover mapping, PLL state,
+production clock helper and hook. All scenarios first require BOARD init and
+an unauthorized explicit call to perform zero hardware accesses. Twenty-seven
+cases then cover mapping, PLL state,
 exact divider selection, write/readback failure, semaphore timeout/timer wrap,
 controller initialization failure and repeat-call latching. Five illegal I2C
 ownership configurations fail compilation. A read-only board PLL/CMU snapshot
@@ -187,6 +235,20 @@ and no enabled Linux composite clock may write camera CMU registers.
 
 ## Required before production activation
 
+The ownership-gated candidate also passed the real Ubuntu 24.04 cross-link
+with the updated heartbeat-monitoring worker embedded in ROMFS:
+`rtthread.elf` SHA-256
+`797569e6805ddfb19d3737ed7d8590c13449be8334cd6ab71b06c59d70bb5057`,
+`rtthread.bin` SHA-256
+`fe5bae87cbc1e8b9c04f39aa01b52ce80171e65064b5c20bc98f86ac012a99b1`,
+worker SHA-256
+`7803cb5ae3a38dc4988694c71bc86341c07b979779fc0bb85c03b76b13a4f398`.
+The kernel includes the explicit startup gate and no automatic AI initializer.
+This is build evidence only: no Linux grant adapter, model inference, FFT
+execution, complete image build or board deployment is implied.
+
+The remaining release requirements are:
+
 1. Enable `tdvp,cpu1-gpio-mask = <0x00200000>` on GPIO0 and
    `tdvp,cpu1-vision-domains` on the power provider in the ownership device
    tree. The software guards are implemented, but their physical coexistence
@@ -196,13 +258,14 @@ and no enabled Linux composite clock may write camera CMU registers.
    preserve Linux display/VGLite clocks, and validate CPU1 power/clock setup
    before sensor and KPU access. Do not import the full CanMV board initializer:
    it configures functions outside CPU1's ownership. `rt_hw_i2c_init` is a
-   BOARD initializer and immediately touches I2C registers: install the matched
-   hook/header/clock source and select `RT_USING_TDVP_CPU1_VISION` together.
-   Its semaphore/100 MHz preparation precedes controller access, not MPP.
+   BOARD initializer: install both deferral patches, hook/header, startup and
+   clock sources, and select `RT_USING_TDVP_CPU1_VISION` together. The hook's
+   semaphore/100 MHz preparation follows GRANT and precedes controller access.
    The camera helper now prepares its dedicated clocks, but first requires
-   shared domains/DDR/PLLs to be ready. Add a Linux ownership-ready handshake
-   and defer MPP until it succeeds; CPU1 must not race Linux power setup or
-   treat an already-powered peripheral as proof of exclusive ownership.
+   shared domains/DDR/PLLs to be ready. Implement Linux's half of the ownership
+   adapter: verify BOTH reservations and actual GPIO/power/clock suppliers,
+   retain them, then drive the existing policy independently of frame opens.
+   CPU1's deferred startup alone cannot establish Linux resource readiness.
 3. Atomically add Linux MMZ/transport reservations and retire Linux camera,
    ISP, KPU/AI2D bindings and the CPU0 ISP service. Add an ownership gate that
    rejects mixed firmware/DT/profile combinations and checks GPIO protection.
@@ -212,8 +275,13 @@ and no enabled Linux composite clock may write camera CMU registers.
 5. Validate sensor CSI2 mode/MCLK/reset on hardware, then physical frame bytes
    through the Linux bridge, slow-reader/close/reopen/error paths, and
    CPU1+Wayland/VGLite coexistence with rollback prepared.
-6. Integrate the CPU1 AI2D/nncase/KPU model path and typed result delivery;
-   driver registration and a frame transport test are not KPU inference.
+6. Complete exclusive CPU1 AI ownership, including KPU/GNNE, AI2D, FFT, their
+   interrupts and AI memory allocations, verified clock/power preparation and
+   error propagation. Remove Linux bindings/direct-runtime acceptance paths.
+   Integrate CPU1 nncase, fixed-model execution, FFT reference checks and typed
+   asynchronous results. Driver registration and a frame test are not AI
+   subsystem acceptance. Shared SRAM/DMA/PLL users must be inventoried before
+   reallocating or resetting them; do not take Linux display/VGLite resources.
 7. Run the production staging/ownership/image checks, build the complete PR
    image, and perform hardware acceptance. Until then this is not a new
    validated CPU1-camera image, even if all host tests are green.
