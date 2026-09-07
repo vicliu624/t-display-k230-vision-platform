@@ -138,10 +138,10 @@ profile 所有权、电源及独立 acceptance。无后台自动 probe、无电�
 实机候选程序返回 transport/driver/runtime/available=1，enabled=0，state=off，
 acceptance=unverified；随后部署到状态服务。未生成 RF acceptance pass 标记。
 
-## 摄像头：明确未通过
+## 摄像头：芯片识别已通过，帧采集与镜像集成未通过
 
-用户确认原配 GC2093 及排线已连接。只有 `/dev/video0`，其 name 为 `mvx`；
-无 `/dev/media*`。当前 DTB 没有 GC2093 配置、I2C4 disabled，镜像默认 sensor
+用户确认原配 GC2093 及排线已连接。初次检查只有 `/dev/video0`，其 name 为 `mvx`；
+无 `/dev/media*`。烧录镜像的 DTB 没有 GC2093 配置、I2C4 disabled，默认 sensor
 仍为 OV5647。VVCAM 模块和 ISP runtime 文件虽存在，但没有形成采集链路。
 
 另确认 SDK 的两个 ISP server 二进制均含 RVV 指令，例如
@@ -156,9 +156,49 @@ ownership、内存与应用桥方案，不能通过添加 V4L2 节点掩盖这�
 Git blob 一致。它与当前 sensor 回调表不兼容：新头文件插入四个 flip 回调，
 但 API version 未递增。已新增隔离的旧 ABI 注册适配层，其九个回调槽位和浮点
 参数传递在 Ubuntu 24.04 与真实 CPU0 上均通过模拟传感器测试。
-这使“不迁移 CPU1、继续 Linux 采集”的路线可以继续验证，但**尚未替换设备
-ISP、改相机 DTB、启动采集或纳入镜像**。详见
+这使“不迁移 CPU1、继续 Linux 采集”的路线可以继续验证。该阶段只完成 ABI
+测试，没有替换设备 ISP、改相机 DTB、启动采集或纳入镜像。详见
 [CPU0 camera ISP integration work](../user-space/tdvp-camera-isp/README.md)。
+
+### 后续实机进展：GC2093 返回 0x2093
+
+新增固定 I2C4 的访问层，校验 adapter 的物理 `of_node`，只访问 `0x37`，
+不扫描其他总线、不使用 `I2C_SLAVE_FORCE`。九个成功/失败路径的回归在
+Ubuntu 24.04 和真实 CPU0 均通过；完整插件动态加载、API version 导出、
+旧 ABI 注册及 GC2093 模式枚举也通过，没有在此测试中配置传感器。
+
+独立候选 DTB 保留触摸 I2C0、扩展坞/键盘 I2C1，将物理 I2C4 固定为 adapter 4，
+启用 CSI2、GPIO7/8 I2C、GPIO13 MCLK1 和 GPIO21 reset。实际 DTB 比对在解析
+phandle 后确认原有 268 个节点除明确列出的相机属性外保持一致。
+
+第一版单节点 composite 时钟在实机错误地报告 594 MHz；发现后卸载模块、关闭
+门控，没有继续芯片或采集测试。原因是 SDK mux 的 `determine_rate` 优先于
+divider 的 `round_rate`。第二版将 mux/gate 和 divider 分开，未修改共用时钟
+驱动或 PLL。MIPI 模块新增启用前/后的频率检查，错误频率在启用前以 `-ERANGE`
+拒绝的路径也经过实机验证。
+
+最终候选在设备上两次读取成功：
+
+```text
+GC2093 chip ID: PASS controller=91409000 bus=4 address=0x37 id=0x2093
+sensor MCLK: 23760000 Hz
+```
+
+GPIO21 对应 gpio-533，由 reset consumer 持有并输出高电平。仅以 pinmux 的
+UNCLAIMED 判断 GPIO 是否工作会误判；GPIO ownership 与 I2C 应答都已核对。
+候选 DTB SHA256 为 `2d273d6f9871f000922db3c8ab723d6ae48db40b42c156411c92dc85c6ac4ce2`。
+所有五个 VVCAM 模块已交叉编译，但实机仅加载 MIPI 模块用于时钟/复位，未加载
+其余 ISP/VB/video 模块，未启动 ISP server 或采集。
+
+两次诊断启动均自动把 SD 卡的启动 DTB 恢复为原 UART1 修复版
+`f9a8a0934bf3b0b5e86e36675f32ff7ad36113cdd9520d23fb14cb19f25e733e`。
+当前内核运行候选 DT，下一次重启回到原 DT。测试结束卸载 MIPI，时钟
+prepare/enable 计数均回到 0、物理 mux gate 关闭，未安装正式相机服务或验收标记。
+CPU1 再验收通过：`467/467`，heartbeat `15897→16377`；greetd、触摸和键盘状态正常。
+原始日志：`.tmp/device-validation/camera-chip-id-20260907.log`。
+
+结论仍是：**摄像头硬件识别通过，不等于 ISP 帧采集或新镜像集成完成**。
+下一步须核对旧 ISP 的内核事件 ABI、VB/CMA 与 CPU1 预留内存的边界，再开始采集。
 
 ## 主机验证与回退
 

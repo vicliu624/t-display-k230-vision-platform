@@ -1,0 +1,117 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] MIPI: verify a managed sensor clock before reset
+
+For the isolated camera candidate; not enabled by the production image.
+Based on pinned SDK 5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7.
+
+diff --git a/mipi/vvcam_mipi_driver.c b/mipi/vvcam_mipi_driver.c
+index ec084a2..32d88f0 100644
+--- a/mipi/vvcam_mipi_driver.c
++++ b/mipi/vvcam_mipi_driver.c
+@@ -52,6 +52,7 @@
+  *****************************************************************************/
+ 
+ #include <linux/module.h>
++#include <linux/clk.h>
+ #include <linux/mod_devicetable.h>
+ #include <linux/platform_device.h>
+ #include <linux/miscdevice.h>
+@@ -252,18 +253,24 @@ static irqreturn_t vvcam_mipi_irq_handler(int irq, void *mipi_dev) {
+     return IRQ_HANDLED;
+ }
+ 
++static void vvcam_sensor_clk_disable(void *clock)
++{
++    clk_disable_unprepare(clock);
++}
++
+ static int vvcam_mipi_probe(struct platform_device *pdev)
+ {
+     int ret = 0;
+     struct vvcam_mipi_dev *mipi_dev;
+     struct resource *res;
+     char *miscdev_name;
+-    int lenp = 0;
+-    const unsigned int *id_p;
++    struct clk *sensor_clk;
++    unsigned int sensor_rate;
+     unsigned int id;
+ 
+-    id_p = of_get_property(pdev->dev.of_node, "id", &lenp);
+-    id = htonl(*id_p);
++    ret = of_property_read_u32(pdev->dev.of_node, "id", &id);
++    if (ret || id > 2)
++        return dev_err_probe(&pdev->dev, -EINVAL, "invalid CSI id\n");
+     dev_info(&pdev->dev, "start probe %u", id);
+ 
+     mipi_dev = devm_kzalloc(&pdev->dev,
+@@ -303,17 +310,46 @@ static int vvcam_mipi_probe(struct platform_device *pdev)
+         dev_err(&pdev->dev, "can't get mipi sensor reset\n");
+     }
+ 
+-    mipi_dev->reset_gpio = devm_gpiod_get(&pdev->dev, "reset", GPIOD_OUT_HIGH);
++    /* Optional for other boards; TDVP supplies its CCF-managed MCLK1. */
++    sensor_clk = devm_clk_get_optional(&pdev->dev, "sensor");
++    if (IS_ERR(sensor_clk))
++        return dev_err_probe(&pdev->dev, PTR_ERR(sensor_clk),
++                             "cannot get sensor clock\n");
++    if (sensor_clk) {
++        ret = of_property_read_u32(pdev->dev.of_node, "assigned-clock-rates",
++                                   &sensor_rate);
++        if (ret || sensor_rate < 6000000 || sensor_rate > 27000000)
++            return dev_err_probe(&pdev->dev, -EINVAL, "invalid sensor clock rate\n");
++        ret = clk_set_rate(sensor_clk, sensor_rate);
++        if (ret)
++            return dev_err_probe(&pdev->dev, ret, "cannot set sensor clock rate\n");
++        if (clk_get_rate(sensor_clk) != sensor_rate)
++            return dev_err_probe(&pdev->dev, -ERANGE,
++                                 "sensor clock mismatch before enable: %lu != %u\n",
++                                 clk_get_rate(sensor_clk), sensor_rate);
++        ret = clk_prepare_enable(sensor_clk);
++        if (ret)
++            return ret;
++        ret = devm_add_action_or_reset(&pdev->dev, vvcam_sensor_clk_disable, sensor_clk);
++        if (ret)
++            return ret;
++        if (clk_get_rate(sensor_clk) != sensor_rate)
++            return dev_err_probe(&pdev->dev, -ERANGE,
++                                 "sensor clock mismatch after enable: %lu != %u\n",
++                                 clk_get_rate(sensor_clk), sensor_rate);
++        dev_info(&pdev->dev, "verified sensor clock: %lu Hz\n", clk_get_rate(sensor_clk));
++    }
++
++    mipi_dev->reset_gpio = devm_gpiod_get_optional(&pdev->dev, "reset", GPIOD_OUT_HIGH);
+     if (IS_ERR(mipi_dev->reset_gpio)) {
+-		printk("failed to acquire reset gpio\n");
+-		// return PTR_ERR(lt9611->reset_gpio);
+-	}else {
+-        gpiod_direction_output(mipi_dev->reset_gpio, true);//
+-        mdelay(100);
++        return dev_err_probe(&pdev->dev, PTR_ERR(mipi_dev->reset_gpio),
++                             "cannot acquire sensor reset\n");
++    } else if (mipi_dev->reset_gpio) {
++        msleep(100);
+         gpiod_set_value_cansleep(mipi_dev->reset_gpio, false);
+-        mdelay(100);
++        msleep(100);
+         gpiod_set_value_cansleep(mipi_dev->reset_gpio, true);
+-        printk("reset gpio init successwwwwwwjx \n");
++        msleep(10);
+ 
+     }
+ 
+@@ -327,8 +363,12 @@ static int vvcam_mipi_probe(struct platform_device *pdev)
+     mipi_dev->id = id;
+ 
+     // vvcam_mipi_default_cfg(mipi_dev);
+-    csi_device_init();
+-    vi_device_init();
++    ret = csi_device_init();
++    if (ret)
++        return ret;
++    ret = vi_device_init();
++    if (ret)
++        return ret;
+ 
+     miscdev_name = devm_kzalloc(&pdev->dev, 16, GFP_KERNEL);
+     if (!miscdev_name)
