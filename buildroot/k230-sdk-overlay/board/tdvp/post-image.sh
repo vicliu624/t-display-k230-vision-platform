@@ -225,7 +225,8 @@ build_cpu1_firmware
 bash "${SCRIPT_DIR}/cpu1/verify-boot-contract.sh" \
 	"${BUILD_DIR:?Buildroot did not provide BUILD_DIR}/uboot-2022.10" \
 	"${BINARIES_DIR}/tdvp-cpu1-rtsmart.bin" \
-	"${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest"
+	"${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest" \
+	"${SDK_STAGE_DIR}/../buildroot-overlay/boot/uboot/u-boot-2022.10-overlay"
 # A newly built AI owner must never be packaged with the former CPU0 camera
 # device tree. This gate runs before genimage, independently of old artifacts.
 bash "${SCRIPT_DIR}/cpu1/vision/verify-pair.sh" \

@@ -56,10 +56,14 @@ TDVP boot decompressor: DMA/SRAM handoff refused
 - `test-tdvp-boot-decompressor.sh` 提取实际生产函数体与寄存器结构进行编译，
   模拟 MMIO/时间/DMA 配置；10 个场景覆盖正常、延迟、分别卡住的通道、两种
   映射读回失败、CRC 错误、解压超时和计时回绕，并断言停止/读回发生在释放前。
-- `test-tdvp-cpu1-boot-contract.sh` 通过有效配对和 13 个拒绝回归。
+- `test-tdvp-cpu1-boot-contract.sh` 覆盖有效配对和 16 个拒绝回归。
   新检查对比实际 U-Boot 构建目录的源码，并要求实际 `u-boot.bin` 与
   `spl/u-boot-spl.bin` 含有交接保护的失败分支文本；不会只接受 overlay 已放入。
   测试里的替代字节仅检查拒绝逻辑，不能证明固件已经编译。
+  测试还复制生产 SDK 目录布局，并执行从 `post-image.sh` 提取的真实调用：
+  SDK 会排除 `*-overlay`，因此同步后的板级脚本不能从自身相对路径寻找
+  U-Boot overlay。打包入口明确传入 SDK staged overlay 作为第四个参数；
+  缺失参考、参考变化、构建源码变化或二进制缺少保护仍必须失败。
 - 2026-09-08，LAN Ubuntu 24.04 容器在禁用网络、独立复制的 U-Boot 构建目录中
   完成真实 `make all`。实际 SPL/U-Boot 与现有 CPU1 原始 payload 一起通过更新的
   boot contract 检查。原 `a57e99c` SDK 输出与完整候选镜像未被替换。
@@ -71,6 +75,14 @@ TDVP boot decompressor: DMA/SRAM handoff refused
 
 这些是构建证据，不是替换卡镜像，也不是板上启动成功的记录。其他 vendor 文件
 仍有既存编译警告；没有以放宽测试的方式把它们标为已解决。
+
+随后完整 SDK 构建在 `post-image` 校验处发现上述参考路径问题。核对项目 overlay、
+SDK staged overlay、实际 U-Boot 构建源码三者 SHA-256 均为
+`0081e8dbed71f8707178bd2e3b6af61c62bd915cdb5ab3c310375ea63dd93d6f`；
+并不是实际 U-Boot 源码同步失败。明确传入参考目录后，真实完整构建产生的
+SPL/U-Boot 与带 startup trace 的 CPU1 payload 通过同一校验器。SDK 布局测试、
+16 个拒绝回归、解压器 10 场景、背光、patch reconciliation、VGLite lock 和
+46 个 Linux patch 结构校验也通过；这仍不代替完整镜像打包和板上验收。
 
 ## 镜像版本不能混淆
 

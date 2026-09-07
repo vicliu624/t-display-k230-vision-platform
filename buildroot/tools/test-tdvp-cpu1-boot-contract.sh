@@ -3,17 +3,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-VERIFY="${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/verify-boot-contract.sh"
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TEMP_DIR}"' EXIT
-UBOOT="${TEMP_DIR}/uboot"
-FIRMWARE="${TEMP_DIR}/fw_payload.bin"
-MANIFEST="${TEMP_DIR}/manifest"
+# Reproduce production sync: board hooks are copied to output/buildroot-*,
+# while *-overlay sources remain ONLY in sdk/buildroot-overlay. A test that
+# executes the verifier in the project tree masks this SDK layout boundary.
+SDK="${TEMP_DIR}/sdk with spaces"
+SDK_STAGE_DIR="${SDK}/output"
+SYNC_BOARD="${SDK_STAGE_DIR}/buildroot-2025.02.1/board/tdvp"
+BUILD_DIR="${SDK_STAGE_DIR}/profile/build"
+BINARIES_DIR="${SDK_STAGE_DIR}/profile/images"
+OVERLAY="${SDK}/buildroot-overlay/boot/uboot/u-boot-2022.10-overlay"
+VERIFY="${SYNC_BOARD}/cpu1/verify-boot-contract.sh"
+UBOOT="${BUILD_DIR}/uboot-2022.10"
+FIRMWARE="${BINARIES_DIR}/tdvp-cpu1-rtsmart.bin"
+MANIFEST="${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest"
+mkdir -p "${SYNC_BOARD}/cpu1" "${BINARIES_DIR}" "${OVERLAY}/arch/riscv/cpu/k230"
+cp "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/verify-boot-contract.sh" "${VERIFY}"
 mkdir -p "${UBOOT}/board/canaan/common"
 HEADER="${UBOOT}/board/canaan/common/sdk_autoconf.h"
 UNZIP="${PROJECT_DIR}/buildroot/k230-sdk-overlay/boot/uboot/u-boot-2022.10-overlay/arch/riscv/cpu/k230/unzip.c"
 mkdir -p "${UBOOT}/arch/riscv/cpu/k230" "${UBOOT}/spl"
 cp "${UNZIP}" "${UBOOT}/arch/riscv/cpu/k230/unzip.c"
+cp "${UNZIP}" "${OVERLAY}/arch/riscv/cpu/k230/unzip.c"
 # Synthetic marker files only exercise packaging refusals. The separate real
 # SPL/U-Boot cross-build must establish that these are linked into boot code.
 printf '%s\n' 'TDVP boot decompressor: DMA/SRAM handoff refused' > "${UBOOT}/u-boot.bin"
@@ -36,7 +48,7 @@ fixture() {
 
 reject() {
 	local expected="$1"
-	if bash "${VERIFY}" "${UBOOT}" "${FIRMWARE}" "${MANIFEST}" > "${TEMP_DIR}/log" 2>&1; then
+	if bash "${VERIFY}" "${UBOOT}" "${FIRMWARE}" "${MANIFEST}" "${OVERLAY}" > "${TEMP_DIR}/log" 2>&1; then
 		printf 'test-tdvp-cpu1-boot-contract: FAIL accepted %s\n' "${expected}" >&2
 		exit 1
 	fi
@@ -47,7 +59,18 @@ reject() {
 }
 
 fixture
-bash "${VERIFY}" "${UBOOT}" "${FIRMWARE}" "${MANIFEST}"
+bash "${VERIFY}" "${UBOOT}" "${FIRMWARE}" "${MANIFEST}" "${OVERLAY}"
+# Execute the actual production invocation, not a test-side reconstruction
+# of its fourth argument. No firmware build or image packaging is executed.
+post_image_guard="$(awk '
+	/^bash "\$\{SCRIPT_DIR\}\/cpu1\/verify-boot-contract.sh"/ { copying = 1 }
+	copying { print; if ($0 !~ /\\$/) exit }
+' "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-image.sh")"
+[ -n "${post_image_guard}" ]
+[ ! -e "${SDK_STAGE_DIR}/buildroot-2025.02.1/boot/uboot/u-boot-2022.10-overlay" ]
+SCRIPT_DIR="${SYNC_BOARD}" SDK_STAGE_DIR="${SDK_STAGE_DIR}" \
+	BUILD_DIR="${BUILD_DIR}" BINARIES_DIR="${BINARIES_DIR}" \
+	bash -eu -c "${post_image_guard}"
 printf '#define CONFIG_LINUX_RUN_CORE_ID 1\n' > "${HEADER}"
 reject 'U-Boot must execute on CPU0'
 fixture
@@ -82,5 +105,16 @@ cp "${UBOOT}/spl/u-boot-spl.bin" "${UBOOT}/u-boot.bin"
 printf 'old unguarded SPL\n' > "${UBOOT}/spl/u-boot-spl.bin"
 reject 'built spl/u-boot-spl.bin lacks the DMA/SRAM handoff guard'
 cp "${UBOOT}/u-boot.bin" "${UBOOT}/spl/u-boot-spl.bin"
-bash "${VERIFY}" "${UBOOT}" "${FIRMWARE}" "${MANIFEST}"
-printf '%s\n' 'test-tdvp-cpu1-boot-contract: PASS valid payload and 13 rejected regressions'
+mv "${OVERLAY}/arch/riscv/cpu/k230/unzip.c" "${OVERLAY}/arch/riscv/cpu/k230/unzip.saved"
+reject 'missing staged U-Boot decompressor reference'
+mv "${OVERLAY}/arch/riscv/cpu/k230/unzip.saved" "${OVERLAY}/arch/riscv/cpu/k230/unzip.c"
+printf '\n/* changed reference */\n' >> "${OVERLAY}/arch/riscv/cpu/k230/unzip.c"
+reject 'built U-Boot decompressor differs'
+cp "${UNZIP}" "${OVERLAY}/arch/riscv/cpu/k230/unzip.c"
+if bash "${VERIFY}" "${UBOOT}" "${FIRMWARE}" "${MANIFEST}" > "${TEMP_DIR}/log" 2>&1; then
+	printf '%s\n' 'test-tdvp-cpu1-boot-contract: FAIL accepted missing explicit overlay argument' >&2
+	exit 1
+fi
+grep -Fq '<staged-uboot-overlay-dir>' "${TEMP_DIR}/log"
+bash "${VERIFY}" "${UBOOT}" "${FIRMWARE}" "${MANIFEST}" "${OVERLAY}"
+printf '%s\n' 'test-tdvp-cpu1-boot-contract: PASS production SDK layout, valid payload and 16 rejected regressions'

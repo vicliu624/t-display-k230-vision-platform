@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 3 ]; then
-	printf 'Usage: %s <uboot-build-dir> <raw-firmware> <firmware-manifest>\n' "$0" >&2
+if [ "$#" -ne 4 ]; then
+	printf 'Usage: %s <uboot-build-dir> <raw-firmware> <firmware-manifest> <staged-uboot-overlay-dir>\n' "$0" >&2
 	exit 2
 fi
 
@@ -42,7 +42,11 @@ case "${magic}" in
 esac
 # Check the actual build, not only the overlay waiting to be copied. The BSP
 # sync is additive and a reused output must not package an old unguarded SPL.
-DECOMPRESSOR="$(dirname "$0")/../../../boot/uboot/u-boot-2022.10-overlay/arch/riscv/cpu/k230/unzip.c"
+# SDK sync deliberately excludes *-overlay directories from output/buildroot-*.
+# The production caller must pass the authoritative staged U-Boot overlay;
+# it is not a sibling of this script once the board hook has been synchronized.
+DECOMPRESSOR="$4/arch/riscv/cpu/k230/unzip.c"
+[ -s "${DECOMPRESSOR}" ] || fail 'missing staged U-Boot decompressor reference'
 cmp -s "${DECOMPRESSOR}" "$1/arch/riscv/cpu/k230/unzip.c" ||
 	fail 'built U-Boot decompressor differs from the paired overlay'
 for binary in u-boot.bin spl/u-boot-spl.bin; do
