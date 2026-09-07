@@ -52,6 +52,13 @@ complete the camera ownership migration described below.
   mapping, bus-speed setup or bus registration is latched and blocks MPP.
   The hook requires I2C4 master-only ownership. Its flag defaults off and the
   unselected BSP entry is unchanged. The production build does not yet opt in.
+- Camera clock setup before MPP registration: explicitly prepare ISP CFG/core/
+  HCLK, CSI2 pixel and sensor MCLK1 fields; verify clock writes and preserve
+  CSI0/CSI1 and MCLK0/MCLK2 fields. Require powered DISP/ISP, DDR P1 access and
+  the pinned board's PLL rates before writing. No shared PLL, power, DDR,
+  I2C, GPU/VO clock or reset writes. The 23.76 MHz MCLK matches the selected
+  GC2093 CSI2 mode table. This guard is not the missing Linux ownership-ready
+  handshake: firmware startup still must wait for that handshake before MPP.
 - A compiled candidate device-tree wrapper and ownership include, with the
   new MMZ/transport reservations and GPIO/power policies. Linux camera/AI
   devices and dedicated clock providers are disabled. This wrapper is NOT
@@ -96,6 +103,7 @@ bash buildroot/tools/test-tdvp-cpu1-gpio-amp.sh
 bash buildroot/tools/test-tdvp-cpu1-power-amp.sh /path/to/pristine/pinned/linux
 bash buildroot/tools/test-tdvp-cpu1-clock-amp.sh /path/to/pinned/linux
 bash buildroot/tools/test-tdvp-cpu1-i2c4-early.sh /path/to/pinned/maix3
+bash buildroot/tools/test-tdvp-cpu1-camera-clock.sh /path/to/pinned/maix3 /path/to/pinned/mpp
 bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh /path/to/fully/patched/linux
 bash buildroot/tools/test-tdvp-cpu1-capture.sh /path/to/pinned/canmv_k230/src/rtsmart/mpp
 ```
@@ -113,9 +121,18 @@ ownership configurations fail compilation. A read-only board PLL/CMU snapshot
 is one successful no-write case, not evidence that this firmware has booted.
 The existing real-firmware CI preflight runs this test after fetching its BSP;
 it also structurally validates the real vision patch, not a substitute fixture.
+The camera-clock test checks real pinned register-layout declarations and runs
+22 successful/failure scenarios against the production helper. Every write is
+restricted to camera clock fields, including checks that changing dividers
+occurs with the affected clocks gated. Shared-resource reads, mapping failure,
+power/PLL refusal, ignored writes and a changing prerequisite are covered.
+One case uses the actual board's read-only CMU/PLL/power snapshot. This is not a
+live register-write or camera test. CI obtains the MPP layout header from the
+exact pinned Git commit even when its compute-only sparse checkout omits MPP.
 The GPIO model runs 100,000 concurrent updates per core against the actual
 patch helper. Pinmux tests cover the four-pad whitelist and failure/conflict
-paths; MPP initialization covers eight stages plus early-I2C failure. The power regression runs
+paths; MPP initialization covers eight stages plus early-I2C and camera-clock
+failure. The power regression runs
 the complete production driver after applying `0068` to actual kernel source,
 with Linux/MMIO mocked, including probe retry, no cycling of live domains,
 power-off refusal and error cleanup. CI runs this against `linux-patch` output
@@ -155,8 +172,18 @@ Its `rtthread.elf` SHA-256 is
 `27be0f41e07661a999218866993bde9ebd7be6f3d474e9e941cef212957da408`;
 `rtthread.bin` SHA-256 is
 `1356796781930e3de16dd4f643c12eed3fa8b6c3150b0a253cdac6efba2788ec`.
-This is a cross-link check only: ISP/MCLK/AI power and clock initialization,
-paired image integration and physical camera acceptance remain outstanding.
+This records the earlier I2C-only cross-link check. Subsequent camera-clock
+changes must be cross-linked and verified independently; a linked kernel does
+not prove the paired image, AI initialization or physical camera acceptance.
+
+The subsequent camera-clock kernel cross-link passed on the same pinned SDK:
+`rtthread.elf` SHA-256
+`b948e6ed6bf53f9a6fbac26087eacc8949470d687243b8b597660b8899990b6d`,
+`rtthread.bin` SHA-256
+`cc0df5e6c1db14e064321817d1b58dbf4cb170f684b043f6ea9d9b417ab66e37`.
+The new clock helper is linked into the curated MPP path. The candidate DTB
+still passes the 273-node baseline comparison and 22 invalid-candidate tests,
+and no enabled Linux composite clock may write camera CMU registers.
 
 ## Required before production activation
 
@@ -172,6 +199,10 @@ paired image integration and physical camera acceptance remain outstanding.
    BOARD initializer and immediately touches I2C registers: install the matched
    hook/header/clock source and select `RT_USING_TDVP_CPU1_VISION` together.
    Its semaphore/100 MHz preparation precedes controller access, not MPP.
+   The camera helper now prepares its dedicated clocks, but first requires
+   shared domains/DDR/PLLs to be ready. Add a Linux ownership-ready handshake
+   and defer MPP until it succeeds; CPU1 must not race Linux power setup or
+   treat an already-powered peripheral as proof of exclusive ownership.
 3. Atomically add Linux MMZ/transport reservations and retire Linux camera,
    ISP, KPU/AI2D bindings and the CPU0 ISP service. Add an ownership gate that
    rejects mixed firmware/DT/profile combinations and checks GPIO protection.

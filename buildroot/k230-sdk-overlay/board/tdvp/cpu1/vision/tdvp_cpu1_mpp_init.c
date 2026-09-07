@@ -25,6 +25,7 @@ extern int vb_init(void);
 extern int vicap_init(void);
 extern int tdvp_cpu1_vision_pins_init(void);
 extern int tdvp_cpu1_i2c4_init_status(void);
+extern int tdvp_cpu1_camera_clock_prepare(void);
 
 static int vision_status = -RT_EBUSY;
 static int attempted;
@@ -47,6 +48,9 @@ int mpp_init(void)
         return vision_status;
     attempted = 1;
     if ((result = tdvp_cpu1_i2c4_init_status()) != 0)
+        goto failed;
+    stage = "camera-clocks";
+    if ((result = tdvp_cpu1_camera_clock_prepare()) != 0)
         goto failed;
     stage = "cmpi";
     if ((result = cmpi_init()) != 0)

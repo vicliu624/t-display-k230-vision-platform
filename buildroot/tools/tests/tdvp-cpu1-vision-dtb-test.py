@@ -110,6 +110,7 @@ def validate_shared_clock_layout(nodes):
         offsets = [values.get(key) for key in ("clk-gate-reg-offset", "clk-rate-reg-offset",
                                              "clk-rate-reg-offset_1", "clk-parent-reg-offset")]
         gate, rate, rate1, mux = offsets
+        assert not {0x64, 0x68, 0x6c}.intersection(offsets), ("Linux camera clock writer remains", path)
         shared = {0x24, 0x2c, 0x30}
         if not shared.intersection(offsets):
             continue
@@ -201,4 +202,17 @@ for path, key, value in mutations:
     except (AssertionError, KeyError):
         continue
     raise AssertionError(("accepted mutation", path, key))
-print(f"CPU1 vision DTB: PASS {len(before)} existing nodes checked; only ownership deltas; {len(mutations)} invalid candidates rejected")
+# Exercise the dedicated-register policy independently of the whole-tree
+# drift guard, so future Linux clock additions cannot silently become writers.
+active_clock = next(path for path, props in after.items()
+                    if path.startswith(CLOCK) and props.get("status") != b"disabled\0"
+                    and props.get("compatible") == b"canaan,k230-clk-composite\0")
+for offset in (0x64, 0x68, 0x6c):
+    changed = copy.deepcopy(after)
+    changed[active_clock]["clk-gate-reg-offset"] = struct.pack(">I", offset)
+    try:
+        validate_shared_clock_layout(changed)
+    except AssertionError:
+        continue
+    raise AssertionError(("accepted Linux camera clock writer", offset))
+print(f"CPU1 vision DTB: PASS {len(before)} existing nodes checked; only ownership deltas; {len(mutations)} invalid candidates and three camera clock writers rejected")

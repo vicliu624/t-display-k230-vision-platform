@@ -9,7 +9,7 @@ printf '#define RT_EBUSY 7\nint rt_kprintf(const char *, ...);\n' > "$test_dir/r
     -DCONFIG_MEM_MMZ_BASE=0x14000000UL -DCONFIG_MEM_MMZ_SIZE=0x08000000UL \
     -I"$test_dir" "$source_dir/tdvp_cpu1_mpp_init.c" \
     "$project/buildroot/tools/tests/tdvp-cpu1-vision-init-test.c" -o "$test_dir/check"
-for stage in 0 1 2 3 4 5 6 7 8 9; do
+for stage in 0 1 2 3 4 5 6 7 8 9 10; do
     "$test_dir/check" "$stage"
 done
 for wrong in base size; do
@@ -30,4 +30,4 @@ done
 # Undefined symbols, including initialization callbacks, must be exactly the
 # expected camera subset. A newly added display/audio init cannot pass by
 # accidentally acquiring a test stub.
-echo 'CPU1 vision init: PASS success, early I2C4 refusal, eight latched MPP failure paths and MMZ guards'
+echo 'CPU1 vision init: PASS success, early I2C4/camera-clock refusal, eight latched MPP failure paths and MMZ guards'

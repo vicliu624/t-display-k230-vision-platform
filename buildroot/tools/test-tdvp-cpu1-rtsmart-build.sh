@@ -20,11 +20,22 @@ NM="${TOOLCHAIN}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/bin/riscv64-unkn
 bash "${SCRIPT_DIR}/validate-k230-sdk-linux-patches.sh" "${CPU1_DIR}/patches"
 bash "${CPU1_DIR}/build-rtsmart.sh" "${OUTPUT_DIR}/fw_payload.bin" \
 	"${OUTPUT_DIR}/manifest" "${CPU1_DIR}/tdvp_cpu1_abi.h"
+TEMP_DIR="$(mktemp -d)"
+trap 'status=$?; if [ "$status" -ne 0 ]; then cat "${TEMP_DIR}"/*.log >&2; fi; rm -rf "${TEMP_DIR}"; exit "$status"' EXIT
 # Validate the opt-in vision hook against the same pinned BSP fetched above.
 # The regression patches a temporary copy, never the compute-only firmware
 # checkout. Missing cached source or malformed real patches must fail CI.
 bash "${SCRIPT_DIR}/validate-k230-sdk-linux-patches.sh" "${CPU1_DIR}/vision"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-i2c4-early.sh" "${BSP}"
+# The compute-only sparse checkout excludes MPP implementations. Use its
+# exact pinned Git blob for the camera clock layout test, not a hand-written
+# header or a different SDK release, and leave the checkout unchanged.
+MPP_CLOCK_HEADER=canmv_k230/src/rtsmart/mpp/kernel/mediafreq/src/sysctl/sysctl_media_clock/sysctl_media_clk.h
+MPP_LAYOUT="${TEMP_DIR}/mpp"
+mkdir -p "${MPP_LAYOUT}/kernel/mediafreq/src/sysctl/sysctl_media_clock"
+git -C "${CHECKOUT}" show "HEAD:${MPP_CLOCK_HEADER}" \
+	> "${MPP_LAYOUT}/kernel/mediafreq/src/sysctl/sysctl_media_clock/sysctl_media_clk.h"
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-camera-clock.sh" "${BSP}" "${MPP_LAYOUT}"
 "${NM}" "${BSP}/rtthread.elf" > "${OUTPUT_DIR}/rtthread-symbols.txt"
 grep -Eq ' [tT] tdvp_cpu1_service$' "${OUTPUT_DIR}/rtthread-symbols.txt"
 grep -Eq ' [tT] dfs_file_open$' "${OUTPUT_DIR}/rtthread-symbols.txt"
@@ -41,8 +52,6 @@ fi
 # kernel case contains a stale binary: a broken status guard must not copy it.
 # GNU make returns 2; its diagnostic must preserve the shell's 7/9, not expand
 # $? to .parse_config or continue after a failed configuration generator.
-TEMP_DIR="$(mktemp -d)"
-trap 'status=$?; if [ "$status" -ne 0 ]; then cat "${TEMP_DIR}"/*.log >&2; fi; rm -rf "${TEMP_DIR}"; exit "$status"' EXIT
 TEST_RT="${TEMP_DIR}/src/rtsmart"
 TEST_BSP="${TEST_RT}/rtsmart/kernel/bsp/maix3"
 mkdir -p "${TEST_BSP}/configs" "${TEST_RT}/mpp/include/comm" \
