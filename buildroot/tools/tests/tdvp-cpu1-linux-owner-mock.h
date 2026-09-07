@@ -15,6 +15,7 @@ typedef uint32_t __u32;
 typedef int32_t __s32;
 typedef uint64_t __u64;
 typedef uint64_t phys_addr_t;
+typedef uint64_t resource_size_t;
 #define EPROBE_DEFER 517
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 extern unsigned int warnings;
@@ -45,6 +46,8 @@ int of_property_count_strings(struct device_node *, const char *);
 void *of_find_property(struct device_node *, const char *, int *);
 int of_parse_phandle_with_args(struct device_node *, const char *, const char *, int, struct of_phandle_args *);
 void *devm_ioremap(struct device *, phys_addr_t, size_t);
+struct resource *request_mem_region(resource_size_t, resource_size_t, const char *);
+void release_mem_region(resource_size_t, resource_size_t);
 struct device *dev_pm_domain_attach_by_name(struct device *, const char *);
 void dev_pm_domain_detach(struct device *, bool);
 int pm_runtime_resume_and_get(struct device *);

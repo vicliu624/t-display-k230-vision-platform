@@ -24,6 +24,17 @@ make --no-print-directory -f "$temporary/Makefile" INSTALL=install TARGET_DIR="$
     STAGING_DIR="$temporary/staging" "$temporary/package/install"
 cmp "$vision/tdvp_vision_abi.h" "$temporary/staging/usr/include/tdvp/tdvp_vision_abi.h"
 bash "$vision/verify-rootfs.sh" "$target"
+# An older bridge must not pass merely because it has the same ABI/telemetry.
+# Mutate each resource label in a copy of the actual ELF; never alter the input.
+installed="$target/lib/modules/6.6.36/updates/tdvp_cpu1_vision.ko"
+for claim in tdvp-cpu1-kpu-sram tdvp-cpu1-shared-sram tdvp-cpu1-gnne-fft-ai2d; do
+    LC_ALL=C sed "s/$claim/${claim/tdvp/xxxx}/g" "$module" > "$installed"
+    if bash "$vision/verify-rootfs.sh" "$target" > "$temporary/rejected.log" 2>&1; then
+        echo "missing AI resource claim accepted: $claim" >&2; exit 1
+    fi
+    grep -Fq "bridge lacks AI resource claim: $claim" "$temporary/rejected.log"
+done
+cp "$module" "$installed"
 # Plant every retired artifact and compressed/nested module. Check refusal
 # first, then cleanup twice to cover reused output and idempotence.
 while IFS= read -r path; do

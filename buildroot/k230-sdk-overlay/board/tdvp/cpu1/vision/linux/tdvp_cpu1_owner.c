@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Fixed paired-image contract, not a generic remoteproc or physical-I/O API. */
 #include <linux/err.h>
+#include <linux/ioport.h>
 #include <linux/ktime.h>
 #include <linux/of_address.h>
 #include <linux/of_reserved_mem.h>
@@ -16,6 +17,22 @@
 extern bool k230_tdvp_gpio_ready(struct device_node *);
 extern bool k230_tdvp_power_ready(struct device_node *);
 extern bool k230_tdvp_clock_ready(struct device_node *);
+
+/* Fixed K230 physical windows, outside this board's installed DDR. These are
+ * Linux resource-tree claims on behalf of CPU1, NOT Linux SRAM allocations or
+ * register mappings. The last 4 KiB covers GNNE (0x800), FFT (0x400), AI2D
+ * (0x400). Shared SRAM must not be reused by a Linux decompressor/allocator.
+ * Cooperative resource claims do not stop arbitrary MMIO/DMA by privileged
+ * code and do not establish that boot-time decompression has quiesced.
+ */
+static const struct {
+    resource_size_t base, bytes;
+    const char *name;
+} ai_resources[] = {
+    {0x80000000, 0x200000, "tdvp-cpu1-kpu-sram"},
+    {0x80200000, 0x200000, "tdvp-cpu1-shared-sram"},
+    {0x80400000, 0x1000, "tdvp-cpu1-gnne-fft-ai2d"},
+};
 
 static int owner_reserved(struct device_node *node, const char *name,
                            phys_addr_t base, size_t bytes)
@@ -170,6 +187,10 @@ void tdvp_linux_owner_abort(struct tdvp_linux_owner *owner)
         owner->domains[i] = NULL;
     }
     owner->powered = 0;
+    while (owner->ai_regions) {
+        i = --owner->ai_regions;
+        release_mem_region(ai_resources[i].base, ai_resources[i].bytes);
+    }
 }
 
 int tdvp_linux_owner_prepare(struct device *dev, struct tdvp_linux_owner *owner)
@@ -226,6 +247,14 @@ int tdvp_linux_owner_prepare(struct device *dev, struct tdvp_linux_owner *owner)
     owner->control = devm_ioremap(dev, TDVP_OWNER_BASE, TDVP_OWNER_WINDOW);
     if (!owner->control)
         return -ENOMEM;
+    for (i = 0; i < ARRAY_SIZE(ai_resources); ++i) {
+        if (!request_mem_region(ai_resources[i].base, ai_resources[i].bytes,
+                                ai_resources[i].name)) {
+            ret = -EBUSY;
+            goto failed;
+        }
+        ++owner->ai_regions;
+    }
     for (i = 0; i < ARRAY_SIZE(domains); ++i) {
         struct device *domain = dev_pm_domain_attach_by_name(dev, domains[i]);
 
@@ -269,7 +298,8 @@ void tdvp_linux_owner_start(struct tdvp_linux_owner *owner)
 {
     u64 cookie;
 
-    if (WARN_ON(owner->started || !owner->clocks_enabled || owner->powered != 2))
+    if (WARN_ON(owner->started || !owner->clocks_enabled || owner->powered != 2 ||
+                owner->ai_regions != ARRAY_SIZE(ai_resources)))
         return;
     do {
         cookie = get_random_u64();

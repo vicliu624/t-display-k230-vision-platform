@@ -32,6 +32,8 @@ static struct reserved_mem reservation;
 static unsigned long rates[5];
 static unsigned int stage, fail_stage, attached, powered, acquired, enabled, exclusive;
 static unsigned int writes, random_calls, refs, seq_reads;
+static unsigned int claimed;
+static struct resource claimed_resources[3];
 unsigned int warnings;
 static int bad_supplier, bad_count, bad_name, bad_binding, assigned, wrong_reservation;
 static int bad_ddr_layout;
@@ -44,6 +46,7 @@ static void reset(void)
     unsigned int i;
     owner = (struct tdvp_linux_owner){0}; wire = (struct tdvp_owner_control){0};
     stage=fail_stage=attached=powered=acquired=enabled=exclusive=writes=random_calls=refs=seq_reads=warnings=0;
+    claimed=0;
     bad_supplier=bad_count=bad_name=bad_binding=assigned=wrong_reservation=0;
     bad_ddr_layout=0;
     tear_snapshot=false; now=1000;
@@ -121,6 +124,24 @@ bool k230_tdvp_power_ready(struct device_node *n) { assert(n==&nodes[POWER]); re
 bool k230_tdvp_clock_ready(struct device_node *n) { assert(n==&nodes[CMU]); return bad_supplier!=3; }
 void *devm_ioremap(struct device *d, phys_addr_t base, size_t bytes)
 { assert(d==&dev && base==TDVP_OWNER_BASE && bytes==TDVP_OWNER_WINDOW); return fail() ? NULL : &wire; }
+struct resource *request_mem_region(resource_size_t base, resource_size_t bytes, const char *name)
+{
+    /* Independent literal map: changing the production range must fail here. */
+    assert(claimed<3 && base==0x80000000ULL+claimed*0x200000ULL);
+    assert(bytes==(claimed==2 ? 0x1000ULL : 0x200000ULL));
+    assert(!strcmp(name, claimed==0 ? "tdvp-cpu1-kpu-sram" :
+                        claimed==1 ? "tdvp-cpu1-shared-sram" : "tdvp-cpu1-gnne-fft-ai2d"));
+    assert(!writes && !attached && !powered && !acquired);
+    if (fail()) return NULL;
+    claimed_resources[claimed]=(struct resource){base,base+bytes-1};
+    return &claimed_resources[claimed++];
+}
+void release_mem_region(resource_size_t base, resource_size_t bytes)
+{
+    assert(claimed && !owner.started && !attached && !powered && !acquired && !enabled && !exclusive);
+    --claimed;
+    assert(claimed_resources[claimed].start==base && resource_size(&claimed_resources[claimed])==bytes);
+}
 struct device *dev_pm_domain_attach_by_name(struct device *d, const char *n)
 { assert(d==&dev); if(fail()) return ERR_PTR(-EIO); ++attached; return &domains[!strcmp(n,"disp")]; }
 void dev_pm_domain_detach(struct device *d, bool on)
@@ -156,6 +177,7 @@ static void clean_failure(void)
     assert(tdvp_linux_owner_prepare(&dev,&owner)<0);
     tdvp_linux_owner_abort(&owner); /* caller cleanup remains idempotent */
     assert(!writes && !refs && !attached && !powered && !acquired && !enabled && !exclusive && !warnings);
+    assert(!claimed && !owner.ai_regions);
 }
 
 int main(void)
@@ -165,7 +187,9 @@ int main(void)
     struct tdvp_owner_record snapshot;
     reset(); assert(!tdvp_linux_owner_prepare(&dev,&owner)); steps=stage;
     assert(!writes && !refs && attached==2 && powered==2 && exclusive==5 && enabled);
+    assert(claimed==3 && owner.ai_regions==3);
     tdvp_linux_owner_abort(&owner); assert(!attached && !powered && !exclusive && !enabled && !acquired);
+    assert(!claimed && !owner.ai_regions);
     for(i=1;i<=steps;++i) { reset(); fail_stage=i; clean_failure(); ++cases; }
     for(i=FIRST_DISABLED;i<ARRAY_SIZE(nodes);++i) { reset(); nodes[i].available=true; clean_failure(); ++cases; }
     for(i=MMZ;i<=SHARED;++i) {
@@ -184,6 +208,10 @@ int main(void)
     reset(); bad_binding=1; clean_failure(); ++cases;
     reset(); assigned=1; clean_failure(); ++cases;
     reset(); wrong_reservation=1; clean_failure(); ++cases;
+    reset(); assert(!tdvp_linux_owner_prepare(&dev,&owner));
+    owner.ai_regions=2; tdvp_linux_owner_start(&owner);
+    assert(warnings==1 && !writes && !random_calls && !owner.started); ++cases;
+    owner.ai_regions=3; tdvp_linux_owner_abort(&owner); assert(!claimed);
     reset(); assert(!tdvp_linux_owner_prepare(&dev,&owner));
     assert(tdvp_linux_owner_status(&owner)==-EAGAIN);
     tdvp_linux_owner_start(&owner); assert(random_calls==2 && writes && wire.linux_side.state==TDVP_OWNER_OFFER);
@@ -214,9 +242,11 @@ int main(void)
     old_writes=writes; now+=50; tdvp_linux_owner_poll(&owner); assert(writes>old_writes);
     tdvp_linux_owner_abort(&owner); /* forbidden cleanup must retain live DMA resources */
     assert(warnings==1 && attached==2 && powered==2 && acquired && enabled && exclusive==5);
+    assert(claimed==3 && owner.ai_regions==3);
     reset(); assert(!tdvp_linux_owner_prepare(&dev,&owner)); tdvp_linux_owner_start(&owner);
     now+=TDVP_OWNER_BOOT_MS; assert(tdvp_linux_owner_poll(&owner)==-ETIMEDOUT);
     assert(attached==2 && powered==2 && enabled && exclusive==5);
+    assert(claimed==3 && owner.ai_regions==3);
     printf("Linux CPU1 ownership adapter: PASS %u preparation refusals, actual MMIO handshake, stale/odd snapshots, wrap and fault-time resource retention\n",cases);
     return 0;
 }

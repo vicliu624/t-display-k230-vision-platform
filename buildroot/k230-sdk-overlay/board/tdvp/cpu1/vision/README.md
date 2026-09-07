@@ -563,6 +563,24 @@ shortcut. VGLite and non-AI2D display resources remain Linux-owned.
 
 ## Remaining release requirements
 
+The Linux bridge additionally claims three physical resource windows on behalf
+of CPU1 before OFFER: KPU SRAM `0x80000000–0x80200000`, shared SRAM
+`0x80200000–0x80400000`, and GNNE/FFT/AI2D `0x80400000–0x80401000` (end
+exclusive). These are `request_mem_region` claims, not Linux allocations or
+MMIO accesses. An existing overlapping resource owner blocks startup; partial
+claims are released only before OFFER. After OFFER all claims survive both
+boot and peer faults until reboot, alongside the retained clock/power resources.
+The final-rootfs guard requires the new claim labels in the actual bridge,
+rejecting an older module with matching telemetry but no AI resource claims.
+
+The production adapter regression now passes 55 preparation/start refusals,
+including each failed resource claim, rollback order, missing-claim refusal
+before OFFER and claim retention on timeout. Its module cross-build passes
+`W=1` and modpost against the actual product Linux kernel. The real-module
+package/ext4 regression also passes. This is cooperative Linux resource-tree
+exclusion, not protection from arbitrary privileged MMIO/DMA, numerical AI
+acceptance or proof that the boot decompressor has stopped using shared SRAM.
+
 1. Validate the installed GPIO semaphore, power retention and shared CMU/DDR/
    PLL holds on the paired board, including startup timing and fault retention.
    Do not turn an ownership fault into a shared-resource reset or hot regrant.

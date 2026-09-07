@@ -10,7 +10,7 @@ struct tdvp_linux_owner {
     struct tdvp_owner_session session;
     struct clk_bulk_data clocks[5];
     struct device *domains[2];
-    unsigned int exclusive, powered;
+    unsigned int exclusive, powered, ai_regions;
     bool clocks_acquired, clocks_enabled, started;
 };
 

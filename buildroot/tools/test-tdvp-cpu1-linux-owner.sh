@@ -5,7 +5,7 @@ vision="$project/buildroot/k230-sdk-overlay/board/tdvp/cpu1/vision"
 test_dir="$(mktemp -d)"
 trap 'rm -rf -- "$test_dir"' EXIT
 mkdir -p "$test_dir/linux"
-for header in types clk device err ktime of_address of_reserved_mem pm_domain pm_runtime random io; do
+for header in types clk device err ktime of_address of_reserved_mem pm_domain pm_runtime random io ioport; do
     printf '#include "tdvp-cpu1-linux-owner-mock.h"\n' > "$test_dir/linux/$header.h"
 done
 "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -UNDEBUG -D__KERNEL__ \
