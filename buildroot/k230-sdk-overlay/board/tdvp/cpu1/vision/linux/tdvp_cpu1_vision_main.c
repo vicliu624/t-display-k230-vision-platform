@@ -303,9 +303,11 @@ static ssize_t status_show(struct device *dev, struct device_attribute *attr, ch
     struct miscdevice *misc = dev_get_drvdata(dev);
     struct vision_device *vision = container_of(misc, struct vision_device, misc);
     const struct tdvp_vision_producer *sample = &vision->observer.sample;
+    const struct tdvp_owner_record *peer = &vision->owner.last_peer;
     const char *ownership_state;
     u64 now = ktime_to_ms(ktime_get());
     unsigned int stream_state;
+    bool traced;
     int ownership;
     ssize_t bytes;
 
@@ -318,14 +320,19 @@ static ssize_t status_show(struct device *dev, struct device_attribute *attr, ch
         now - vision->owner.session.peer_seen >= TDVP_OWNER_PEER_MS))
         ownership_state = "stale";
     stream_state = tdvp_vision_observer_state(&vision->observer, now);
+    traced = peer->reserved[0] == TDVP_STARTUP_TRACE_MAGIC &&
+        peer->reserved[1] > TDVP_STARTUP_NONE && peer->reserved[1] <= TDVP_STARTUP_COMPLETE;
     bytes = sysfs_emit(buffer,
         "status_version=1\nresource_owner=cpu1\nownership_contract=2\n"
         "ownership_state=%s\nownership_error=%d\nvision_state=%s\nvision_error=%d\n"
-        "reader_open=%u\nframes_delivered=%llu\ncaptured=%llu\npublished=%llu\ndropped=%llu\n",
+        "reader_open=%u\nframes_delivered=%llu\ncaptured=%llu\npublished=%llu\ndropped=%llu\n"
+        "startup_trace_version=%u\nstartup_stage=%s\nstartup_result=%d\n",
         ownership_state, ownership, tdvp_vision_observer_name(stream_state),
         vision->fault ? vision->fault : sample->fault, vision->opened,
         vision->frames_delivered, (unsigned long long)sample->captured,
-        (unsigned long long)sample->published, (unsigned long long)sample->dropped);
+        (unsigned long long)sample->published, (unsigned long long)sample->dropped,
+        traced ? 1U : 0U, tdvp_startup_stage_name(traced ? peer->reserved[1] : 0U),
+        traced ? (s32)peer->reserved[2] : 0);
     mutex_unlock(&vision->lock);
     return bytes;
 }

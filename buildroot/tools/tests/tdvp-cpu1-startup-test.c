@@ -8,6 +8,7 @@
 #include <string.h>
 #include <rtthread.h>
 #include "tdvp_vision_owner_io.h"
+#include "tdvp_startup_trace.h"
 
 extern int tdvp_cpu1_vision_startup(void);
 extern int tdvp_cpu1_vision_ownership_status(void);
@@ -41,6 +42,14 @@ int tdvp_cpu1_i2c4_board_init(void)
 {
     assert(tdvp_cpu1_vision_ownership_status() == 0);
     assert(wire.cpu1_side.state == TDVP_OWNER_STARTING && ++i2c == 1);
+    struct tdvp_owner_record peer = wire.linux_side;
+    uint64_t heartbeat = wire.cpu1_side.heartbeat;
+    uint32_t sequence = wire.cpu1_side.sequence;
+    for (int n = 0; n < 100; ++n)
+        tdvp_cpu1_startup_trace(TDVP_STARTUP_I2C_CLOCK, TDVP_STARTUP_PENDING);
+    assert(wire.cpu1_side.sequence == sequence + 200);
+    assert(wire.cpu1_side.heartbeat == heartbeat); /* Trace is not a heartbeat. */
+    assert(!memcmp(&peer, &wire.linux_side, sizeof(peer))); /* Never writes peer half. */
     return scenario == 6 ? -42 : 0;
 }
 int mpp_init(void)
@@ -58,6 +67,9 @@ int tdvp_cpu1_vision_launch(void)
 {
     assert(i2c == 1 && mpp == 1 && ai == 1 && ++launch == 1);
     assert(wire.cpu1_side.state == TDVP_OWNER_READY);
+    assert(wire.cpu1_side.reserved[0] == TDVP_STARTUP_TRACE_MAGIC);
+    assert(wire.cpu1_side.reserved[1] == TDVP_STARTUP_LAUNCH);
+    assert(wire.cpu1_side.reserved[2] == TDVP_STARTUP_PENDING);
     assert(tdvp_cpu1_vision_runtime_status() == 0);
     if (scenario == 0) {
         struct tdvp_owner_record saved = wire.cpu1_side;
@@ -112,6 +124,8 @@ int main(int argc, char **argv)
     }
     assert(tdvp_cpu1_vision_ownership_status() == -RT_EBUSY && !maps);
     assert(tdvp_cpu1_vision_runtime_status() == -RT_EIO);
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_GRANT, TDVP_STARTUP_PENDING);
+    assert(!memcmp(&original, &wire.cpu1_side, sizeof(original))); /* No grant, no write. */
     if (!setjmp(done)) {
         int result = tdvp_cpu1_vision_startup();
         assert((scenario >= 1 && scenario <= 4) || scenario == 12);
@@ -127,11 +141,20 @@ int main(int argc, char **argv)
     if (scenario == 14) assert(ai == 1 && launch == 1 && wire.cpu1_side.state == TDVP_OWNER_FAULT);
     if (scenario == 0 || scenario == 5 || scenario == 8 || scenario == 10)
         assert(i2c == 1 && mpp == 1 && launch == 1);
-    if (scenario == 0) assert(wire.cpu1_side.state == TDVP_OWNER_READY);
+    if (scenario == 0) {
+        assert(wire.cpu1_side.state == TDVP_OWNER_READY);
+        assert(wire.cpu1_side.reserved[1] == TDVP_STARTUP_COMPLETE && !wire.cpu1_side.reserved[2]);
+    }
+    if (scenario == 6) assert((int32_t)wire.cpu1_side.reserved[2] == -42);
+    if (scenario == 7) assert((int32_t)wire.cpu1_side.reserved[2] == -43);
+    if (scenario == 8) assert((int32_t)wire.cpu1_side.reserved[2] == -44);
     if (scenario >= 5 && scenario <= 10) {
         assert(wire.cpu1_side.state == TDVP_OWNER_FAULT);
         assert(tdvp_cpu1_vision_ownership_status() != 0);
         assert(tdvp_cpu1_vision_runtime_status() != 0);
+        struct tdvp_owner_record saved = wire.cpu1_side;
+        tdvp_cpu1_startup_trace(TDVP_STARTUP_GRANT, TDVP_STARTUP_PENDING);
+        assert(!memcmp(&saved, &wire.cpu1_side, sizeof(saved))); /* Fault remains latched. */
     }
     assert(tdvp_cpu1_vision_startup() == -RT_EBUSY); /* No in-place restart. */
     printf("CPU1 production startup: PASS scenario %d\n", scenario);

@@ -185,6 +185,10 @@ int main(void)
     unsigned int i, steps, cases=0, old_writes;
     struct tdvp_owner_session cpu;
     struct tdvp_owner_record snapshot;
+    for (i = TDVP_STARTUP_GRANT; i <= TDVP_STARTUP_COMPLETE; ++i)
+        assert(strcmp(tdvp_startup_stage_name(i), "unavailable"));
+    assert(!strcmp(tdvp_startup_stage_name(0), "unavailable"));
+    assert(!strcmp(tdvp_startup_stage_name(TDVP_STARTUP_COMPLETE + 1), "unavailable"));
     reset(); assert(!tdvp_linux_owner_prepare(&dev,&owner)); steps=stage;
     assert(!writes && !refs && attached==2 && powered==2 && exclusive==5 && enabled);
     assert(claimed==3 && owner.ai_regions==3);
@@ -228,8 +232,20 @@ int main(void)
     }
     assert(!tdvp_linux_owner_status(&owner));
     assert(owner.session.peer_ready && wire.linux_side.peer_cookie==cpu.own.cookie);
+    /* Diagnostic extension is copied only from a stable, paired publication. */
+    cpu.own.reserved[0] = TDVP_STARTUP_TRACE_MAGIC;
+    cpu.own.reserved[1] = TDVP_STARTUP_MMZ;
+    cpu.own.reserved[2] = TDVP_STARTUP_PENDING;
+    tdvp_owner_publish(&wire.cpu1_side, &cpu.own);
+    assert(tdvp_linux_owner_poll(&owner) == 0);
+    assert(owner.last_peer.reserved[1] == TDVP_STARTUP_MMZ);
+    assert(owner.last_peer.reserved[2] == TDVP_STARTUP_PENDING);
     /* Linux MMIO snapshot rejects an in-flight writer and a changed sequence. */
     wire.cpu1_side.sequence|=1; assert(!tdvp_linux_owner_snapshot(&wire.cpu1_side,&snapshot));
+    wire.cpu1_side.reserved[1] = TDVP_STARTUP_GNNE;
+    assert(tdvp_linux_owner_poll(&owner) == 0);
+    assert(owner.last_peer.reserved[1] == TDVP_STARTUP_MMZ);
+    wire.cpu1_side.reserved[1] = TDVP_STARTUP_MMZ;
     wire.cpu1_side.sequence++; tear_snapshot=true;
     assert(!tdvp_linux_owner_snapshot(&wire.cpu1_side,&snapshot)); tear_snapshot=false;
     assert(tdvp_linux_owner_snapshot(&wire.cpu1_side,&snapshot));
@@ -239,6 +255,11 @@ int main(void)
     now+=TDVP_OWNER_PEER_MS;
     assert(tdvp_linux_owner_poll(&owner)==-ETIMEDOUT);
     assert(wire.linux_side.state==TDVP_OWNER_FAULT);
+    assert(owner.last_peer.reserved[1] == TDVP_STARTUP_MMZ);
+    wire.cpu1_side.cookie++;
+    wire.cpu1_side.reserved[1] = TDVP_STARTUP_COMPLETE;
+    assert(tdvp_linux_owner_poll(&owner) == -ETIMEDOUT);
+    assert(owner.last_peer.reserved[1] == TDVP_STARTUP_MMZ); /* Wrong epoch cannot replace history. */
     old_writes=writes; now+=50; tdvp_linux_owner_poll(&owner); assert(writes>old_writes);
     tdvp_linux_owner_abort(&owner); /* forbidden cleanup must retain live DMA resources */
     assert(warnings==1 && attached==2 && powered==2 && acquired && enabled && exclusive==5);

@@ -4,10 +4,12 @@
 #include <linux/clk.h>
 #include <linux/device.h>
 #include "tdvp_vision_owner.h"
+#include "tdvp_startup_trace.h"
 
 struct tdvp_linux_owner {
     struct tdvp_owner_control __iomem *control;
     struct tdvp_owner_session session;
+    struct tdvp_owner_record last_peer; /* last cookie-matched, stable diagnostic sample */
     struct clk_bulk_data clocks[5];
     struct device *domains[2];
     unsigned int exclusive, powered, ai_regions;

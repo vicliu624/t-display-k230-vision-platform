@@ -8,6 +8,7 @@
 #include <rtthread.h>
 #include <riscv_io.h>
 #include <ioremap.h>
+#include "tdvp-startup-trace-stub.h"
 
 static uint32_t cmu[32], before[32], pll[4], semaphore;
 static unsigned int maps, unmaps, locks, releases, clock_writes, pll_reads;
@@ -171,13 +172,17 @@ int main(int argc, char **argv)
     assert(rt_hw_i2c_init() == 0); /* BOARD entry must not touch ANY hardware. */
     assert(!maps && !clock_writes && !initialized && !registered);
     assert(tdvp_cpu1_i2c4_board_init() == -RT_EBUSY);
+    assert(!trace_calls);
     assert(!maps && !clock_writes && !initialized && !registered);
     ownership = 1;
     assert(tdvp_cpu1_i2c4_board_init() == expected);
     assert(tdvp_cpu1_i2c4_init_status() == expected);
+    assert(trace_result == expected);
+    unsigned int saved_trace_calls = trace_calls;
     unsigned int saved_maps = maps, saved_writes = clock_writes, saved_locks = locks;
     assert(rt_hw_i2c_init() == 0);
     assert(tdvp_cpu1_i2c4_board_init() == expected); /* no repeated map/register/reset */
+    assert(trace_calls == saved_trace_calls);
     assert(maps == saved_maps && clock_writes == saved_writes && locks == saved_locks);
     assert(!held && !irq_off);
     assert(unmaps == (scenario == 24 || scenario == 25 ? 0U : (scenario >= 1 && scenario <= 3 ? (unsigned)scenario - 1 : 3U)));

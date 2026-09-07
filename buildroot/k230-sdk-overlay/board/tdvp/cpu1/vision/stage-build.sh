@@ -20,10 +20,11 @@ prepare)
     install -m 0644 "$source_dir/SConscript" "$bsp/board/mpp/SConscript"
     for file in tdvp_cpu1_vision_layout.h tdvp_cpu1_vision_pins.c tdvp_cpu1_i2c4_clock.c \
         tdvp_cpu1_camera_clock.c tdvp_vision_owner.c tdvp_vision_owner.h tdvp_vision_owner_io.h \
-        tdvp_vision_abi.h tdvp_cpu1_vision_startup.c tdvp_cpu1_ai_clock.c tdvp_cpu1_ai_init.c tdvp_cpu1_fft.c; do
+        tdvp_vision_abi.h tdvp_startup_trace.h tdvp_cpu1_vision_startup.c tdvp_cpu1_ai_clock.c tdvp_cpu1_ai_init.c tdvp_cpu1_fft.c; do
         install -m 0644 "$source_dir/$file" "$bsp/board/mpp/$file"
     done
     install -m 0644 "$source_dir/tdvp_cpu1_i2c4_board.h" "$bsp/drivers/interdrv/i2c/"
+    install -m 0644 "$source_dir/tdvp_startup_trace.h" "$bsp/drivers/interdrv/i2c/"
     install -m 0644 "$source_dir/tdvp_cpu1_vision_launch.c" "$bsp/applications/"
     install -m 0644 "$source_dir/tdvp_cpu1_vision_mount.c" "$bsp/applications/mnt.c"
     if ! grep -Fq "src += Glob('tdvp_cpu1_vision_launch.c')" "$bsp/applications/SConscript"; then

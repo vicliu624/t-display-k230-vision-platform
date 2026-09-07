@@ -7,7 +7,7 @@ trap 'rm -rf -- "$test_dir"' EXIT
 printf '#define RT_EBUSY 7\nint rt_kprintf(const char *, ...);\n' > "$test_dir/rtthread.h"
 "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -O2 \
     -DCONFIG_MEM_MMZ_BASE=0x14000000UL -DCONFIG_MEM_MMZ_SIZE=0x08000000UL \
-    -I"$test_dir" "$source_dir/tdvp_cpu1_mpp_init.c" \
+    -I"$test_dir" -I"$source_dir" "$source_dir/tdvp_cpu1_mpp_init.c" \
     "$project/buildroot/tools/tests/tdvp-cpu1-vision-init-test.c" -o "$test_dir/check"
 for stage in 0 1 2 3 4 5 6 7 8 9 10; do
     "$test_dir/check" "$stage"

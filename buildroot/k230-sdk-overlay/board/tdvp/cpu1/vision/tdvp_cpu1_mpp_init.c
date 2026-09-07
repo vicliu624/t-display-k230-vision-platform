@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include <rtthread.h>
 #include "tdvp_cpu1_vision_layout.h"
+#include "tdvp_startup_trace.h"
 
 #if !defined(CONFIG_MEM_MMZ_BASE) || !defined(CONFIG_MEM_MMZ_SIZE)
 #error "CPU1 vision requires an explicit, Linux-reserved MMZ"
@@ -54,38 +55,49 @@ int mpp_init(void)
     if ((result = tdvp_cpu1_i2c4_init_status()) != 0)
         goto failed;
     stage = "camera-clocks";
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_CAMERA_CLOCKS, TDVP_STARTUP_PENDING);
     if ((result = tdvp_cpu1_camera_clock_prepare()) != 0)
         goto failed;
     stage = "cmpi";
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_CMPI, TDVP_STARTUP_PENDING);
     if ((result = cmpi_init()) != 0)
         goto failed;
     stage = "log";
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_LOG, TDVP_STARTUP_PENDING);
     if ((result = log_init()) != 0)
         goto failed;
     stage = "mmz";
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_MMZ, TDVP_STARTUP_PENDING);
     /* The vendor MMZ allocator reserves its final page. */
     if ((result = mmz_init(TDVP_VISION_MMZ_BASE, TDVP_VISION_MMZ_SIZE - 4096UL)) != 0)
         goto failed;
     stage = "mmz-userdev";
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_MMZ_USERDEV, TDVP_STARTUP_PENDING);
     if ((result = mmz_userdev_init()) != 0)
         goto failed;
     stage = "sysctrl";
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_SYSCTRL, TDVP_STARTUP_PENDING);
     if ((result = sysctrl_init()) != 0)
         goto failed;
     stage = "vb";
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_VB, TDVP_STARTUP_PENDING);
     if ((result = vb_init()) != 0)
         goto failed;
     stage = "camera-pins";
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_CAMERA_PINS, TDVP_STARTUP_PENDING);
     if ((result = tdvp_cpu1_vision_pins_init()) != 0)
         goto failed;
     stage = "vicap";
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_VICAP, TDVP_STARTUP_PENDING);
     if ((result = vicap_init()) != 0)
         goto failed;
     vision_status = 0;
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_VICAP, 0);
     rt_kprintf("TDVP CPU1 vision: media drivers initialized; capture not started\n");
     return 0;
 
 failed:
+    tdvp_cpu1_startup_trace(TDVP_STARTUP_NONE, result);
     vision_status = result;
     rt_kprintf("TDVP CPU1 vision: %s initialization failed: %d\n", stage, result);
     return result;

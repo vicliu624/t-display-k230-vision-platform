@@ -327,6 +327,11 @@ int tdvp_linux_owner_poll(struct tdvp_linux_owner *owner)
         return -EAGAIN;
     stable = tdvp_linux_owner_snapshot(&owner->control->cpu1_side, &peer);
     tdvp_owner_linux_step(&owner->session, stable ? &peer : NULL, ktime_to_ms(ktime_get()));
+    if (stable && peer.magic == TDVP_OWNER_MAGIC && peer.version == TDVP_OWNER_VERSION &&
+        peer.bytes == sizeof(peer) && peer.contract == TDVP_OWNER_CONTRACT &&
+        peer.cookie && peer.cookie == owner->session.own.peer_cookie &&
+        peer.peer_cookie == owner->session.own.cookie)
+        owner->last_peer = peer;
     tdvp_linux_owner_publish(&owner->control->linux_side, &owner->session.own);
     return tdvp_linux_owner_status(owner);
 }

@@ -4,6 +4,7 @@
 #include <encoding.h>
 #include <tick.h>
 #include "tdvp_vision_owner_io.h"
+#include "tdvp_startup_trace.h"
 
 #ifndef RT_USING_TDVP_CPU1_VISION
 #error "Ownership startup must not be linked into an unpaired firmware"
@@ -18,6 +19,18 @@ static volatile struct tdvp_owner_control *wire;
 static struct tdvp_owner_session owner;
 static int startup_attempted;
 static volatile tdvp_v_u64 last_publication_ms;
+
+void tdvp_cpu1_startup_trace(unsigned int stage, int result)
+{
+    if (!wire || (owner.own.state != TDVP_OWNER_STARTING && owner.own.state != TDVP_OWNER_READY))
+        return;
+    if (stage > TDVP_STARTUP_COMPLETE) return;
+    if (stage) owner.own.reserved[1] = stage;
+    owner.own.reserved[0] = TDVP_STARTUP_TRACE_MAGIC;
+    owner.own.reserved[2] = (tdvp_v_u32)result;
+    tdvp_owner_publish(&wire->cpu1_side, &owner.own);
+    /* Do not increment heartbeat, refresh freshness or poll/regrant here. */
+}
 
 static tdvp_v_u64 owner_now(void)
 {
@@ -83,6 +96,7 @@ int tdvp_cpu1_vision_startup(void)
     for (;;) {
         result = owner_poll();
         if (result == 1) {
+            tdvp_cpu1_startup_trace(TDVP_STARTUP_GRANT, TDVP_STARTUP_PENDING);
             result = tdvp_cpu1_i2c4_board_init();
             if (!result) result = mpp_init();
             if (!result) result = tdvp_cpu1_ai_init();
@@ -91,9 +105,12 @@ int tdvp_cpu1_vision_startup(void)
             if (!result) result = tdvp_owner_cpu1_ready(&owner);
             if (!result) {
                 tdvp_owner_publish(&wire->cpu1_side, &owner.own);
+                tdvp_cpu1_startup_trace(TDVP_STARTUP_LAUNCH, TDVP_STARTUP_PENDING);
                 result = tdvp_cpu1_vision_launch();
+                tdvp_cpu1_startup_trace(result ? TDVP_STARTUP_LAUNCH : TDVP_STARTUP_COMPLETE, result);
             }
             if (result) {
+                tdvp_cpu1_startup_trace(TDVP_STARTUP_NONE, result);
                 rt_kprintf("TDVP CPU1: ownership-gated initialization failed: %d\n", result);
                 tdvp_owner_fail(&owner, TDVP_OWNER_ERR_INIT);
             }

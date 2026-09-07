@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include "tdvp-startup-trace-stub.h"
 
 extern int mpp_init(void);
 extern int tdvp_cpu1_vision_init_status(void);
@@ -12,6 +13,10 @@ int tdvp_cpu1_vision_ownership_status(void) { return ownership ? 0 : -7; }
 
 static int step(int expected)
 {
+    static const unsigned int stages[] = {TDVP_STARTUP_CMPI, TDVP_STARTUP_LOG,
+        TDVP_STARTUP_MMZ, TDVP_STARTUP_MMZ_USERDEV, TDVP_STARTUP_SYSCTRL,
+        TDVP_STARTUP_VB, TDVP_STARTUP_CAMERA_PINS, TDVP_STARTUP_VICAP};
+    assert(trace_stage == stages[expected - 1] && trace_result == TDVP_STARTUP_PENDING);
     assert(++calls == expected);
     return calls == fail_at ? -100 - calls : 0;
 }
@@ -41,12 +46,16 @@ int main(int argc, char **argv)
     assert(tdvp_cpu1_vision_init_status() != 0);
     const int expected = fail_at ? -100 - fail_at : 0;
     assert(mpp_init() == -7 && !calls); /* No ownership: no initialization attempt. */
+    assert(!trace_calls);
     ownership = 1;
     assert(mpp_init() == expected);
     assert(tdvp_cpu1_vision_init_status() == expected);
+    assert(trace_result == expected);
+    const unsigned int saved_trace_calls = trace_calls;
     assert(calls == (fail_at >= 9 ? 0 : (fail_at ? fail_at : 8)));
     /* Neither success nor partially initialized failure may run twice. */
     assert(mpp_init() == expected);
+    assert(trace_calls == saved_trace_calls);
     assert(calls == (fail_at >= 9 ? 0 : (fail_at ? fail_at : 8)));
     return 0;
 }

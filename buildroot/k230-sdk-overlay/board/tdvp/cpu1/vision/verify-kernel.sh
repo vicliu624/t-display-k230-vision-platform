@@ -10,7 +10,7 @@ for symbol in tdvp_cpu1_service mpp_init tdvp_cpu1_vision_ownership_status vicap
     sensor_gc2093_probe tdvp_cpu1_vision_launch tdvp_cpu1_vision_mount \
     tdvp_cpu1_i2c4_clock_prepare tdvp_cpu1_i2c4_init_status tdvp_cpu1_camera_clock_prepare \
     tdvp_cpu1_vision_startup tdvp_owner_cpu1_step tdvp_cpu1_ai_init tdvp_cpu1_ai_clock_prepare \
-    gnne_device_init ai_2d_device_init tdvp_cpu1_fft_init; do
+    gnne_device_init ai_2d_device_init tdvp_cpu1_fft_init tdvp_cpu1_startup_trace; do
     grep -Eq " [tT] ${symbol}$" "$symbols" || { echo "CPU1 kernel missing $symbol" >&2; exit 1; }
 done
 if grep -Eq '(__rt_init_ai_module_init| ai_module_init)$| [tT] (kd_vo_init|connector_device_init|ai_init|ao_init|venc_init|vdec_init|sdma_memcpy_only_for_fft|usbd_mtp.*)$' "$symbols"; then

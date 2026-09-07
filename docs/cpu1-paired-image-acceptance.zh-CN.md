@@ -51,6 +51,9 @@ dmesg
 状态文件应是 version 1、CPU1 owner、contract 2。继续核对 Linux/CPU1
 所有权状态、错误码和推进的 worker 心跳；不能只根据设备节点存在判定成功。
 状态读取本身不启动相机；忙时可能返回 EAGAIN，可稍后重读，不能清除错误。
+包含启动进度扩展的新镜像还会输出 `startup_trace_version`、`startup_stage`
+和 `startup_result`，解释见 [CPU1 启动进度记录](cpu1-startup-trace.zh-CN.md)。
+这些字段保留最后执行阶段，不替代推进的心跳、资源状态或摄像头帧验收。
 三个 Linux 资源树声明分别覆盖 KPU SRAM、shared SRAM 和 GNNE/FFT/AI2D
 寄存器。这是协作式资源排他，不是任意特权 MMIO/DMA 的安全隔离证明。
 
