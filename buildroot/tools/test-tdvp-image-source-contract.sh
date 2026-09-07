@@ -143,10 +143,10 @@ for mutation in login-command login-user session; do
 	case "${mutation}" in
 		login-command)
 			path=/etc/greetd/config.toml
-			sed 's|tdvp-labwc-session|tdvp-greeter-session|' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;
+			sed 's|tdvp-greeter-session|tdvp-labwc-session|' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;
 		login-user)
 			path=/etc/greetd/config.toml
-			sed 's|user = "tdvp"|user = "root"|' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;
+			sed 's|user = "greeter"|user = "root"|' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;
 		session)
 			path=/usr/local/bin/tdvp-labwc-session
 			printf '#!/bin/sh\nexec /usr/bin/dbus-run-session -- /usr/bin/labwc\n' > "${TEMP_DIR}/mutant" ;;

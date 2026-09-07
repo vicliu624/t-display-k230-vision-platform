@@ -60,6 +60,9 @@ for file in "${SYSIMAGE}" "${SPL}" "${UBOOT_ENV}" "${UBOOT}" "${BOOTFS}" "${ROOT
 	fi
 done
 
+# Check real ext4 metadata, not permissions in the unprivileged staging tree.
+bash "$(dirname "$0")/verify-auth-rootfs.sh" "${ROOTFS}"
+
 # U-Boot must identify the root partition by its deterministic GPT UUID.  The
 # Linux mmcblk index is not a stable board ABI: it changes when optional SDIO
 # peripherals are present or probe in a different order.
@@ -803,10 +806,9 @@ reject_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-labwc-desktop-session'
 reject_fs_path "${ROOTFS}" '/usr/bin/sfwbar'
 reject_fs_path "${ROOTFS}" '/usr/bin/swaybg'
 reject_fs_path "${ROOTFS}" '/etc/sfwbar/sfwbar.config'
-# The delivered default is the tdvp desktop; the installed greeter remains
-# an explicit rollback choice. Match the SDK baseline and package policy.
-require_rootfs_line '/etc/greetd/config.toml' '^command = "/usr/local/bin/tdvp-labwc-session"$'
-require_rootfs_line '/etc/greetd/config.toml' '^user = "tdvp"$'
+# Login authentication is distinct from the in-session swaylock surface.
+require_rootfs_line '/etc/greetd/config.toml' '^command = "/usr/local/bin/tdvp-greeter-session"$'
+require_rootfs_line '/etc/greetd/config.toml' '^user = "greeter"$'
 require_rootfs_content '/etc/pam.d/greetd' 'session    required   pam_unix.so'
 require_rootfs_content '/etc/pam.d/greetd-greeter' 'session    required   pam_unix.so'
 require_rootfs_content '/etc/pam.d/swaylock' 'auth       required   pam_unix.so'

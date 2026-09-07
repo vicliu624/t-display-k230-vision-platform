@@ -216,6 +216,30 @@ Use it with the dedicated `tdvp-camera-isp` package, not the vendor OV5647/RVV
 runtime. The camera DTB guard checks phandle bindings and clock fields; merely
 finding the string `gc2093` is not evidence of integration or frame capture.
 
+## CPU1 shared GPIO arbitration
+
+`0067-tdvp-gpio-cpu1-shared-port-arbitration.patch` is opt-in through
+`tdvp,cpu1-gpio-mask = <0x00200000>` on GPIO0. It permits only the TDVP
+GPIO0/21 contract, uses the RT-Smart hardware semaphore 0 at `0x911040a0`,
+and replaces bgpio's shadow-based writes with live protected RMW operations.
+Linux cannot request GPIO21. Timeout refuses the write; Linux must not reset,
+gate or suspend the shared controller. System suspend is rejected until an
+AMP-wide quiesce protocol exists; ordinary Wayland screen blanking is unaffected.
+The image ownership cutover must enable this property before CPU1 drives reset.
+The host regression extracts and executes the helper from this patch itself.
+
+## CPU1 vision power-domain retention
+
+`0068-tdvp-power-retain-cpu1-vision-domains.patch` opts in with
+`tdvp,cpu1-vision-domains` on the K230 power-domain provider. AI and DISP
+remain powered, because CPU1 owns KPU/ISP and ISP shares DISP with the Linux
+screen. Already-on domains are not cycled. Direct power-off is rejected and
+probe failures are propagated with initialized domains unwound. Other domains
+and non-opted-in boards retain their existing policy. Wayland blanking is not
+system suspend. The regression executes the actual patched driver with mocked
+Linux/MMIO services, including retry and failure paths; silicon timing still
+requires hardware validation.
+
 ## Required Checks
 
 ```sh

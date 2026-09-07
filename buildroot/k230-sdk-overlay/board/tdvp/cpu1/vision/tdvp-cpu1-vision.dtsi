@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: GPL-2.0 OR MIT
+/* Candidate only: requires Linux 0067/0068 and the paired CPU1 vision image.
+ * Include AFTER the complete RM69A10 board DTS (including CPU0 GC2093 setup).
+ * Do not apply this as a live overlay or boot it with compute-only CPU1.
+ */
+/ {
+	reserved-memory {
+		tdvp_cpu1_mmz: cpu1-mmz@14000000 {
+			reg = <0x0 0x14000000 0x0 0x08000000>;
+			no-map;
+		};
+		tdvp_cpu1_transport: cpu1-transport@1c000000 {
+			reg = <0x0 0x1c000000 0x0 0x02000000>;
+			no-map;
+		};
+	};
+	cpu1_vision: cpu1-vision {
+		compatible = "tdvp,cpu1-vision-v1";
+		memory-region = <&tdvp_cpu1_transport>, <&tdvp_cpu1_mmz>;
+		memory-region-names = "transport", "mmz";
+		tdvp,gpio-controller = <&gpio0>;
+		tdvp,power-controller = <&sysctl_power>;
+		status = "okay";
+	};
+};
+
+&gpio0 { tdvp,cpu1-gpio-mask = <0x00200000>; };
+&gpio0_ports { gpio-reserved-ranges = <21 1>; };
+&sysctl_power { tdvp,cpu1-vision-domains; };
+
+/* CPU1 alone owns sensor, I2C4, CSI, ISP and AI engines/interrupts. */
+&i2c4 {
+	status = "disabled";
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	gc2093@37 { status = "disabled"; };
+};
+&isp { status = "disabled"; };
+&mipi0 { status = "disabled"; };
+&mipi1 { status = "disabled"; };
+&mipi2 {
+	status = "disabled";
+	/delete-property/ reset-gpios;
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	/delete-property/ clocks;
+	/delete-property/ clock-names;
+	/delete-property/ assigned-clocks;
+	/delete-property/ assigned-clock-parents;
+	/delete-property/ assigned-clock-rates;
+};
+&gnne { status = "disabled"; };
+&ai2d { status = "disabled"; };
+
+/* Disabled providers are skipped by of_clk_init: Linux must not perform
+ * unused-clock gating or rate changes on CPU1's dedicated clock fields.
+ * Keep shared PLLs, GPIO/IOMUX and all display/VGLite/non-AI2D clocks intact.
+ * CPU1/boot must establish its clocks; this declaration does not enable them.
+ */
+&i2c4_clk { status = "disabled"; };
+&i2c4_pclk_gate { status = "disabled"; };
+&tdvp_sensor_mclk1 { status = "disabled"; };
+&tdvp_sensor_mclk1_mux { status = "disabled"; };
+&ai_clk { status = "disabled"; };
+&ai_aclk { status = "disabled"; };

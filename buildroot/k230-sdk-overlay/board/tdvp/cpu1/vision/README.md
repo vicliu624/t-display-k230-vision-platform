@@ -27,6 +27,18 @@ This directory is an **in-progress migration**. Merely building it does not
 - Embedded ROMFS mounting and LWP launch glue; no CPU1 SD/USB/network startup.
 - A noncached three-slot SPSC frame transport and Linux `poll/read` copy bridge.
   The bridge accepts no user physical addresses and exports no `mmap`.
+- Camera-only pinmux for 7/8 (I2C4), 13 (MCLK1) and 21 (reset), preserving
+  voltage/reserved bits and refusing an existing alternate I2C4 route.
+- Opt-in Linux GPIO0 cross-core arbitration (`0067`): hardware semaphore 0,
+  live register RMW, CPU1 GPIO21 preservation, timeout refusal, and no Linux
+  reset/clock-off/system-suspend while the shared controller is active.
+- Opt-in AI/DISP power retention (`0068`), including the ISP/display shared
+  domain. Linux does not cycle already-on domains and rejects power-off while
+  CPU1 ownership is enabled. Initialization failures are not silently ignored.
+- A compiled candidate device-tree wrapper and ownership include, with the
+  new MMZ/transport reservations and GPIO/power policies. Linux camera/AI
+  devices and dedicated clock providers are disabled. This wrapper is NOT
+  selected by the production profile yet and is not a live DT overlay.
 
 ## Memory and wire contract
 
@@ -61,7 +73,11 @@ Host regression tests:
 
 ```sh
 bash buildroot/tools/test-tdvp-cpu1-vision-init.sh
+bash buildroot/tools/test-tdvp-cpu1-vision-pins.sh
 bash buildroot/tools/test-tdvp-cpu1-transport.sh
+bash buildroot/tools/test-tdvp-cpu1-gpio-amp.sh
+bash buildroot/tools/test-tdvp-cpu1-power-amp.sh /path/to/pristine/pinned/linux
+bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh /path/to/fully/patched/linux
 bash buildroot/tools/test-tdvp-cpu1-capture.sh /path/to/pinned/canmv_k230/src/rtsmart/mpp
 ```
 
@@ -69,6 +85,18 @@ The capture test compiles against the actual pinned MPI headers with mocked
 operations: 25 lifecycle/failure cases. The transport test covers packed row
 copying, backpressure, leases, stale epochs, invalid releases and overflow.
 These tests do not prove physical cache coherency, camera operation or FPS.
+The GPIO model runs 100,000 concurrent updates per core against the actual
+patch helper. Pinmux tests cover the four-pad whitelist and failure/conflict
+paths; MPP initialization now covers eight stages. The power regression runs
+the complete production driver after applying `0068` to actual kernel source,
+with Linux/MMIO mocked, including probe retry, no cycling of live domains,
+power-off refusal and error cleanup. CI runs this against `linux-patch` output
+with `--patched`, first checking that the patch can be reversed without fuzz.
+The candidate DTB test compiles both the actual CPU0 board and the vision
+wrapper, resolves phandles, and compares all 273 existing nodes with a narrow
+property allowlist. Twenty invalid candidates (Linux ownership, missing
+protection/reservation, overlap, mailbox/UART1 regression) are rejected. This
+proves declarations and absence of unrelated DT drift, not runtime ownership.
 
 On the LAN Ubuntu 24.04 validation container, the pinned CPU1 musl toolchain
 cross-linked the real MPI/ISP libraries with both executables:
@@ -79,23 +107,25 @@ bash buildroot/k230-sdk-overlay/board/tdvp/cpu1/vision/build-capture-probe.sh \
 ```
 
 The camera-only RT-Smart kernel and a subsequent ROMFS/worker kernel also
-linked. The Linux bridge compiled against the existing 6.6.36 scalar kernel
-with that kernel tree mounted read-only. The upstream RT-Smart linker script
+linked, including the four-pad initializer. The Linux bridge and GPIO driver
+compiled against the existing 6.6.36 scalar kernel with that kernel tree
+mounted read-only; the power-domain driver also compiled as a RISC-V object.
+That object's `W=1` build retains the upstream missing-prototype warning for
+`k230_pd_probe`. The GPIO validation module must never be loaded alongside the
+built-in GPIO driver. The upstream RT-Smart linker script
 still emits an RWX LOAD-segment warning; no claim of hardened ELF permissions
 is made. Nothing in this migration has been deployed to the board yet.
 
 ## Required before production activation
 
-1. **GPIO arbitration:** RT-Smart GPIO21 sensor reset shares the GPIO0 data
-   and direction registers with Linux. RT-Smart uses hardlock 0; Linux
-   `gpio-k230.c`/bgpio currently uses only local spinlocks and cached port
-   state. Simply disabling Linux CSI/I2C is insufficient: Linux writes may
-   overwrite CPU1's reset bit, or CPU1 read/modify/write may lose Linux bits.
-   Add cross-core protection preserving the remote-owned bit, including
-   direction and suspend/resume paths, and test it before booting.
-2. Configure only camera pins 7/8 (I2C4), 13 (MCLK1) and 21 (reset) on CPU1.
-   Do not copy the full CanMV pinmux initializer: its function-selection helper
-   clears alternate pins and can modify Linux-owned functions.
+1. Enable `tdvp,cpu1-gpio-mask = <0x00200000>` on GPIO0 and
+   `tdvp,cpu1-vision-domains` on the power provider in the ownership device
+   tree. The software guards are implemented, but their physical coexistence
+   behavior has not been tested. Simply disabling Linux CSI/I2C is insufficient.
+2. Retire Linux camera/AI clock providers without gating active CPU1 clocks,
+   preserve Linux display/VGLite clocks, and validate CPU1 power/clock setup
+   before sensor and KPU access. Do not import the full CanMV board initializer:
+   it configures functions outside CPU1's ownership.
 3. Atomically add Linux MMZ/transport reservations and retire Linux camera,
    ISP, KPU/AI2D bindings and the CPU0 ISP service. Add an ownership gate that
    rejects mixed firmware/DT/profile combinations and checks GPIO protection.

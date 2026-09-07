@@ -349,6 +349,8 @@ require_line "${STAGED_OVERLAY}/boot/uboot/u-boot-2022.10-overlay/board/canaan/c
 require_file "${STAGED_OVERLAY}/linux/0064-tdvp-riscv-dts-use-scalar-cpu0.patch"
 require_file "${STAGED_OVERLAY}/linux/0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch"
 require_file "${STAGED_OVERLAY}/linux/0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch"
+require_file "${STAGED_OVERLAY}/linux/0067-tdvp-gpio-cpu1-shared-port-arbitration.patch"
+require_file "${STAGED_OVERLAY}/linux/0068-tdvp-power-retain-cpu1-vision-domains.patch"
 require_line "${STAGED_OVERLAY}/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" 'BR2_PACKAGE_TDVP_CAMERA_ISP=y'
 require_line "${STAGED_OVERLAY}/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" '# BR2_PACKAGE_VVCAM is not set'
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c"
@@ -630,8 +632,11 @@ require_content "${DESKTOP_SOURCE}/foot.ini" 'initial-window-mode=windowed'
 require_content "${DESKTOP_SOURCE}/foot.ini" 'initial-window-size-pixels=900x460'
 require_file "${DESKTOP_SOURCE}/backgrounds/tdvp-pda-paper.svg"
 require_content "${GREETER_SOURCE}/config.toml" '[default_session]'
-require_content "${GREETER_SOURCE}/config.toml" 'command = "/usr/local/bin/tdvp-labwc-session"'
-require_content "${GREETER_SOURCE}/config.toml" 'user = "tdvp"'
+require_content "${GREETER_SOURCE}/config.toml" 'command = "/usr/local/bin/tdvp-greeter-session"'
+require_content "${GREETER_SOURCE}/config.toml" 'user = "greeter"'
+require_absent_content "${GREETER_SOURCE}/config.toml" '[initial_session]'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/swaylock.mk" '/usr/sbin/unix_chkpwd f 4755 0 0 - - - - -'
+require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/verify-auth-rootfs.sh"
 require_file "${GREETER_SOURCE}/tdvp-graphical-login"
 require_content "${GREETER_SOURCE}/tdvp-graphical-login" 'select {autologin|greeter}'
 require_content "${GREETER_SOURCE}/tdvp-graphical-login" 'command = "/usr/local/bin/tdvp-greeter-session"'
@@ -701,7 +706,9 @@ if [ "${PATCH_ONLY}" = "1" ]; then
 	done
 	require_file "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-wf-panel-session"
 	require_file "${STAGED_OVERLAY}/package/tdvp-greeter/src/tdvp-graphical-login"
-	require_content "${STAGED_OVERLAY}/package/tdvp-greeter/src/config.toml" 'command = "/usr/local/bin/tdvp-labwc-session"'
+	require_content "${STAGED_OVERLAY}/package/tdvp-greeter/src/config.toml" 'command = "/usr/local/bin/tdvp-greeter-session"'
+	require_content "${STAGED_OVERLAY}/package/tdvp-greeter/src/config.toml" 'user = "greeter"'
+	require_absent_content "${STAGED_OVERLAY}/package/tdvp-greeter/src/config.toml" '[initial_session]'
 	require_file "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-pcmanfm-desktop-session"
 	require_file "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-key-bridge.c"
 	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-gdk-committed-compat.c" 'GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE 1'

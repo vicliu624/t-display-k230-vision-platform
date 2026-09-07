@@ -15,9 +15,9 @@ TDVP_GREETER_DEPENDENCIES = \
 	tdvp-greetd \
 	tdvp-gtkgreet \
 	wlr-randr
-# The image starts the tdvp desktop directly.  The greeter stays installed as
-# an explicit rollback target selected by tdvp-graphical-login, and shares the
-# same board DRM and output-transform contract when it is selected.
+# The image starts the authenticated greeter. Explicit maintenance autologin
+# remains available through tdvp-graphical-login, but is not the shipped
+# default. Both paths share the board DRM and output-transform contract.
 define TDVP_GREETER_USERS
 	greeter -1 greeter -1 = /var/lib/greetd /bin/sh seat,video,render
 endef

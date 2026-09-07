@@ -61,7 +61,9 @@ jobs:
           bash buildroot/tools/test-tdvp-cpu1-build-env.sh
           bash buildroot/tools/test-tdvp-cpu1-mailbox.sh
           bash buildroot/tools/test-tdvp-cpu1-vision-init.sh
+          bash buildroot/tools/test-tdvp-cpu1-vision-pins.sh
           bash buildroot/tools/test-tdvp-cpu1-transport.sh
+          bash buildroot/tools/test-tdvp-cpu1-gpio-amp.sh
           bash buildroot/tools/test-tdvp-lora-status.sh
           bash buildroot/tools/test-tdvp-vglite-diagnostics-report.sh
           bash buildroot/tools/test-tdvp-vglite-session-gate.sh
@@ -71,6 +73,7 @@ jobs:
           bash buildroot/tools/test-tdvp-profile-config.sh
           bash buildroot/tools/test-tdvp-cpu0-dts-queue.sh
           bash buildroot/tools/test-tdvp-session-idle-contract.sh
+          bash buildroot/tools/test-tdvp-auth-image.sh
           bash buildroot/tools/test-tdvp-image-source-contract.sh
           bash buildroot/tools/test-verify-sdcard-image-volumepulse-guard.sh
           bash buildroot/tools/test-tdvp-display-smoke-cleanup.sh
@@ -93,6 +96,11 @@ jobs:
         run: |
           bash buildroot/tools/build-k230-sdk-rm69a10.sh "$TDVP_WORKTREE" linux-patch
           bash buildroot/tools/assert-k230-sdk-rm69a10-baseline.sh --patch-only "$TDVP_WORKTREE"
+          kernel_commit="$(python3 -c 'import configparser; c = configparser.ConfigParser(); c.read("buildroot/sdk-sources.lock"); print(c["linux_kernel"]["commit"])')"
+          [[ "$kernel_commit" =~ ^[0-9a-f]{40}$ ]]
+          kernel_source="$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/build/linux-$kernel_commit"
+          bash buildroot/tools/test-tdvp-cpu1-power-amp.sh "$kernel_source" --patched
+          bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh "$kernel_source"
 
       - name: Build the bootable SD image
         run: bash buildroot/tools/build-k230-sdk-rm69a10.sh "$TDVP_WORKTREE"

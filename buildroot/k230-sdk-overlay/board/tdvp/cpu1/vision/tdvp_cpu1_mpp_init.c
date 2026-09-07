@@ -23,6 +23,7 @@ extern int mmz_userdev_init(void);
 extern int sysctrl_init(void);
 extern int vb_init(void);
 extern int vicap_init(void);
+extern int tdvp_cpu1_vision_pins_init(void);
 
 static int vision_status = -RT_EBUSY;
 static int attempted;
@@ -61,6 +62,9 @@ int mpp_init(void)
         goto failed;
     stage = "vb";
     if ((result = vb_init()) != 0)
+        goto failed;
+    stage = "camera-pins";
+    if ((result = tdvp_cpu1_vision_pins_init()) != 0)
         goto failed;
     stage = "vicap";
     if ((result = vicap_init()) != 0)

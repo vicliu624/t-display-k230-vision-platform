@@ -25,21 +25,22 @@ int mmz_init(unsigned long base, unsigned long size)
 int mmz_userdev_init(void) { return step(4); }
 int sysctrl_init(void) { return step(5); }
 int vb_init(void) { return step(6); }
-int vicap_init(void) { return step(7); }
+int tdvp_cpu1_vision_pins_init(void) { return step(7); }
+int vicap_init(void) { return step(8); }
 int rt_kprintf(const char *format, ...) { (void)format; return 0; }
 
 int main(int argc, char **argv)
 {
     assert(argc == 2);
     fail_at = atoi(argv[1]);
-    assert(fail_at >= 0 && fail_at <= 7);
+    assert(fail_at >= 0 && fail_at <= 8);
     assert(tdvp_cpu1_vision_init_status() != 0);
     const int expected = fail_at ? -100 - fail_at : 0;
     assert(mpp_init() == expected);
     assert(tdvp_cpu1_vision_init_status() == expected);
-    assert(calls == (fail_at ? fail_at : 7));
+    assert(calls == (fail_at ? fail_at : 8));
     /* Neither success nor partially initialized failure may run twice. */
     assert(mpp_init() == expected);
-    assert(calls == (fail_at ? fail_at : 7));
+    assert(calls == (fail_at ? fail_at : 8));
     return 0;
 }

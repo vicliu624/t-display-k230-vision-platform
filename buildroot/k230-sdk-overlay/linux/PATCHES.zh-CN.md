@@ -193,6 +193,26 @@ kernel configuration 和最终 DTB。物理验收记录包含 touch trace，以�
 camera DTB guard 检查实际 phandle 绑定和时钟字段；出现 `gc2093` 字符串
 本身不代表驱动已集成或已经能够取帧。
 
+## CPU1 共享 GPIO 保护
+
+`0067-tdvp-gpio-cpu1-shared-port-arbitration.patch` 只在 GPIO0 声明
+`tdvp,cpu1-gpio-mask = <0x00200000>` 时启用，且仅接受 TDVP GPIO0/21 布局。
+它与 RT-Smart 共用 `0x911040a0` 的硬件锁 0，用实时寄存器读改写替换
+bgpio 缓存整组状态的写入，并拒绝 Linux 申请 GPIO21。锁超时拒绝写入；
+Linux 不得复位或关闭共享控制器时钟。实现跨核休眠协调前拒绝整机 suspend，
+普通 Wayland 息屏不受影响。CPU1 开始操作复位脚前必须在镜像所有权切换中
+启用此属性。主机回归直接提取并执行本补丁里的 helper，而非另一份测试实现。
+
+## CPU1 视觉电源域保持
+
+`0068-tdvp-power-retain-cpu1-vision-domains.patch` 由 K230 电源域节点上的
+`tdvp,cpu1-vision-domains` 显式启用。CPU1 使用 KPU/ISP，且 ISP 与 Linux
+屏幕共用 DISP 域，因此启用后保持 AI、DISP 供电，不重启已开启的域，
+并拒绝直接断电调用。探测失败会返回错误并撤销已初始化的域；其他电源域
+及未启用此属性的板型保持既有策略。Wayland 息屏不等于整机 suspend。
+回归测试执行实际打补丁后的驱动，模拟 Linux/MMIO 服务并覆盖重试和失败路径；
+芯片上的供电时序仍需硬件验证。
+
 ## Required Check
 
 ```sh
