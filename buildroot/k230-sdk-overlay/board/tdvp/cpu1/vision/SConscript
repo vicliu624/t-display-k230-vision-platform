@@ -1,0 +1,19 @@
+# The pinned vendor script whole-links every .a in the directory. Keep an
+# explicit allowlist: old cached VO/audio/VPU archives must never leak in.
+from building import *
+import os
+
+cwd = GetCurrentDir()
+mpp = os.environ['MPP_SRC_DIR']
+libraries = ['cmpi', 'log', 'mmz', 'sys', 'vb', 'vicap', 'sensor', 'mediafreq']
+for name in libraries:
+    archive = os.path.join(mpp, 'kernel', 'lib', 'lib' + name + '.a')
+    if not os.path.isfile(archive):
+        raise RuntimeError('Missing CPU1 vision library: ' + archive)
+
+flags = ' -Wl,--whole-archive ' + ' '.join('-l' + name for name in libraries)
+flags += ' -Wl,--no-whole-archive'
+group = DefineGroup('Mpp', ['mpp_init.c'], depend=['RT_USING_MPP'],
+                    CPPPATH=[cwd], LINKFLAGS=flags,
+                    LIBPATH=[os.path.join(mpp, 'kernel', 'lib')])
+Return('group')

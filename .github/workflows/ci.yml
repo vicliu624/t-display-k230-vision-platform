@@ -60,6 +60,8 @@ jobs:
           bash buildroot/tools/test-tdvp-cpu1-boot-contract.sh
           bash buildroot/tools/test-tdvp-cpu1-build-env.sh
           bash buildroot/tools/test-tdvp-cpu1-mailbox.sh
+          bash buildroot/tools/test-tdvp-cpu1-vision-init.sh
+          bash buildroot/tools/test-tdvp-cpu1-transport.sh
           bash buildroot/tools/test-tdvp-lora-status.sh
           bash buildroot/tools/test-tdvp-vglite-diagnostics-report.sh
           bash buildroot/tools/test-tdvp-vglite-session-gate.sh
