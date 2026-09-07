@@ -95,8 +95,8 @@ esac
 # DRM driver exposes and validates IN_FENCE_FD/OUT_FENCE_PTR it would bypass
 # the measured VGLite -> finish -> atomic page-flip ownership contract.
 #
-# This is scoped to the experimental VGLite profile: the current Pixman image
-# keeps its existing behavior, and a later fence-qualified direct-scanout gate
+# This is scoped to the default VGLite profile: Pixman recovery keeps its
+# existing behavior, and a later fence-qualified direct-scanout gate
 # can remove this guard without changing Labwc's window policy.
 direct_scanout_policy=existing
 vglite_failure_recovery=not-applicable
@@ -242,7 +242,7 @@ rmdir "${session_directory}" 2>/dev/null || true
 rmdir "${session_root}" 2>/dev/null || true
 
 # Do not make an authenticated user log in again merely because the
-# experimental compositor crashed. This occurs only after trip_vglite() has
+# VGLite compositor crashed. This occurs only after trip_vglite() has
 # persisted the breaker, so the self-exec is deterministically Pixman and
 # cannot retry or mix the failed renderer in the same session.
 if [ "${restart_with_pixman}" = yes ]; then

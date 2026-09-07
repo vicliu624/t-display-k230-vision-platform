@@ -37,6 +37,8 @@ define TDVP_LABWC_DESKTOP_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/etc/tdvp/labwc/environment
 	$(INSTALL) -D -m 0644 $(@D)/renderer-profile \
 		$(TARGET_DIR)/etc/tdvp/labwc/renderer-profile
+	$(INSTALL) -D -m 0644 $(@D)/vglite-enabled \
+		$(TARGET_DIR)/etc/tdvp/labwc/vglite-enabled
 	$(INSTALL) -D -m 0644 $(@D)/tdvp-local-admin-path.sh \
 		$(TARGET_DIR)/etc/profile.d/tdvp-local-admin-path.sh
 	$(INSTALL) -D -m 0644 $(@D)/70-tdvp-touch.rules \

@@ -57,6 +57,7 @@ jobs:
           bash buildroot/tools/validate-k230-sdk-linux-patches.sh buildroot/k230-sdk-overlay/linux
           bash buildroot/tools/test-reconcile-k230-sdk-linux-patches.sh
           bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
+          bash buildroot/tools/test-tdvp-renderer-profile.sh
           bash buildroot/tools/test-tdvp-cpu1-boot-contract.sh
           bash buildroot/tools/test-tdvp-cpu1-build-env.sh
           bash buildroot/tools/test-tdvp-cpu1-mailbox.sh

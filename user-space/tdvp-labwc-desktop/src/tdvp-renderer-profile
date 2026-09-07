@@ -4,9 +4,9 @@ set -eu
 # Renderer selection is deliberately a session-start decision.  A wlroots
 # renderer owns textures, output buffers and render passes, so changing it in
 # the middle of a frame is not a safe failure-recovery mechanism.  Keep the
-# release profile on Pixman, require an image-owned approval marker for
-# VGLite, and use a per-user circuit breaker after an abnormal VGLite session
-# exit.
+# product default on the pinned VGLite stack, require an image-owned enable
+# policy, and use a per-user circuit breaker after an abnormal VGLite session
+# exit. The enable policy is not a record of hardware acceptance.
 profile_file="${TDVP_RENDERER_PROFILE_FILE:-/etc/tdvp/labwc/renderer-profile}"
 vglite_enabled_file="${TDVP_VGLITE_ENABLED_FILE:-/etc/tdvp/labwc/vglite-enabled}"
 state_root="${TDVP_RENDERER_STATE_DIR:-${XDG_STATE_HOME:-${HOME:-/home/tdvp}/.local/state}/tdvp-labwc}"

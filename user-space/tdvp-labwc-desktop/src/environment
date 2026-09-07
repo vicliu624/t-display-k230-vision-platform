@@ -2,9 +2,10 @@
 WLR_BACKENDS=drm,libinput
 WLR_DRM_DEVICES=/dev/dri/card0
 # K230's vendor DRM driver is not backed by a Mesa DRI driver in this image.
-# Use wlroots' native pixman renderer so the compositor never falls back
-# through the unavailable canaan-drm EGL path.
-WLR_RENDERER=pixman
+# Use the pinned native VGLite renderer, not the unavailable Mesa/EGL path.
+# tdvp-labwc-session resolves policy and may explicitly recover to Pixman;
+# tdvp-greeter-session independently keeps the login compositor on Pixman.
+WLR_RENDERER=vglite
 WLR_DRM_NO_MODIFIERS=1
 WLR_RENDERER_ALLOW_SOFTWARE=1
 # This image uses a private session D-Bus launched by dbus-run-session, not a

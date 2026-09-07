@@ -263,7 +263,7 @@ bash "${IMAGE_GUARD}" "${BINARIES_DIR}"
 	printf 'linux_commit=7d4e1f444f461dbe3833bd99a4640e7b6c2cd529\n'
 	printf 'wlroots_commit=94bca3e871ec4cce73afbef7bad4d962331ab9bb\n'
 	printf 'labwc_commit=9af441ecd36bbee66d4df46baa7b482872d989f2\n'
-	printf 'renderer_default=pixman\n'
+	printf 'renderer_default=vglite\n'
 	printf 'labwc_update_activation_env=0\n'
 	printf 'cpu1_execution_model=linux-cpu0+rtsmart-cpu1\n'
 	printf 'linux_physical_cpu=0\n'

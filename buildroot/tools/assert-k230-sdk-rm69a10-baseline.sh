@@ -436,7 +436,10 @@ require_content "${DESKTOP_SOURCE}/tdvp-labwc-session" 'vglite_diagnostics=enabl
 require_content "${DESKTOP_SOURCE}/tdvp-labwc-session" 'labwc_verbose=enabled-for-diagnostics'
 require_file "${DESKTOP_SOURCE}/tdvp-renderer-profile"
 require_file "${DESKTOP_SOURCE}/renderer-profile"
-require_content "${DESKTOP_SOURCE}/renderer-profile" 'TDVP_RENDERER_PROFILE=pixman'
+require_line "${DESKTOP_SOURCE}/renderer-profile" 'TDVP_RENDERER_PROFILE=vglite'
+require_line "${DESKTOP_SOURCE}/environment" 'WLR_RENDERER=vglite'
+require_line "${DESKTOP_SOURCE}/vglite-enabled" 'tdvp_vglite_policy_version=1'
+require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk" '$(TARGET_DIR)/etc/tdvp/labwc/vglite-enabled'
 require_content "${DESKTOP_SOURCE}/tdvp-renderer-profile" 'vglite-enabled'
 require_content "${DESKTOP_SOURCE}/tdvp-renderer-profile" 'clear-vglite-failure'
 require_content "${DESKTOP_SOURCE}/tdvp-renderer-profile" 'diagnostics-next-vglite-session'
@@ -733,7 +736,8 @@ if [ "${PATCH_ONLY}" = "1" ]; then
 	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-labwc-session" 'labwc_verbose=enabled-for-diagnostics'
 	require_file "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-renderer-profile"
 	require_file "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/renderer-profile"
-	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/renderer-profile" 'TDVP_RENDERER_PROFILE=pixman'
+	require_line "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/renderer-profile" 'TDVP_RENDERER_PROFILE=vglite'
+	require_line "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/vglite-enabled" 'tdvp_vglite_policy_version=1'
 	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-renderer-profile" 'vglite-enabled'
 	require_content "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/tdvp-renderer-profile" 'diagnostics-next-vglite-session'
 	require_file "${STAGED_OVERLAY}/package/tdvp-labwc-desktop/src/menus/lxde-applications.menu"
@@ -954,6 +958,6 @@ require_content "${IMAGES}/tdvp-image-manifest" 'linux_physical_cpu=0'
 require_content "${IMAGES}/tdvp-image-manifest" 'cpu1_firmware_format=opensbi-fw-payload-raw'
 require_content "${IMAGES}/tdvp-image-manifest" 'wlroots_commit=94bca3e871ec4cce73afbef7bad4d962331ab9bb'
 require_content "${IMAGES}/tdvp-image-manifest" 'labwc_commit=9af441ecd36bbee66d4df46baa7b482872d989f2'
-require_content "${IMAGES}/tdvp-image-manifest" 'renderer_default=pixman'
+require_content "${IMAGES}/tdvp-image-manifest" 'renderer_default=vglite'
 require_content "${IMAGES}/tdvp-image-manifest" 'labwc_update_activation_env=0'
 printf '%s\n' 'TDVP desktop assertion: PASS'

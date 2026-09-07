@@ -7,6 +7,11 @@ set -a
 . /etc/tdvp/labwc/environment
 set +a
 
+# The login compositor is a separate recovery entry point, not the accelerated
+# authenticated desktop. Keep it usable even if the desktop's GPU path fails.
+export WLR_RENDERER=pixman
+unset TDVP_LABWC_VGLITE_FAILURE_RECOVERY TDVP_VGLITE_DIAGNOSTICS
+
 export HOME="${HOME:-/var/lib/greetd}"
 export XDG_CONFIG_HOME=/etc/tdvp/greetd
 export XDG_CONFIG_DIRS=/etc/xdg

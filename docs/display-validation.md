@@ -1,10 +1,24 @@
 # Display Validation
 
-The image validates the internal RM69A10 panel through the K230 DRM/KMS path.
-The fixed-panel approved candidate uses connector `DSI-1`, output transform
-`90`, and logical size `1232x568`; the current board session has been observed
-with `WLR_RENDERER=vglite`. Pixman is the release/recovery baseline, not an
-automatic interpretation of an ordinary SHM benchmark pass.
+The image drives the internal RM69A10 panel through K230 DRM/KMS, connector
+`DSI-1`, transform `90`, and logical size `1232x568`. On 2026-09-07 the product
+policy was changed to default the authenticated desktop to VGLite. Pixman
+remains the independent greeter renderer, explicit maintenance option and
+render-failure recovery path.
+
+A default selection is not a hardware acceptance result. The display team's
+earlier VGLite results belong to their measured stack and session. The newly
+flashed board was observed using Pixman; this policy edit does not restart the
+user's desktop. The new image still requires real VGLite Gates and gtklock
+lock/blank/wake coexistence validation.
+
+Both `renderer-profile` and the image-owned `vglite-enabled` policy are
+installed. Missing enable policy still resolves safely to Pixman. The enable
+file is not a test report. Existing failure detection, the three-consecutive-
+failure controlled exit and Pixman session recovery remain unchanged; no
+renderer switch happens within a frame. Image checks bind the environment,
+profile, enable file and manifest so merely shipping a driver cannot count as
+enabling the default renderer.
 
 ## Image Checks
 

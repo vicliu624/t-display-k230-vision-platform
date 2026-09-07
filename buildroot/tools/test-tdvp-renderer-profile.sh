@@ -43,7 +43,7 @@ expect_equal() {
 	exit 1
 }
 
-expect_equal pixman "$(run_tool resolve)" default-pixman
+expect_equal pixman "$(run_tool resolve)" missing-policy-safe-pixman
 expect_equal off "$(run_tool diagnostics-status)" diagnostics-default-off
 
 printf '%s\n' 'TDVP_RENDERER_PROFILE=vglite' > "${profile_file}"
@@ -74,6 +74,17 @@ expect_equal vglite "$(run_tool resolve)" clear-breaker-restores-approved-profil
 
 printf '%s\n' 'TDVP_RENDERER_PROFILE=unexpected' > "${profile_file}"
 expect_equal pixman "$(run_tool resolve)" invalid-profile-falls-back
+
+# Bind the default to the actual files installed by the product recipe, not
+# just a synthetic VGLite assignment. The image-source test checks that the
+# recipe really delivers these files and the image guard requires them.
+sed 's/\r$//' "${project_dir}/user-space/tdvp-labwc-desktop/src/renderer-profile" > "${profile_file}"
+sed 's/\r$//' "${project_dir}/user-space/tdvp-labwc-desktop/src/vglite-enabled" > "${enabled_file}"
+expect_equal vglite "$(run_tool resolve)" real-product-default-vglite
+run_tool trip 1
+expect_equal pixman "$(run_tool resolve)" real-product-failure-recovers-pixman
+rm -f "${failure_file}" "${enabled_file}"
+expect_equal pixman "$(run_tool resolve)" real-product-missing-enable-policy-safe-pixman
 
 if [ "$(id -u)" = 0 ]; then
 	rm -f "${enabled_file}"
