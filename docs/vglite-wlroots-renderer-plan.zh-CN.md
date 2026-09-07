@@ -49,10 +49,10 @@ override-source 的 rsync 路径而刻意跳过通用 `_PATCH` 阶段。因此�
 
 K230 内核已经启用了 `CONFIG_GPU_VGLITE`，平台镜像也安装了与它匹配的 VGLite
 用户态库和仅授予 `render` 组的 `/dev/vg_lite` 规则。Mesa 仍只提供 `swrast` DRI，
-所以 `WLR_RENDERER=gles2` 不代表硬件加速。通用发布/回退 profile 仍以 Pixman 为
-保守基线；但 2026-09-05 的受控板端候选已经明确选择 `WLR_RENDERER=vglite`，并由
-approval marker、watchdog、session recovery 与本节 Gate 1 共同约束。两种 profile
-不得靠临时改环境变量互相伪装。
+所以 `WLR_RENDERER=gles2` 不代表硬件加速。当前镜像只允许认证后的桌面使用
+`WLR_RENDERER=vglite`，不提供 Pixman 桌面 profile 或软件回退。镜像策略标记、watchdog、
+失败熔断与本节 Gate 1 分别约束准入、超时、失败退出和实机验收；策略标记本身不代表
+硬件验收通过。独立 greeter 仍使用 Pixman，但它不能启动 Pixman 用户桌面。
 
 当前登录会话由 `dbus-run-session` 提供私有 session bus，而镜像没有启用
 `systemd --user` manager。因此环境文件必须固定
@@ -675,27 +675,26 @@ coherent allocation/import 合同；在此之前，wlroots 只可去除没有新
 
 ## 失败策略和验收
 
-通用发布镜像在 Gate 0.5 及完整可复现构建通过前仍明确默认 Pixman；只有锁定 kernel、SDK、
-wlroots 和 Labwc revision 的实验候选才能安装 VGLite 批准标记。当前真机候选是这个例外：
-`tdvp-renderer-profile` 明确选择 `vglite`，`/etc/tdvp/labwc/vglite-enabled` 已存在，且 greetd
-默认以 `tdvp` 执行 `tdvp-labwc-session`，因此开机不要求输入凭据。
+当前产品策略要求认证后的桌面只使用 VGLite。`tdvp-renderer-profile` 只接受 `vglite`；
+缺失、重复或不支持的 profile、缺失有效的 `/etc/tdvp/labwc/vglite-enabled` 策略标记，
+或已有的 GPU 失败标记都会阻止桌面启动。不得以 Pixman 或其他 renderer 掩盖这些错误。
+镜像使用 greetd/gtkgreet 密码登录；独立 greeter 的 Pixman compositor 不属于用户桌面。
 
 图形登录模式与 renderer profile 是两条独立开关。`tdvp-graphical-login select greeter` 会原子地
 将 `/etc/greetd/config.toml` 切为现有 `greeter` session；`select autologin` 则切回 `tdvp` 的
 Labwc session。任选其一后执行 `systemctl restart greetd` 即生效，且该操作不改变
 `tdvp-renderer-profile`、VGLite approval marker 或 circuit breaker。这使无人值守默认桌面和
-保守的 greeter 回退各自可验证，不必修改 renderer 配置或重建镜像。
+独立的 greeter 入口各自可验证，不必修改 renderer 配置或重建镜像。无论使用哪种登录模式，
+进入用户桌面都必须通过同一个 VGLite-only 启动器；自动登录不是当前镜像的默认模式。
 
 VGLite 不能在初始化失败后悄悄把**当前帧**切回 Pixman；这会破坏 renderer、texture、
 allocator 与 KMS buffer 的所有权，也会让用户误以为已得到 GPU 加速。初始化失败仍应记录
-原因并结束该 VGLite compositor process group。为避免把已认证用户送回 greeter，Labwc
-session 会把非正常 VGLite exit 写入 `$XDG_STATE_HOME/tdvp-labwc/vglite.failed`；只有该
-记录成功后，才以一次受控 self-exec 重启**同一登录会话**的 Pixman desktop。该 self-exec
-只接受内部 `TDVP_LABWC_FORCE_PIXMAN=1`，不能强制 VGLite；它会在启动 Pixman 前移除仅供
-VGLite 使用的 direct-scanout guard，因此不会重试或混用失败 renderer。若 breaker 无法写入，
-会话按原始错误退出而不是冒险进入重启循环。
+原因并结束该 VGLite compositor process group。Labwc session 会把非正常 VGLite exit
+写入 `$XDG_STATE_HOME/tdvp-labwc/vglite.failed`，清理本次登记的子进程组并结束会话，
+由 greetd 返回登录页。启动器没有切换 renderer 的 self-exec 或内部强制软件渲染入口。
+即使 breaker 无法写入，也必须结束失败会话，不能启动其他 renderer 或进入重启循环。
 
-后续登录同样会明确解析为 Pixman。该 circuit breaker 不是隐式 GPU 成功：
+后续登录会被 circuit breaker 阻止，不会解析为 Pixman。该 circuit breaker 不是隐式 GPU 成功：
 `tdvp-renderer-profile status` 同时显示 configured/effective profile、批准状态和 breaker
 状态，重新尝试 VGLite 必须由 root 清除失败标记。正常 logout 与 greetd/KMS maintenance
 使用的预期终止信号不会触发 breaker。
@@ -703,22 +702,18 @@ VGLite 使用的 direct-scanout guard，因此不会重试或混用失败 render
 对于 0059–0061 candidate 中的真实 VGLite completion 丢失，`vg_lite_finish()` 最迟在默认
 5000 ms 返回失败；wlroots render pass 因而返回 false，Labwc 的 `0004` patch 在仅由
 `TDVP_LABWC_VGLITE_FAILURE_RECOVERY=1` 开启的 VGLite 会话中计数该失败。三个**连续**失败
-才令 Labwc 以非零状态结束 event loop，随后才由上述 session wrapper 写 breaker 并启动一次
-Pixman。因此在最坏情况下该路径约需要三个 watchdog 窗口，而不是在一个正常的慢帧后任意
+才令 Labwc 以非零状态结束 event loop，随后由上述 session wrapper 写 breaker 并结束桌面。
+因此在最坏情况下该路径约需要三个 watchdog 窗口，而不是在一个正常的慢帧后任意
 kill compositor；任一成功 output commit 都会把计数归零。这是 kernel 有界等待、renderer
-错误返回、Labwc 退出和 session fallback 的明确责任链，仍须在 K230 以真实硬件故障注入和
+错误返回、Labwc 退出和会话清理的明确责任链，仍须在 K230 以真实硬件故障注入和
 Gate 1 验证，不能由 host-side sandbox 证明已经通过。
 
 在不影响真机桌面的情况下，`buildroot/tools/test-tdvp-labwc-session-recovery.sh` 以
-user-namespace `bwrap` sandbox 伪造 `setsid`、`dbus-run-session`、Labwc 和 profile helper。
-它固定让第一轮 VGLite fake Labwc 返回 `77`，并断言得到一个持久 breaker、恰好一次 Pixman
-self-restart、已移除的 VGLite direct-scanout guard、已移除的内部 force 标记以及可追溯的两份
-session log。该主机测试不能替代硬件 Gate 1，但能防止修改启动器时退化这条恢复状态机。
-
-当前 candidate 的该测试已在具备 RISC-V 交叉工具链且带 `bwrap` 的编译机实际通过：模拟的第一轮 VGLite
-session 返回失败后，breaker 被写入；第二轮只启动一次 Pixman，且 VGLite 专用
-direct-scanout guard 已移除。这个证据只覆盖启动器状态机，不覆盖 K230 GPU、page flip 或
-真实桌面恢复，因此仍必须在板端 Gate 1 复验。
+隔离的 root chroot 执行真实启动器、真实 profile helper 和真实 `setsid`，仅用 fixture 替代
+compositor 与 D-Bus。它让 VGLite fake Labwc 返回 `77`，断言只启动一次 VGLite、写入持久
+breaker、清理已登记的子进程组，并阻止下一次登录；同时覆盖正常退出、缺失策略标记和
+缺失 helper。测试不依赖 `bwrap`，不会操作板端 GPU，也不能证明 K230 page flip、真实
+锁屏恢复或完整 Gate 1 已通过。
 
 启用 VGLite 的最终板端验收包括：
 

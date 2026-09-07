@@ -34,8 +34,8 @@ WLROOTS_CONF_OPTS = -Dexamples=false -Dxcb-errors=disabled
 # wlroots 0.18.2 with the pinned TDVP fork exposes the K230 VGLite renderer.
 # The renderer implementation uses DRM dumb buffers exported through PRIME
 # DMA-BUF and does not use EGL. The runtime renderer is selected by the
-# session environment; the default target profile remains Pixman during VGLite
-# staging.
+# session environment; authenticated desktops require VGLite and never fall
+# back to another renderer. The independent greeter has its own environment.
 WLROOTS_RENDERERS = vglite
 WLROOTS_BACKENDS = libinput drm
 

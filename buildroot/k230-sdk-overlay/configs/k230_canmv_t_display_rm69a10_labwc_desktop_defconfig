@@ -104,10 +104,10 @@ BR2_PACKAGE_OPENSSH_KEY_UTILS=y
 BR2_PACKAGE_OPENSSH_SANDBOX=y
 BR2_PACKAGE_LIBDRM=y
 # The kernel already carries the K230 VGLite driver. Install its matched
-# userspace library and a bounded off-screen acceptance probe, but keep the
-# default greeter and desktop on Pixman until the KMS page-flip lifecycle and
-# a clean VGLite build provenance have passed hardware validation. VGLite is
-# an explicit staging profile, never an undocumented silent fallback.
+# userspace library and a bounded off-screen acceptance probe. Authenticated
+# desktops require VGLite; missing policy or a GPU failure blocks the desktop
+# without a software-renderer fallback. The independent login compositor is
+# configured separately by tdvp-greeter-session.
 BR2_PACKAGE_VG_LITE=y
 BR2_PACKAGE_TDVP_VGLITE_ACCEPTANCE=y
 BR2_PACKAGE_MESA3D=y

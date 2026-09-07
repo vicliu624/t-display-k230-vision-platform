@@ -31,7 +31,11 @@ the greeter. The launch wrapper derives `HOME`, `USER`, `XDG_CONFIG_HOME`,
 does not hard-code a particular user or `/home/tdvp`.
 
 The session environment in `/etc/tdvp/labwc/environment` selects the K230 DRM
-device, pixman renderer, seatd backend and the 1232x568 logical desktop. Labwc
+device, VGLite renderer, seatd backend and the 1232x568 logical desktop. The
+authenticated session requires the image-owned VGLite policy and a clear GPU
+failure marker; invalid policy or an abnormal GPU exit blocks the desktop
+without selecting another renderer. The independent login compositor still
+uses Pixman and is not an authenticated-desktop fallback. Labwc
 then starts PCManFM, per-user PulseAudio, the upstream panel and the LilyGO key
 bridge. The bridge maps the board Menu key to `wfpanelctl smenu menu`; Fn is an
 XKB Mod5 layer, not a user-space key remapper.
