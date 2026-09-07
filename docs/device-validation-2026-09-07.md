@@ -2,7 +2,8 @@
 
 本记录不是整张镜像的发布验收。基线为 `codex/cpu1-rtsmart-integration` 的
 `8db973f4e948b9379ab729333259787632dd7626`；检查后设备已应用以下定点修复。
-没有替换 nRF 固件，没有启用摄像头，没有生成新的完整 SD 镜像。
+没有替换 nRF 固件，没有正式安装/启用相机服务，没有生成新的完整 SD 镜像。
+相机已在隔离候选目录中完成实机采集，详见下文，不等于烧录镜像已具备该能力。
 
 ## CPU1：修复后实机通过
 
@@ -138,7 +139,7 @@ profile 所有权、电源及独立 acceptance。无后台自动 probe、无电�
 实机候选程序返回 transport/driver/runtime/available=1，enabled=0，state=off，
 acceptance=unverified；随后部署到状态服务。未生成 RF acceptance pass 标记。
 
-## 摄像头：芯片识别已通过，帧采集与镜像集成未通过
+## 摄像头：芯片识别和基础帧采集已通过，正式镜像集成未完成
 
 用户确认原配 GC2093 及排线已连接。初次检查只有 `/dev/video0`，其 name 为 `mvx`；
 无 `/dev/media*`。烧录镜像的 DTB 没有 GC2093 配置、I2C4 disabled，默认 sensor
@@ -197,8 +198,50 @@ prepare/enable 计数均回到 0、物理 mux gate 关闭，未安装正式相�
 CPU1 再验收通过：`467/467`，heartbeat `15897→16377`；greetd、触摸和键盘状态正常。
 原始日志：`.tmp/device-validation/camera-chip-id-20260907.log`。
 
-结论仍是：**摄像头硬件识别通过，不等于 ISP 帧采集或新镜像集成完成**。
-下一步须核对旧 ISP 的内核事件 ABI、VB/CMA 与 CPU1 预留内存的边界，再开始采集。
+上述芯片识别阶段的结论是：**硬件识别不等于 ISP 帧采集或新镜像集成完成**。
+
+### 后续实机进展：Linux CPU0 连续获取 1080p 图像
+
+基础 ISP event / VB ioctl ABI 比对通过。设备 CMA 为
+`0x20000000–0x3fffffff`，与 CPU1 的 `0x10000000–0x13ffffff` 不重叠；
+实际使用 `enable_cma=1`，没有改为固定 MMZ，也没有启动 CPU1 MPP。
+加载完整候选模块后，`/dev/video1–4` 才是真正 VVCAM 节点，`/dev/video0` 仍为 mvx。
+
+首轮采集暴露了两个额外问题：旧 ISP 直接改写所有 sensor MCLK；VVCAM 完帧的
+时间戳和公开帧序号均为零，导致 FFmpeg 不断丢帧。已停止该轮并诊断重启清理时钟状态。
+`0003` 利用旧 ISP 已存在的 `mode.clk=0` 分支跳过用户态时钟写入，保留内核受保护
+的时钟供应；`0004` 在完帧路径添加单调完成时间戳和每次 stream 的帧序号，保持
+ISP 私有 buffer index 不变。未改写 ISP 二进制、GC2093 寄存器表、曝光/增益算法。
+
+之后在 `DevicePolicy=closed`、**不允许 `/dev/mem`** 的隔离 ISP 服务中，两次
+60 帧实测分别为 30.006 / 29.927 FPS，1920×1080 NV12，每帧 3,110,400 字节，
+序号均 0..59，时间戳严格递增。已将真实 NV12 帧转为 PNG 并检查，能看到键盘、
+桌面和线缆，不是黑图或测试图；图片保存在本地诊断目录，没有提交至 Git。
+FFmpeg 另一次正常采集三帧退出，PTS 为 0 / 33972 / 66658 微秒，三个完整帧 hash 不同。
+`VIDIOC_G_PARM` 未实现的告警仍存在，未将其声称为完整 V4L2 接口验收。
+
+卸载时的资源告警进一步定位为：V4L2 软件子设备登记的整段 ISP MMIO 包住了
+真正 ISP/MIPI 的资源，卸载后导致后者的 managed release 找不到资源。`0005`
+只删除软件子设备没有使用的 MMIO/IRQ 声明，保留真实驱动的资源保护。
+最终五补丁队列完整重编后，两次“加载 → 60 帧采集 → 停止 → 全部卸载”均通过：
+
+| 轮次 | 帧数/序号 | 完成时间戳（微秒） | 实测 FPS | 内核生命周期告警 |
+| --- | --- | --- | ---: | --- |
+| 1 | 60 / 0..59 | 944171454..946137775 | 30.005 | 无新增 |
+| 2 | 60 / 0..59 | 953463834..955429962 | 30.008 | 无新增 |
+
+每轮时钟寄存器在采集前后均为 `0x003a7709`，卸载后为 `0x003a7708`，门控确实关闭。
+两个 capture service 都返回 `0/SUCCESS`。最终 subdev module SHA256：
+`7db704f19d36f5e1a6841d310acc5d40f55700a86e1b5b8064d38989c0668768`；
+插件 SHA256：`df65b714eeac692cd7f3b1cea863d0a7807f71f01fa1e26cbf57b8473f6d4977`。
+原始日志位于 `.tmp/device-validation/camera-runtime-v4/`；详细修复和构建身份见
+[相机候选说明](../user-space/tdvp-camera-isp/README.md)。
+
+测试后未留下 ISP 服务、摄像头模块或正式 acceptance 标记。SD 卡已恢复 UART1
+基线 DTB，临时恢复 unit 已移除；当前运行的相机候选 DT 只维持到下一次重启。
+相机测试阶段 CPU1 多次重验通过，最终一次序列 `1401/1401`、heartbeat `114747→115228`。
+下一步是正式 package / DTB 队列与增量构建集成，以及 Wayland/VGLite 共存测试，
+不是继续把“只存在文件或节点”当作相机已经交付。
 
 ## 主机验证与回退
 

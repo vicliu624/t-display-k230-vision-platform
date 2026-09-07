@@ -33,9 +33,14 @@ int main(int argc, char **argv)
     struct vvcam_sensor_mode mode;
     assert(registered->ctrl.enum_mode(context, 0, &mode) == 0);
     assert(mode.width == 1920 && mode.height == 1080 && mode.ae_info.cur_fps == 30);
+    assert(mode.clk == 0); /* The legacy ISP must not write sensor clocks. */
+    assert(registered->ctrl.enum_mode(context, 1, &mode) == 0);
+    assert(mode.width == 1920 && mode.height == 1080 && mode.ae_info.cur_fps == 60);
+    assert(mode.clk == 0);
+    assert(registered->ctrl.enum_mode(context, 2, &mode) != 0);
     registered->ctrl.deinit(context);
     registered = NULL;
     assert(dlclose(plugin) == 0);
-    puts("GC2093 plugin: PASS dynamic load, API 1, legacy registration, mode enumeration (no sensor I/O)");
+    puts("GC2093 plugin: PASS dynamic load, API 1, legacy registration, kernel-owned clocks for both modes (no sensor I/O)");
     return 0;
 }

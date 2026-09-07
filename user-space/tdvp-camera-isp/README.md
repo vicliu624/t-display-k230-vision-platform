@@ -2,9 +2,10 @@
 
 This directory is **not yet enabled in the image**. It contains a scalar-ISP
 sensor ABI adapter, a board-specific GC2093 transport, candidate device-tree
-configuration and a VVCAM clock/reset patch. Physical chip identification
-passed on 2026-09-07. **Frame capture has not passed**; neither chip detection
-nor a scalar executable proves that the complete camera stack works.
+configuration and VVCAM lifecycle patches. **Physical GC2093 identification
+and bounded 1920x1080 NV12 frame capture passed on 2026-09-07**, including two
+complete module load/capture/unload cycles. This is not yet a production image
+integration, Wayland preview, VGLite coexistence or long-duration acceptance.
 
 ## Pinned candidate and reason for the adapter
 
@@ -66,12 +67,15 @@ It also applies the real transport patch to the pinned driver and dynamically
 loads the complete plugin: API version, registration, allocation and mode
 enumeration. It does not configure or stream a physical sensor.
 
-The PR workflow runs both host regressions. It does not claim camera
-acceptance, install this adapter, or replace the existing ISP binary.
+The PR workflow runs both host regressions. The I2C test applies all five real
+candidate patches to pinned source without fuzz, dynamically tests the plugin,
+and builds the capture checker while verifying that it rejects `/dev/null`.
+It does not open a host camera, claim hardware acceptance, install this
+adapter, or replace the existing ISP binary.
 
 ## Board candidate and physical identification
 
-Apply `patches/0001-*.patch` and `0002-*.patch` to a **private copy** of the
+Apply all `patches/0001-*.patch` through `0005-*.patch` in order to a **private copy** of the
 pinned SDK `buildroot-overlay/package/vvcam`; do not patch an existing SDK
 build directory in place. Compile the shared plugin from:
 
@@ -140,26 +144,109 @@ reference phandles and rejects changes to existing properties outside the
 explicit camera allowlist. The real comparison preserved **268 existing
 nodes**. This is a scope check, not full device-tree binding validation.
 
-The two diagnostic boots automatically restored the pre-camera DTB on the SD
+The chip-identification diagnostic boots automatically restored the pre-camera DTB on the SD
 card before testing. The running kernel retains the candidate DT until the
 next reboot, but no VVCAM module or ISP daemon was left active. No production
 ISP/plugin file or camera acceptance marker was installed. Raw local evidence:
 `.tmp/device-validation/camera-chip-id-20260907.log`.
 
+## Physical frame capture and lifecycle corrections
+
+The legacy/basic ISP event values and layouts, VB ioctls and V4L2 buffer
+descriptors were compared with the pinned SDK. New crop/selection events are
+not thereby proven compatible. The board's CMA pool is
+`0x20000000-0x3fffffff`; CPU1 occupies `0x10000000-0x13ffffff`. VVCAM uses
+`enable_cma=1` / `dma_alloc_coherent`, not a fixed MMZ pool. Actual allocation
+logs fell in CMA. No CPU1 MPP or shared display ownership was enabled.
+
+Three runtime defects were found and addressed before accepting capture:
+
+1. **Clock ownership (`0003`).** The old ISP's `cb_IsiOpenIss` writes all
+   three sensor clocks directly when the sensor mode's `clk` is nonzero.
+   This was visible in the first stream test and bypassed the managed kernel
+   clock. Disassembly confirmed that `clk=0` skips those writes. Both GC2093
+   mode descriptors now use that branch; the sensor register tables, gain
+   controls and ISP executable remain unchanged. A diagnostic reboot cleared
+   the old writes. All subsequent ISP tests used systemd `DevicePolicy=closed`
+   with only the camera/I2C/PTY devices allowed, **not `/dev/mem`**.
+2. **Completion metadata (`0004`).** Vendor buffers had zero timestamps and
+   zero public V4L2 frame sequences, causing FFmpeg to drop successive frames.
+   The patch stamps the receipt of an ISP completion with `ktime_get_ns()`
+   and assigns a per-pad sequence under the existing queue spinlock. This is
+   a **completion timestamp**, not a sensor exposure timestamp. The separate
+   vendor buffer-index field is unchanged. Sequences reset for a new stream.
+3. **Resource ownership (`0005`).** The event-only V4L2 subdevice registered
+   an unused `0x90000000-0x9000ffff` resource. Platform registration inserted
+   it above the real ISP and MIPI claims; deleting it orphaned that subtree,
+   causing their later managed release to report nonexistent resources.
+   Remove the software subdevice's unused MMIO/IRQ declarations, not the
+   real drivers' `devm_ioremap_resource` protection. Actual ownership is now
+   ISP `0x90000000-0x90008fff` and MIPI `0x9000a800-0x9000afff`.
+
+With `0001-0004`, two consecutive 60-frame streams passed at **30.006** and
+**29.927 FPS**, with sequences `0..59`, strictly increasing monotonic
+timestamps and exactly **3,110,400 bytes/frame**. The last NV12 frame was
+decoded to PNG and visually inspected: a real keyboard/desk/cables scene,
+not a blank frame or test pattern. No rotation or image-quality tuning was
+applied. FFmpeg subsequently captured three full frames and exited normally;
+their PTS were `0`, `33972`, `66658` microseconds and hashes differed.
+`VIDIOC_G_PARM` remains unsupported and FFmpeg warns about unknown nominal
+frame rate; this is not presented as complete V4L2 API compatibility.
+
+The final `0001-0005` candidate then passed two **full module reload** cycles:
+
+| Cycle | Complete NV12 frames | Sequence | Completion timestamps (us) | Measured FPS |
+| --- | ---: | --- | --- | ---: |
+| 1 | 60 | 0..59 | 944171454..946137775 | 30.005 |
+| 2 | 60 | 0..59 | 953463834..955429962 | 30.008 |
+
+Both capture services exited `0/SUCCESS`. No new nonexistent-resource,
+WARNING, BUG, Oops or Call Trace message appeared during these cycles.
+Clock register `0x9110006c` remained `0x003a7709` across each capture and
+became `0x003a7708` on unload; mux enable/prepare counts returned to zero.
+CMA free memory did not decline across the two final cycles, but this does
+not prove long-term absence of leaks. The kernel and DTB were unchanged from
+the successful chip-identification candidate. All five modules were built
+fresh with the matching Ubuntu 24.04 / SDK CPU0 toolchain.
+
+| Final runtime-v4 artifact | SHA256 |
+| --- | --- |
+| Scalar ISP (unmodified upstream) | `5d3e7bd8914cd2a3d9ca9da03a2743e7bd8ab24b9cb090929950b632ffb833ce` |
+| GC2093 plugin | `df65b714eeac692cd7f3b1cea863d0a7807f71f01fa1e26cbf57b8473f6d4977` |
+| ISP subdev module | `7db704f19d36f5e1a6841d310acc5d40f55700a86e1b5b8064d38989c0668768` |
+| MIPI module | `3565e0262f2a1e1c08279222085ff750932f1abeb5dd2493330758bd69c9cf49` |
+| Capture checker | `5f5c4e4ca7e44b039da5cd43ad14cc2f867595f34582e9fcf144fe39376eee3d` |
+
+`tests/v4l2-capture-check.c` uses only QUERYCAP, S_FMT and the MMAP streaming
+path. It refuses non-VVCAM devices, unexpected stride/size, error buffers,
+invalid/non-increasing timestamps and discontinuous sequences. It captures
+60 frames and optionally saves the last raw frame with exclusive creation.
+Run it under an external service time limit as well, because setup/teardown
+ioctls can wait on the ISP. It does not exercise crop, flip, DRM or Wayland,
+and does not write a production acceptance marker.
+
+Local raw evidence is under `.tmp/device-validation/camera-runtime-v3/` and
+`camera-runtime-v4/`. The PNG SHA256 is
+`37e9444745cb9a8e72a1c7d668cd53b61899262c62499210e7ae3a87000e5deb`.
+Images and raw diagnostic files are not committed. The candidate is stored
+under `/var/lib/tdvp-repair-backups/20260907/camera-candidate/` on the board,
+not over the system ISP/plugin/modules. Test daemons and modules were stopped
+and unloaded. The temporary boot-recovery unit was removed after verifying
+that the SD boot DTB was restored to the UART1 baseline.
+
 ## Remaining integration requirements
 
 1. Build an isolated, pinned scalar-ISP plus matching sensor-plugin package;
-   verify dynamic dependencies and kernel event compatibility. The modern
-   kernel added crop/selection and sensor controls that the older daemon may
-   not implement; basic capture and unsupported operations need real testing.
-2. Promote the validated I2C/clock/CSI2 candidate into the production package
-   and ordered Linux queue only after capture compatibility is verified.
+   retain the tested clock ownership and device restrictions. Do not ship
+   the incompatible modern RVV ISP on CPU0.
+2. Promote the validated I2C/clock/CSI2 candidate and all five VVCAM patches
+   into the production package and ordered Linux queue with source/hash locks.
    Preserve CPU1's reservation and all Linux display, GPU, SD, keyboard and
    radio ownership, including on incremental builds.
-3. Check the ISP/VVCAM buffer allocation and event ABI before loading the
-   remaining modules; do not assume the old daemon implements modern controls.
-4. Perform bounded stream start, frame acquisition and stop
-   tests, then test camera preview through Wayland alongside VGLite and CPU1.
+3. Implement truthful camera device discovery/status and test the old daemon's
+   unsupported controls, crop/selection and frame-interval API behavior.
+4. Test camera preview through Wayland alongside VGLite and CPU1, including
+   process restart and longer-running buffer/clock lifecycle checks.
 5. Only after this works, enable the service/package, update hardware status
    and produce a complete image. No fake camera node or acceptance marker.
 
