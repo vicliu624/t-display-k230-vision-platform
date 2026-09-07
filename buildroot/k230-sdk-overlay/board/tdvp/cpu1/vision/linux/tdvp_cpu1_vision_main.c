@@ -18,12 +18,14 @@
 #include <linux/workqueue.h>
 #include "tdvp_vision_abi.h"
 #include "tdvp_cpu1_vision_layout.h"
+#include "tdvp_cpu1_owner.h"
 
 #define VISION_FRAME_BYTES (1920U * 1080U * 3U / 2U)
 #define VISION_WATCHDOG (10 * HZ)
 #define VISION_TICK msecs_to_jiffies(50)
 
 struct vision_device {
+    struct tdvp_linux_owner owner;
     struct miscdevice misc;
     struct kref ref;
     struct mutex lock;
@@ -82,14 +84,20 @@ static void vision_refresh(struct vision_device *vision)
 static void vision_tick(struct work_struct *work)
 {
     struct vision_device *vision = container_of(to_delayed_work(work), struct vision_device, work);
+    int ownership;
 
     mutex_lock(&vision->lock);
-    if (!vision->dead && vision->opened) {
-        vision_refresh(vision);
-        if (vision->fault)
-            writel(TDVP_VISION_CMD_STOP, &vision->control->consumer.command);
-        else
-            writeq(++vision->heartbeat, &vision->control->consumer.heartbeat);
+    if (!vision->dead) {
+        ownership = tdvp_linux_owner_poll(&vision->owner);
+        if (ownership && ownership != -EAGAIN)
+            vision->fault = ownership;
+        if (vision->opened) {
+            vision_refresh(vision);
+            if (vision->fault)
+                writel(TDVP_VISION_CMD_STOP, &vision->control->consumer.command);
+            else
+                writeq(++vision->heartbeat, &vision->control->consumer.heartbeat);
+        }
         if (vision->ready || vision->fault)
             wake_up_interruptible(&vision->wait);
         schedule_delayed_work(&vision->work, VISION_TICK);
@@ -112,6 +120,16 @@ static int vision_open(struct inode *inode, struct file *file)
     }
     if (vision->opened) {
         result = -EBUSY;
+        goto out;
+    }
+    result = tdvp_linux_owner_status(&vision->owner);
+    if (result)
+        goto out;
+    /* READY precedes worker launch. Refuse stale RAM from an earlier boot,
+     * and wait until this boot's worker publishes its ownership cookie.
+     */
+    if (readq(&producer->epoch) != vision->owner.session.observed_cookie) {
+        result = -EAGAIN;
         goto out;
     }
     if (readl(&producer->magic) != TDVP_VISION_MAGIC ||
@@ -149,7 +167,6 @@ static int vision_open(struct inode *inode, struct file *file)
     writel(TDVP_VISION_CMD_RUN, &vision->control->consumer.command);
     kref_get(&vision->ref);
     file->private_data = vision;
-    schedule_delayed_work(&vision->work, VISION_TICK);
 out:
     mutex_unlock(&vision->lock);
     return result;
@@ -231,8 +248,7 @@ static int vision_release(struct inode *inode, struct file *file)
 {
     struct vision_device *vision = file->private_data;
 
-    /* Keep the exclusive-open gate held while cancelling the old heartbeat. */
-    cancel_delayed_work_sync(&vision->work);
+    /* The boot ownership heartbeat must outlive every individual reader. */
     mutex_lock(&vision->lock);
     if (!vision->dead && readq(&vision->control->producer.epoch) == vision->epoch) {
         u64 published = readq(&vision->control->producer.published);
@@ -261,22 +277,9 @@ static const struct file_operations vision_fops = {
 
 static int vision_probe(struct platform_device *pdev)
 {
-    struct device_node *memory;
-    struct resource reserved;
     struct vision_device *vision;
     int result;
 
-    memory = of_parse_phandle(pdev->dev.of_node, "memory-region", 0);
-    if (!memory)
-        return -EINVAL;
-    result = of_address_to_resource(memory, 0, &reserved);
-    if (!of_property_read_bool(memory, "no-map"))
-        result = -EINVAL;
-    of_node_put(memory);
-    if (result)
-        return result;
-    if (reserved.start != TDVP_VISION_SHARED_BASE || resource_size(&reserved) != TDVP_VISION_SHARED_SIZE)
-        return -EINVAL;
     vision = kzalloc(sizeof(*vision), GFP_KERNEL);
     if (!vision)
         return -ENOMEM;
@@ -284,6 +287,9 @@ static int vision_probe(struct platform_device *pdev)
     mutex_init(&vision->lock);
     init_waitqueue_head(&vision->wait);
     INIT_DELAYED_WORK(&vision->work, vision_tick);
+    result = tdvp_linux_owner_prepare(&pdev->dev, &vision->owner);
+    if (result)
+        goto failed;
     vision->record = kvmalloc(sizeof(struct tdvp_vision_frame_header) + VISION_FRAME_BYTES, GFP_KERNEL);
     vision->slots = devm_ioremap(&pdev->dev, TDVP_VISION_SHARED_BASE,
                                 TDVP_VISION_SLOT_COUNT * TDVP_VISION_SLOT_BYTES);
@@ -301,29 +307,29 @@ static int vision_probe(struct platform_device *pdev)
     if (result)
         goto failed;
     platform_set_drvdata(pdev, vision);
-    dev_info(&pdev->dev, "CPU1 asynchronous frame bridge; no camera/ISP ownership\n");
+    /* Fixed boot-time DT node; no hot-unbind, unloading, or in-place restart.
+     * From OFFER onward even a failed handshake must retain all suppliers.
+     */
+    __module_get(THIS_MODULE);
+    tdvp_linux_owner_start(&vision->owner);
+    schedule_delayed_work(&vision->work, VISION_TICK);
+    dev_info(&pdev->dev, "CPU1 ownership OFFER; boot-lifetime resource holds, asynchronous frame bridge\n");
     return 0;
 failed:
+    tdvp_linux_owner_abort(&vision->owner);
     kref_put(&vision->ref, vision_free);
-    return result;
+    return dev_err_probe(&pdev->dev, result, "CPU1 ownership preparation failed; no offer issued\n");
 }
 
-static int vision_remove(struct platform_device *pdev)
+static int vision_pm_prepare(struct device *dev)
 {
-    struct vision_device *vision = platform_get_drvdata(pdev);
-
-    mutex_lock(&vision->lock);
-    vision->dead = true;
-    writel(TDVP_VISION_CMD_STOP, &vision->control->consumer.command);
-    mutex_unlock(&vision->lock);
-    wake_up_interruptible(&vision->wait);
-    misc_deregister(&vision->misc);
-    cancel_delayed_work_sync(&vision->work);
-    /* Existing fds retain the object, but dead prevents further I/O after
-     * devm unmaps the physical windows on return from remove(). */
-    kref_put(&vision->ref, vision_free);
-    return 0;
+    struct vision_device *vision = dev_get_drvdata(dev);
+    /* DPMS blanking is not system suspend. A cross-core quiesce protocol is
+     * required before suspend/hibernation can take away clocks or memory.
+     */
+    return vision->owner.started ? -EBUSY : 0;
 }
+static const struct dev_pm_ops vision_pm_ops = { .prepare = vision_pm_prepare };
 
 static const struct of_device_id vision_match[] = {
     { .compatible = "tdvp,cpu1-vision-v1" },
@@ -332,8 +338,8 @@ static const struct of_device_id vision_match[] = {
 MODULE_DEVICE_TABLE(of, vision_match);
 static struct platform_driver vision_driver = {
     .probe = vision_probe,
-    .remove = vision_remove,
-    .driver = { .name = "tdvp-cpu1-vision", .of_match_table = vision_match },
+    .driver = { .name = "tdvp-cpu1-vision", .of_match_table = vision_match,
+                .suppress_bind_attrs = true, .pm = &vision_pm_ops },
 };
 module_platform_driver(vision_driver);
 MODULE_LICENSE("GPL");

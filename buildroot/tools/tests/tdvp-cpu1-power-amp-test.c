@@ -25,6 +25,12 @@ typedef uint32_t u32;
 #define pr_err(...) ((void)0)
 #define dev_info(...) ((void)0)
 #define subsys_initcall(fn) static int (*test_init_entry)(void) = fn
+#define EXPORT_SYMBOL_GPL(fn)
+#define THIS_MODULE NULL
+#define __module_get(module) (++module_pins)
+#define smp_load_acquire(p) (*(p))
+#define smp_store_release(p, v) (*(p) = (v))
+#define of_node_get(node) (node)
 struct device_node { bool vision; };
 struct device { struct device_node *of_node; };
 struct platform_device { struct device dev; };
@@ -38,7 +44,7 @@ struct generic_pm_domain {
 struct genpd_onecell_data { struct generic_pm_domain **domains; int num_domains; };
 struct of_device_id { const char *compatible; };
 struct platform_driver {
-    struct { const char *name; const struct of_device_id *of_match_table; } driver;
+    struct { const char *name; const struct of_device_id *of_match_table; bool suppress_bind_attrs; } driver;
     int (*probe)(struct platform_device *);
 };
 static u32 registers[128];
@@ -46,6 +52,7 @@ static struct resource resource;
 static struct genpd_onecell_data allocation;
 static int fail_alloc, fail_map, fail_init, fail_provider, fail_power;
 static int writes, init_count, remove_count, provider_calls, registration_calls;
+static unsigned int module_pins;
 static int init_ids[5], removed_ids[5];
 static bool init_off[5];
 static const unsigned int status_offsets[] = {0x1c, 0x2c, 0x40, 0x80, 0x10c};
@@ -130,12 +137,14 @@ static void reset_state(void)
     fail_alloc = fail_map = fail_provider = 0;
     fail_init = fail_power = -1;
     writes = init_count = remove_count = provider_calls = 0;
+    tdvp_power_owner = NULL; module_pins = 0;
     /* Intentionally retain static domain flags between probes. */
 }
 static void assert_cleanup(int initialized)
 {
     int i;
     assert(init_count == initialized && remove_count == initialized);
+    assert(!tdvp_power_owner && !module_pins);
     for (i = 0; i < initialized; ++i) assert(removed_ids[i] == initialized - 1 - i);
 }
 int main(void)
@@ -144,9 +153,13 @@ int main(void)
     struct platform_device device = {.dev = {.of_node = &node}};
     int i, variant;
     assert(!test_init_entry() && registration_calls == 1);
+    assert(k230_power_domain_driver.driver.suppress_bind_attrs);
     for (variant = 0; variant < 3; ++variant) {
         reset_state(); node.vision = variant != 1;
         assert(!k230_power_domain_probe(&device));
+        assert(k230_tdvp_power_ready(&node) == node.vision);
+        assert(!k230_tdvp_power_ready(NULL));
+        assert(module_pins == (unsigned int)node.vision);
         assert(init_count == 5 && provider_calls == 1 && !remove_count && !writes);
         for (i = 0; i < 5; ++i) {
             bool owned = node.vision && (i == K230_PM_DOMAIN_AI || i == K230_PM_DOMAIN_DISP);
@@ -179,6 +192,7 @@ int main(void)
     assert(k230_power_domain_probe(&device) == -ENOMEM && !writes && !init_count);
     reset_state(); fail_map = 1;
     assert(k230_power_domain_probe(&device) == -EIO && !writes && !init_count);
-    puts("CPU1 power AMP: PASS real patched probe, opt-in/retry, live domains not cycled, off denied, failures unwound");
+    assert(!tdvp_power_owner && !module_pins);
+    puts("CPU1 power AMP: PASS real patched probe, readiness only on success, live domains not cycled, off denied, failures unwound");
     return 0;
 }

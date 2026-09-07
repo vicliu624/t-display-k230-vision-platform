@@ -28,6 +28,7 @@ trap 'status=$?; if [ "$status" -ne 0 ]; then cat "${TEMP_DIR}"/*.log >&2; fi; r
 bash "${SCRIPT_DIR}/validate-k230-sdk-linux-patches.sh" "${CPU1_DIR}/vision"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-i2c4-early.sh" "${BSP}"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-ownership.sh" "${BSP}"
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-linux-owner.sh"
 # The compute-only sparse checkout excludes MPP implementations. Use its
 # exact pinned Git blob for the camera clock layout test, not a hand-written
 # header or a different SDK release, and leave the checkout unchanged.

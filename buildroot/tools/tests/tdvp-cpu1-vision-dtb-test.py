@@ -165,6 +165,10 @@ def validate(before, after):
         "memory-region": ((SHARED, ()), (MMZ, ())), "memory-region-names": b"transport\0mmz\0",
         "tdvp,gpio-controller": ((GPIO, ()),), "tdvp,power-controller": ((POWER, ()),),
         "tdvp,clock-controller": ((CLOCK.rstrip("/"), ()),),
+        "clocks": tuple((f"/soc/sysctl/sysctl_boot@91102000/pll{i}_div4", ()) for i in range(3)),
+        "clock-names": b"pll0\0pll1\0pll2\0",
+        "power-domains": ((POWER, (1,)), (POWER, (2,))),
+        "power-domain-names": b"ai\0disp\0",
     }
     # The existing firmware allocation, mailbox and 512 MiB CMA must survive.
     assert cells(after["/reserved-memory/cpu1-runtime@10000000"]["reg"]) == (0, 0x10000000, 0, 0x4000000)
@@ -185,6 +189,9 @@ before, after = (normalized(read_tree(p)) for p in sys.argv[1:])
 validate(before, after)
 mutations = [(p, "status", b"okay\0") for p in DISABLED]
 mutations += [(GPIO, "tdvp,cpu1-gpio-mask", struct.pack(">I", 0)),
+              (VISION, "clocks", None), (VISION, "clock-names", b"pll1\0pll0\0pll2\0"),
+              (VISION, "power-domains", ((POWER, (0,)), (POWER, (2,)))),
+              (VISION, "power-domain-names", b"disp\0ai\0"),
               (POWER, "tdvp,cpu1-vision-domains", None), (MMZ, "no-map", None),
               (CLOCK.rstrip("/"), "tdvp,cpu1-i2c4-clock-sharing", None),
               (VISION, "tdvp,clock-controller", ((POWER, ()),)),

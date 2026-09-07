@@ -75,6 +75,7 @@ int main(void)
     owner_linux_cookie = owner_record.peer_cookie;
     owner_heartbeat = owner_record.heartbeat;
     owner_seen = epoch;
+    epoch = owner_cookie; /* Bind frames to this granted boot, never stale RAM. */
     control = kd_mpi_sys_mmap(TDVP_VISION_CONTROL_BASE, TDVP_VISION_CONTROL_SIZE);
     slots = kd_mpi_sys_mmap(TDVP_VISION_SHARED_BASE, TDVP_VISION_SLOT_COUNT * TDVP_VISION_SLOT_BYTES);
     if (!control || control == MAP_FAILED || !slots || slots == MAP_FAILED) {

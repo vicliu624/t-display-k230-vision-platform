@@ -73,21 +73,36 @@ complete the camera ownership migration described below.
   publishes OFFER only after preparing/retaining resources, CPU1 requires an
   advancing heartbeat before writing HELLO, Linux validates the matching
   live CPU1 cookie before GRANT, and CPU1 initializes only on that grant.
-  The Linux policy is tested but its kernel resource-preparation adapter is
-  still missing: the current bridge cannot issue a production grant.
+  The Linux adapter now validates both registered `no-map` reservations,
+  disabled Linux camera/AI declarations and exact named supplier references.
+  `0070` verifies actual GPIO/power/clock initialization, not just DT flags.
+  Before OFFER it holds AI/DISP runtime-PM references, enables the three shared
+  PLL divide-by-four suppliers and obtains rate-exclusive references (including
+  their parent protection). No PLL retuning is performed. This remains a
+  candidate path, not selected by the production image.
   Separate 128-byte records, sequence-checked snapshots and fences prevent
   mixed publications; boot/peer timeouts and identity changes latch faults.
   Startup is attempted once. Failure does not reset shared resources or free
   possibly DMA-owned buffers. The worker also monitors the kernel ownership
   heartbeat and stops on lost/invalid ownership.
+- The Linux ownership heartbeat starts at probe and continues without an open
+  frame reader. Reader close requests STOP but never releases boot ownership.
+  Frame epochs now equal the granted CPU1 cookie, preventing a fresh Linux
+  reader from accepting an old boot's valid-looking frame control block.
+  Resources remain held after OFFER, including timeout/fault; safe quiesce and
+  regrant are not implemented. The fixed boot DT must not be removed or changed
+  by live overlays. The bridge pins its module, omits hot-unbind attributes,
+  and rejects system suspend/hibernation. Screen DPMS/lock remains available.
+  `0070` also hides GPIO/power hot-unbind attributes and pins AMP instances;
+  it does not change the GPU renderer or display clock operations.
 - Camera clock setup before MPP registration: explicitly prepare ISP CFG/core/
   HCLK, CSI2 pixel and sensor MCLK1 fields; verify clock writes and preserve
   CSI0/CSI1 and MCLK0/MCLK2 fields. Require powered DISP/ISP, DDR P1 access and
   the pinned board's PLL rates before writing. No shared PLL, power, DDR,
   I2C, GPU/VO clock or reset writes. The 23.76 MHz MCLK matches the selected
   GC2093 CSI2 mode table. This guard is not the missing Linux ownership-ready
-  handshake: the new startup adapter supplies CPU1's wait, but production
-  activation still requires Linux's validated resource-preparation/grant path.
+  handshake: the paired Linux/RT-Smart adapters supply that protocol, but the
+  complete paired image still requires production wiring and hardware tests.
 - A compiled candidate device-tree wrapper and ownership include, with the
   new MMZ/transport reservations and GPIO/power policies. Linux camera/AI
   devices and dedicated clock providers are disabled. This wrapper is NOT
@@ -142,6 +157,7 @@ bash buildroot/tools/test-tdvp-cpu1-power-amp.sh /path/to/pristine/pinned/linux
 bash buildroot/tools/test-tdvp-cpu1-clock-amp.sh /path/to/pinned/linux
 bash buildroot/tools/test-tdvp-cpu1-i2c4-early.sh /path/to/pinned/maix3
 bash buildroot/tools/test-tdvp-cpu1-ownership.sh /path/to/pinned/maix3
+bash buildroot/tools/test-tdvp-cpu1-linux-owner.sh
 bash buildroot/tools/test-tdvp-cpu1-camera-clock.sh /path/to/pinned/maix3 /path/to/pinned/mpp
 bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh /path/to/fully/patched/linux
 bash buildroot/tools/test-tdvp-cpu1-capture.sh /path/to/pinned/canmv_k230/src/rtsmart/mpp
@@ -156,8 +172,16 @@ including 12 startup scenarios: absent/stale/invalid offers, live startup,
 peer loss, each initialization/launch failure, grant loss during MPP and
 mapping failure. It patches actual pinned component sources with zero fuzz,
 compiles them and checks that automatic MPP/AI calls are absent while
-unselected source bodies remain unchanged. These tests do not prepare real
-Linux resources, authenticate a mismatched image, or prove hardware behavior.
+unselected source bodies remain unchanged. Those RT-Smart tests do not prepare
+real Linux resources, authenticate a mismatched image, or prove hardware behavior.
+The separate Linux adapter test executes its production C with DT/PM/clock/MMIO
+primitives mocked: 46 preparation refusals must issue no offer and leak no
+references. It also checks Linux/RT-Smart publication compatibility, a complete
+handshake, sequence wrap, torn snapshots and lifetime retention after boot/peer
+timeouts. Bridge FD/PM lifecycle assertions are source checks, not runtime
+hardware acceptance. The power and clock regressions now apply/validate `0070`
+as well and execute actual provider-readiness logic, including an unregistered
+or unprotected shared clock refusing readiness.
 The early-I2C test applies the actual vision patch with zero fuzz to a temporary
 copy of the pinned BSP, extracts its real BOARD entry and executes it with the
 production clock helper and hook. All scenarios first require BOARD init and
@@ -244,8 +268,23 @@ with the updated heartbeat-monitoring worker embedded in ROMFS:
 worker SHA-256
 `7803cb5ae3a38dc4988694c71bc86341c07b979779fc0bb85c03b76b13a4f398`.
 The kernel includes the explicit startup gate and no automatic AI initializer.
-This is build evidence only: no Linux grant adapter, model inference, FFT
-execution, complete image build or board deployment is implied.
+That earlier cross-link predates the Linux resource adapter. The subsequent
+paired adapter revision passed a real patched Linux 6.6.36 `vmlinux`/modules
+build and the bridge's `W=1` compilation/modpost on Ubuntu 24.04. All three
+readiness exports exist in the linked kernel. The candidate DTB passed the
+273-node comparison, 26 invalid-candidate tests and three camera-clock writer
+refusals. Renderer lock and VGLite session-gate host regressions still pass.
+
+The latest paired-source build evidence is:
+
+- Linux bridge SHA-256: `eea1a87bfff9bdc51a3c5ccde15727b73981c11844ae20ed8cc57de81e2f5d2c`.
+- CPU1 worker: `2d38d00966760922a9966c0f7435f95f5b4b04fd5b53b484df84c6c9ca205c36`.
+- RT-Smart ELF with that worker in ROMFS: `0e5c1af45d403f6b06a576057d4106a29cabed423859fe6683329951cec3ec1b`.
+- RT-Smart binary: `32725bfc201b2bbf4423cc20fa929417ed0a4cd454ea0925a4892ab64f968c9d`.
+
+This is build evidence only, not model inference, FFT execution, full AI SRAM/
+DMA ownership audit, complete image build or board deployment. Existing SDK
+warnings (including the RT-Smart RWX LOAD segment) remain.
 
 The remaining release requirements are:
 
@@ -262,10 +301,10 @@ The remaining release requirements are:
    clock sources, and select `RT_USING_TDVP_CPU1_VISION` together. The hook's
    semaphore/100 MHz preparation follows GRANT and precedes controller access.
    The camera helper now prepares its dedicated clocks, but first requires
-   shared domains/DDR/PLLs to be ready. Implement Linux's half of the ownership
-   adapter: verify BOTH reservations and actual GPIO/power/clock suppliers,
-   retain them, then drive the existing policy independently of frame opens.
-   CPU1's deferred startup alone cannot establish Linux resource readiness.
+   shared domains/DDR/PLLs to be ready. Linux's half now validates BOTH
+   reservations and real GPIO/power/clock suppliers, holds the named resources
+   and drives ownership independently of frame opens. Validate its actual
+   startup timing, PM/CCF holds and fault retention on the paired board image.
 3. Atomically add Linux MMZ/transport reservations and retire Linux camera,
    ISP, KPU/AI2D bindings and the CPU0 ISP service. Add an ownership gate that
    rejects mixed firmware/DT/profile combinations and checks GPIO protection.

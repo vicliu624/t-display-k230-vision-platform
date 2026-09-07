@@ -257,6 +257,21 @@ ownership cutover. The regression compiles the actual patched CCF operations
 and runs 100,000 concurrent model iterations per core, plus timeout/refusal,
 retained-parent, malformed-layout and non-AMP/GPU controls.
 
+## CPU1 runtime supplier readiness
+
+`0070-tdvp-cpu1-runtime-supplier-readiness.patch` adds GPL readiness exports
+from the actual GPIO, power and clock drivers. GPIO publishes only after its
+guarded controller, clocks and ports initialize. Power publishes only after
+AI/DISP retention and provider registration succeed. Clock readiness requires
+every enabled composite provider to have registered and every shared LS writer
+to have the hardware-semaphore mapping. DT declarations alone cannot satisfy
+the Linux bridge's gate. GPIO/power hot-unbind attributes are suppressed and
+AMP instances pin their modules for the boot lifetime. This fixed-board
+lifecycle restriction is intentional; dynamic DT removal/forced unload is not
+supported. Existing GPU/display clock operations and renderer patches are
+unchanged. The candidate bridge separately holds PM/CCF resources before OFFER;
+this patch alone does not switch the production image or initialize AI engines.
+
 ## Required Checks
 
 ```sh

@@ -23,7 +23,18 @@ typedef pthread_mutex_t spinlock_t;
 #undef abs
 #define abs(x) ((x) < 0 ? -(x) : (x))
 struct clk_hw { int unused; };
-struct device_node { bool enabled; uintptr_t start; int error; };
+struct list_head { struct list_head *next, *prev; };
+struct device_node { bool enabled; uintptr_t start; int error; struct device_node *child, *next; };
+static struct list_head tdvp_registered_clocks = {&tdvp_registered_clocks, &tdvp_registered_clocks};
+static pthread_mutex_t tdvp_registered_clocks_lock = PTHREAD_MUTEX_INITIALIZER;
+#define mutex_lock(p) assert(!pthread_mutex_lock(p))
+#define mutex_unlock(p) assert(!pthread_mutex_unlock(p))
+#define for_each_available_child_of_node(parent, node) for ((node)=(parent)->child; (node); (node)=(node)->next)
+#define list_for_each_entry(pos, head, member) \
+    for (struct list_head *entry=(head)->next; entry!=(head) && ((pos)=container_of(entry, __typeof__(*(pos)), member), 1); entry=entry->next)
+static bool of_device_is_compatible(struct device_node *node, const char *name)
+{ (void)node; assert(!strcmp(name,"canaan,k230-clk-composite")); return true; }
+static void of_node_put(struct device_node *node) { assert(node); }
 struct resource { uintptr_t start, end; };
 static spinlock_t local_lock = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic u32 cmu[64], hardware_lock, linux_bits[64], cpu1_bits[64];
@@ -149,6 +160,43 @@ static void *cpu1_thread(void *unused)
     return NULL;
 }
 
+static void readiness_test(void)
+{
+    struct device_node parent={.enabled=true}, children[21]={0};
+    struct k230_clk_composite registered[21];
+    unsigned int i;
+
+    assert(!k230_tdvp_clock_ready(NULL));
+    assert(!k230_tdvp_clock_ready(&parent));
+    parent.child=&children[0];
+    for(i=0;i<21;++i) {
+        registered[i]=uart_clock();
+        registered[i].amp_lock_reg=&hardware_lock;
+        registered[i].owner_node=&children[i];
+        if(i<20) children[i].next=&children[i+1];
+        registered[i].owner_entry.prev=tdvp_registered_clocks.prev;
+        registered[i].owner_entry.next=&tdvp_registered_clocks;
+        tdvp_registered_clocks.prev->next=&registered[i].owner_entry;
+        tdvp_registered_clocks.prev=&registered[i].owner_entry;
+    }
+    /* Twenty guarded LS clocks plus one independent Linux GPU clock. */
+    registered[20].gate_reg=&cmu[0x74/4]; registered[20].rate_reg=NULL;
+    registered[20].amp_lock_reg=NULL;
+    assert(k230_tdvp_clock_ready(&parent));
+    for(i=0;i<20;++i) {
+        registered[i].amp_lock_reg=NULL;
+        assert(!k230_tdvp_clock_ready(&parent));
+        registered[i].amp_lock_reg=&hardware_lock;
+        registered[i].owner_node=NULL;
+        assert(!k230_tdvp_clock_ready(&parent));
+        registered[i].owner_node=&children[i];
+    }
+    parent.enabled=false; assert(!k230_tdvp_clock_ready(&parent));
+    parent.enabled=true; parent.child=&children[1]; assert(!k230_tdvp_clock_ready(&parent));
+    tdvp_registered_clocks.next=tdvp_registered_clocks.prev=&tdvp_registered_clocks;
+    puts("CPU1 clock readiness: PASS actual getter, all enabled providers registered, all shared writers guarded; GPU unaffected");
+}
+
 int main(void)
 {
     struct device_node parent = {.enabled = true, .start = 0x91100000};
@@ -230,6 +278,7 @@ int main(void)
     k230_clk_composite_disable(&altered.hw);
     assert(!k230_clk_composite_set_rate(&altered.hw, 100000000, 400000000));
     assert(timeout_logs == 3 && !owns_lock && !hardware_lock);
+    readiness_test();
     puts("CPU1 clock AMP: PASS 100000 concurrent iterations per core, real CCF ops, CPU1 field protection, APB retention, timeout refusal, malformed DT rejection and unchanged GPU/non-AMP paths");
     return 0;
 }
