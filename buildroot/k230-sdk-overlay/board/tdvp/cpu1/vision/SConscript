@@ -13,7 +13,8 @@ for name in libraries:
 
 flags = ' -Wl,--whole-archive ' + ' '.join('-l' + name for name in libraries)
 flags += ' -Wl,--no-whole-archive'
-group = DefineGroup('Mpp', ['mpp_init.c', 'tdvp_cpu1_vision_pins.c'], depend=['RT_USING_MPP'],
+group = DefineGroup('Mpp', ['mpp_init.c', 'tdvp_cpu1_vision_pins.c',
+                           'tdvp_cpu1_i2c4_clock.c'], depend=['RT_USING_MPP'],
                     CPPPATH=[cwd], LINKFLAGS=flags,
                     LIBPATH=[os.path.join(mpp, 'kernel', 'lib')])
 Return('group')

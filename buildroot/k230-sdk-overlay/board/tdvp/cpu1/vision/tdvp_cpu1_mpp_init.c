@@ -24,6 +24,7 @@ extern int sysctrl_init(void);
 extern int vb_init(void);
 extern int vicap_init(void);
 extern int tdvp_cpu1_vision_pins_init(void);
+extern int tdvp_cpu1_i2c4_init_status(void);
 
 static int vision_status = -RT_EBUSY;
 static int attempted;
@@ -39,12 +40,15 @@ int tdvp_cpu1_vision_init_status(void)
  */
 int mpp_init(void)
 {
-    const char *stage = "cmpi";
+    const char *stage = "early-i2c4";
     int result;
 
     if (attempted)
         return vision_status;
     attempted = 1;
+    if ((result = tdvp_cpu1_i2c4_init_status()) != 0)
+        goto failed;
+    stage = "cmpi";
     if ((result = cmpi_init()) != 0)
         goto failed;
     stage = "log";

@@ -15,6 +15,7 @@ static int step(int expected)
 }
 
 int cmpi_init(void) { return step(1); }
+int tdvp_cpu1_i2c4_init_status(void) { return fail_at == 9 ? -109 : 0; }
 int log_init(void) { return step(2); }
 int mmz_init(unsigned long base, unsigned long size)
 {
@@ -33,14 +34,14 @@ int main(int argc, char **argv)
 {
     assert(argc == 2);
     fail_at = atoi(argv[1]);
-    assert(fail_at >= 0 && fail_at <= 8);
+    assert(fail_at >= 0 && fail_at <= 9);
     assert(tdvp_cpu1_vision_init_status() != 0);
     const int expected = fail_at ? -100 - fail_at : 0;
     assert(mpp_init() == expected);
     assert(tdvp_cpu1_vision_init_status() == expected);
-    assert(calls == (fail_at ? fail_at : 8));
+    assert(calls == (fail_at == 9 ? 0 : (fail_at ? fail_at : 8)));
     /* Neither success nor partially initialized failure may run twice. */
     assert(mpp_init() == expected);
-    assert(calls == (fail_at ? fail_at : 8));
+    assert(calls == (fail_at == 9 ? 0 : (fail_at ? fail_at : 8)));
     return 0;
 }

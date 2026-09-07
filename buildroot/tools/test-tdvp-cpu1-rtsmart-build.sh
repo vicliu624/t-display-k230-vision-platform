@@ -20,6 +20,11 @@ NM="${TOOLCHAIN}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/bin/riscv64-unkn
 bash "${SCRIPT_DIR}/validate-k230-sdk-linux-patches.sh" "${CPU1_DIR}/patches"
 bash "${CPU1_DIR}/build-rtsmart.sh" "${OUTPUT_DIR}/fw_payload.bin" \
 	"${OUTPUT_DIR}/manifest" "${CPU1_DIR}/tdvp_cpu1_abi.h"
+# Validate the opt-in vision hook against the same pinned BSP fetched above.
+# The regression patches a temporary copy, never the compute-only firmware
+# checkout. Missing cached source or malformed real patches must fail CI.
+bash "${SCRIPT_DIR}/validate-k230-sdk-linux-patches.sh" "${CPU1_DIR}/vision"
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-i2c4-early.sh" "${BSP}"
 "${NM}" "${BSP}/rtthread.elf" > "${OUTPUT_DIR}/rtthread-symbols.txt"
 grep -Eq ' [tT] tdvp_cpu1_service$' "${OUTPUT_DIR}/rtthread-symbols.txt"
 grep -Eq ' [tT] dfs_file_open$' "${OUTPUT_DIR}/rtthread-symbols.txt"

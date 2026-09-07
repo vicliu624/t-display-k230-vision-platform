@@ -1,0 +1,53 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] rtsmart: gate camera I2C4 board init on early clocks
+
+Opt in only for the paired CPU1 vision firmware and Linux ownership DT.
+The board hook and clock implementation are installed from vision sources.
+MPP checks the hook's latched result; a missing hook fails the kernel link.
+
+diff --git a/Kconfig b/Kconfig
+--- a/Kconfig
++++ b/Kconfig
+@@ -31,5 +31,15 @@
+ source "testcase/kernel/Kconfig"
+ 
++config RT_USING_TDVP_CPU1_VISION
++    bool "TDVP CPU1 vision ownership (requires paired Linux DT)"
++    depends on RT_USING_MPP && RT_USING_I2C && RT_USING_I2C4
++    depends on !RT_USING_I2C0 && !RT_USING_I2C1 && !RT_USING_I2C2 && !RT_USING_I2C3
++    depends on !RT_USING_I2C4_SLAVE
++    default n
++    help
++      Prepare the shared I2C4 clock before BOARD-init register access.
++      Never enable with the Linux-owned camera device tree.
++
+ config CHIP_K230
+     bool
+     select ARCH_RISCV64
+diff --git a/drivers/interdrv/i2c/drv_i2c.c b/drivers/interdrv/i2c/drv_i2c.c
+--- a/drivers/interdrv/i2c/drv_i2c.c
++++ b/drivers/interdrv/i2c/drv_i2c.c
+@@ -1192,8 +1192,15 @@
+     i2c_dw_writel(i2c_base, DW_IC_INTR_MASK, 0);
+ }
+ 
++#ifdef RT_USING_TDVP_CPU1_VISION
++#include "tdvp_cpu1_i2c4_board.h"
++#endif
++
+ int rt_hw_i2c_init(void)
+ {
++#ifdef RT_USING_TDVP_CPU1_VISION
++    return tdvp_cpu1_i2c4_board_init();
++#else
+     int i;
+ 
+     for (i = 0; i < sizeof(i2c_buses) / sizeof(i2c_buses[0]); i++)
+@@ -1220,6 +1227,7 @@
+     }
+ 
+     return 0;
++#endif
+ }
+ INIT_BOARD_EXPORT(rt_hw_i2c_init);
+ 

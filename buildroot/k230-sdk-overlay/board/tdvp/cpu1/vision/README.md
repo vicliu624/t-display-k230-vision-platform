@@ -43,8 +43,15 @@ complete the camera ownership migration described below.
   CPU1 ownership is enabled. Initialization failures are not silently ignored.
 - Opt-in shared LS clock arbitration (`0069`): serialize Linux UART/I2C/GPIO
   CMU register writes with hardware semaphore 0, retain the shared LS APB
-  parent and reject Linux-owned declarations for I2C4 fields. The matched
-  RT-Smart early clock initialization is still required before I2C board init.
+  parent and reject Linux-owned declarations for I2C4 fields.
+- The paired RT-Smart BOARD hook (`0001-rtsmart-i2c4-early-clock.patch`)
+  prepares I2C4's exact 100 MHz functional clock before controller access,
+  using hardware semaphore 0 and an independently mapped CMU. It observes,
+  but never retunes, PLL0; it preserves the shared APB divider and all other
+  peripherals. Unsupported PLL state, timeout, failed readback, controller
+  mapping, bus-speed setup or bus registration is latched and blocks MPP.
+  The hook requires I2C4 master-only ownership. Its flag defaults off and the
+  unselected BSP entry is unchanged. The production build does not yet opt in.
 - A compiled candidate device-tree wrapper and ownership include, with the
   new MMZ/transport reservations and GPIO/power policies. Linux camera/AI
   devices and dedicated clock providers are disabled. This wrapper is NOT
@@ -88,6 +95,7 @@ bash buildroot/tools/test-tdvp-cpu1-transport.sh
 bash buildroot/tools/test-tdvp-cpu1-gpio-amp.sh
 bash buildroot/tools/test-tdvp-cpu1-power-amp.sh /path/to/pristine/pinned/linux
 bash buildroot/tools/test-tdvp-cpu1-clock-amp.sh /path/to/pinned/linux
+bash buildroot/tools/test-tdvp-cpu1-i2c4-early.sh /path/to/pinned/maix3
 bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh /path/to/fully/patched/linux
 bash buildroot/tools/test-tdvp-cpu1-capture.sh /path/to/pinned/canmv_k230/src/rtsmart/mpp
 ```
@@ -96,9 +104,18 @@ The capture test compiles against the actual pinned MPI headers with mocked
 operations: 25 lifecycle/failure cases. The transport test covers packed row
 copying, backpressure, leases, stale epochs, invalid releases and overflow.
 These tests do not prove physical cache coherency, camera operation or FPS.
+The early-I2C test applies the actual vision patch with zero fuzz to a temporary
+copy of the pinned BSP, extracts its real BOARD entry and executes it with the
+production clock helper and hook. Twenty-seven cases cover mapping, PLL state,
+exact divider selection, write/readback failure, semaphore timeout/timer wrap,
+controller initialization failure and repeat-call latching. Five illegal I2C
+ownership configurations fail compilation. A read-only board PLL/CMU snapshot
+is one successful no-write case, not evidence that this firmware has booted.
+The existing real-firmware CI preflight runs this test after fetching its BSP;
+it also structurally validates the real vision patch, not a substitute fixture.
 The GPIO model runs 100,000 concurrent updates per core against the actual
 patch helper. Pinmux tests cover the four-pad whitelist and failure/conflict
-paths; MPP initialization now covers eight stages. The power regression runs
+paths; MPP initialization covers eight stages plus early-I2C failure. The power regression runs
 the complete production driver after applying `0068` to actual kernel source,
 with Linux/MMIO mocked, including probe retry, no cycling of live domains,
 power-off refusal and error cleanup. CI runs this against `linux-patch` output
@@ -132,6 +149,15 @@ built-in GPIO driver. The upstream RT-Smart linker script
 still emits an RWX LOAD-segment warning; no claim of hardened ELF permissions
 is made. Nothing in this migration has been deployed to the board yet.
 
+The early-I2C revision also cross-linked into the actual camera-only RT-Smart
+kernel, including the guarded BOARD entry and both public status/clock symbols.
+Its `rtthread.elf` SHA-256 is
+`27be0f41e07661a999218866993bde9ebd7be6f3d474e9e941cef212957da408`;
+`rtthread.bin` SHA-256 is
+`1356796781930e3de16dd4f643c12eed3fa8b6c3150b0a253cdac6efba2788ec`.
+This is a cross-link check only: ISP/MCLK/AI power and clock initialization,
+paired image integration and physical camera acceptance remain outstanding.
+
 ## Required before production activation
 
 1. Enable `tdvp,cpu1-gpio-mask = <0x00200000>` on GPIO0 and
@@ -143,8 +169,9 @@ is made. Nothing in this migration has been deployed to the board yet.
    preserve Linux display/VGLite clocks, and validate CPU1 power/clock setup
    before sensor and KPU access. Do not import the full CanMV board initializer:
    it configures functions outside CPU1's ownership. `rt_hw_i2c_init` is a
-   BOARD initializer and immediately touches I2C registers: the matched CPU1
-   semaphore/100 MHz I2C4 preparation must precede it, not run inside MPP.
+   BOARD initializer and immediately touches I2C registers: install the matched
+   hook/header/clock source and select `RT_USING_TDVP_CPU1_VISION` together.
+   Its semaphore/100 MHz preparation precedes controller access, not MPP.
 3. Atomically add Linux MMZ/transport reservations and retire Linux camera,
    ISP, KPU/AI2D bindings and the CPU0 ISP service. Add an ownership gate that
    rejects mixed firmware/DT/profile combinations and checks GPIO protection.
