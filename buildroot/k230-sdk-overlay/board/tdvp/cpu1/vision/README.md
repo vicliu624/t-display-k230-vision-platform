@@ -11,6 +11,12 @@ This directory is an **in-progress migration**. Merely building it does not
   switch the production image to CPU1 camera ownership. Do not boot the
   candidate CPU1 firmware with the existing CPU0 camera device tree.
 
+The former `vpl-camera` Linux V4L2 desktop demo is retired: no menu entry or
+launcher is shipped, including in reused Buildroot targets. A replacement demo
+has not been designed or selected. Future Linux previews must consume CPU1
+results, not open the camera directly. Removing the old demo does not itself
+complete the camera ownership migration described below.
+
 ## Implemented and cross-built
 
 - A camera-only MPP kernel initializer with explicit strong dependencies and

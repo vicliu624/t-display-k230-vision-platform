@@ -21,11 +21,8 @@ grep -Fxq 'DevicePolicy=closed' "$source_dir/tdvp-camera-isp.service"
 grep -Fq '/etc/init.d/S31canaan_isp' "$overlay/board/tdvp/post-build.sh"
 grep -Fq 'verify-camera-rootfs.sh' "$overlay/board/tdvp/post-build.sh"
 grep -Fq 'verify-camera-dtb.sh' "$overlay/board/tdvp/verify-sdcard-image.sh"
-grep -Fq -- '--vo=wlshm' "$overlay/package/vicliu-pocket-linux-desktop/src/bin/vpl-camera"
-grep -Fq -- '--demuxer-thread=no --demuxer-readahead-secs=0' "$overlay/package/vicliu-pocket-linux-desktop/src/bin/vpl-camera"
-grep -Fq -- '--demuxer-lavf-o-add=video_size=1920x1080' "$overlay/package/vicliu-pocket-linux-desktop/src/bin/vpl-camera"
-grep -Fq -- '--demuxer-lavf-o-add=input_format=nv12' "$overlay/package/vicliu-pocket-linux-desktop/src/bin/vpl-camera"
-! grep -Fq 'av://v4l2:/dev/video0' "$overlay/package/vicliu-pocket-linux-desktop/src/bin/vpl-camera"
+# The transitional Linux driver diagnostics are not a desktop preview demo.
+bash "$project/buildroot/tools/test-tdvp-camera-demo-retired.sh"
 "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -O2 \
     "$source_dir/tdvp-camera-device.c" -o "$test_dir/tdvp-camera-device"
 # Bad arguments must not enumerate/open hardware on the CI host.

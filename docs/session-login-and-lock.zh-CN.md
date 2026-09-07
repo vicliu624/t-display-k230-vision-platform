@@ -6,9 +6,9 @@
   Labwc 桌面。默认配置不包含自动登录的 `initial_session`。
 - 空闲 300 秒锁定当前 Wayland 会话，再过 30 秒关闭屏幕输出。唤醒不应该
   注销应用或重新创建桌面。
-- 登录页和锁屏不是同一个进程。当前交付的 swaylock 使用纯色界面和键盘
-  密码输入；窗口式、可见密码输入框的锁屏交互仍在迁移中，不能把恢复
-  greeter 视作这一交互改造已经完成。
+- 登录页和锁屏不是同一个进程。`tdvp-session-lock` 现在使用 gtklock，
+  展示用户名、密码输入框、时钟和 Unlock 按钮；唤醒后在这个窗口解锁。
+  swaylock 暂留作维护工具，不再是自动/手动锁屏入口的默认程序。
 
 ## PAM 权限修复
 
@@ -16,15 +16,15 @@
 校验成功，普通桌面用户调用返回 9（认证信息不可用）。helper 是 root 所有
 的 `0755`，无法替普通用户读取正确保持为 `0600` 的 `/etc/shadow`。
 
-`swaylock.mk` 使用 Buildroot 的 `SWAYLOCK_PERMISSIONS`，在 fakeroot
+`gtklock.mk` 和维护用的 `swaylock.mk` 使用 Buildroot 权限表，在 fakeroot
 阶段将 `/usr/sbin/unix_chkpwd` 设为 `root:root 4755`。权限只授予 PAM
 专用密码校验 helper；不得把 swaylock/GTK/桌面合成器改成 setuid，不得将
 shadow 改为普通用户可读，也不得用 `pam_permit` 绕过认证。
 
 成品镜像的 `verify-auth-rootfs.sh` 直接检查 ext4 inode 的属主和权限，并核对
-完整的 swaylock PAM 规则及默认 greeter 配置。静态源文件存在不再被当成
+完整的 gtklock/swaylock PAM 规则及默认 greeter 配置。静态源文件存在不再被当成
 “锁屏认证可用”的证据。`test-tdvp-auth-image.sh` 使用真实 ext4 小镜像验证
-正确状态及十种失败情况，不要求 CI 获得 root 权限。
+正确状态及十三种失败情况，不要求 CI 获得 root 权限。
 
 ```sh
 bash buildroot/tools/test-tdvp-auth-image.sh
@@ -46,17 +46,17 @@ tdvp-graphical-login select greeter
 在用户允许结束当前桌面后重启了 greetd；日志记录了 greeter 会话和随后
 通过 `greetd` PAM 打开的 `tdvp` 会话。旧配置及 helper 位于设备：
 `/var/lib/tdvp-repair-backups/20260907/pam-greeter.3HP1qr/`。
-这不代替后续窗口式锁屏的画面、输入和 Wayland 锁定状态验收。
+窗口式锁屏另有以下运行验证，不能与恢复登录服务混为一谈。
 
-## 窗口式锁屏候选（尚未设为产品默认）
+## 窗口式锁屏（已切换设备和产品配置）
 
-候选使用 gtklock 4.0.0（`66321fb2bf0d5869d779e7ac6b4d8d9c272ea707`）和
+使用 gtklock 4.0.0（`66321fb2bf0d5869d779e7ac6b4d8d9c272ea707`）和
 gtk-session-lock 0.2.0（`b3544f361498d716b1ceef1ad6ac9bdf024bf782`）。
 它是 ext-session-lock 客户端，不是覆盖在桌面上的普通 layer-shell 窗口。
 密码框、解锁按钮、用户名称和时钟可见；配置禁止 idle-hide/start-hidden。
 样式与 greeter 使用相同的字体和颜色，尺寸按 1232×568 横屏约束。
 
-不能直接使用上游 4.0.0 的认证路径。候选包包含配对改动：
+不能直接使用上游 4.0.0 的认证路径。产品包包含配对改动：
 
 - `src/tdvp-auth.c` 替换 PAM 后端，在工作线程里同步检查当前 UID 的密码、
   账户状态和凭据刷新结果；不创建登录会话、不修改过期密码，不 fork GTK
@@ -65,6 +65,8 @@ gtk-session-lock 0.2.0（`b3544f361498d716b1ceef1ad6ac9bdf024bf782`）。
 - `0001` 补丁将密码副本交给工作线程；GTK 控件操作和成功解锁决定都留在
   主循环。认证期间所有输出禁止再次提交，回调不保存可能已销毁的窗口指针。
   认证成功之前的 SIGTERM/普通 shutdown 不发送 Wayland unlock。
+- daemonize 使用有界管道等待 compositor 的 locked 确认；父进程只在收到
+  确认后返回成功，替代上游有竞态的 ready 信号及一秒等待。
 - 图形程序保持普通用户权限，只有 `unix_chkpwd` 通过 fakeroot 权限规则
   获得 root:root 4755。不得把测试用 PAM 配置目录适配器编进产品程序。
 
@@ -78,8 +80,15 @@ gtk-session-lock 0.2.0（`b3544f361498d716b1ceef1ad6ac9bdf024bf782`）。
 - 使用现有 SDK 的 GTK 3.24.43、PAM 1.6.1、Wayland 1.23.1 完成候选应用和
   Wayland 库的标量 RISC-V 交叉编译，ELF 属性不要求 V 扩展。
 - 设备以真实 `tdvp` UID 运行同一后端：`tdvp` 密码被接受，错误密码被拒绝。
-  探针仅通过链接适配器把 PAM 策略目录指向 `/tmp/tdvp-gtklock-pam.Emdekx`，
-  使用真实设备 PAM/helper；未写 `/etc/pam.d/gtklock`，未切换或重启桌面。
+  早期探针使用隔离的 PAM 策略目录；随后已安装正式 `/etc/pam.d/gtklock`。
+- 设备上的隔离 headless Labwc/pixman 会话验证：无需点击即可输入、错误
+  密码保持锁定、正确密码发送 unlock、输出 off/on 后密码框可见。SIGTERM
+  没有发送 unlock，compositor 保持黑屏锁定，替代 locker 可接管并认证解锁。
+  新 daemonize 管道也验证了先收到 locked 再向启动方返回成功。
+- 已安装到正式桌面，并原子切换 `/usr/local/bin/tdvp-session-lock`；没有
+  重启 greetd 或结束当前会话。正式屏幕截图显示密码窗口，用户随后明确
+  确认“能看到窗口并成功解锁”。原入口备份在设备
+  `/var/lib/tdvp-repair-backups/20260907/window-lock.akeYo2/`。
 
 复现主机回归：
 
@@ -90,8 +99,7 @@ patch --batch --fuzz=0 -d /path/to/fresh/gtklock-4.0.0 -p1 < \
 bash buildroot/tools/test-tdvp-gtklock-ui-lifecycle.sh /path/to/patched/gtklock-4.0.0
 ```
 
-仍未完成：包的产品 Kconfig/defconfig 选择、session-lock 包装器切换、实际
-画面与输入焦点、息屏唤醒、触摸软键盘、真实 compositor 的崩溃保持锁定、
-VGLite 共存及最终镜像验证。当前 `tdvp-session-lock` 仍运行 swaylock，
-新包还没有通过生产 Buildroot recipe 完整构建；不能用手动 Meson 交叉编译
-代替生产构建，也不能把这个候选称为已经交付的新锁屏。
+产品 defconfig、SDK 包注册、session-lock 包装器及镜像权限/内容检查均已
+更新。仍需验证：触摸软键盘、VGLite renderer 共存和最终镜像。隔离会话的
+崩溃测试使用 pixman，不应被描述为 VGLite 验收。新包还没有通过生产
+Buildroot recipe 完整构建，手动 Meson 交叉编译和设备热修复不代替新镜像交付。

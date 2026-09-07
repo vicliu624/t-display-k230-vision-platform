@@ -19,6 +19,7 @@ auth_inode() {
 # shadow, a writable helper or a setuid Wayland client must never pass.
 auth_inode /usr/sbin/unix_chkpwd 04755
 auth_inode /usr/bin/swaylock 0755
+auth_inode /usr/bin/gtklock 0755
 auth_inode /etc/shadow 0600
 auth_inode /etc/pam.d/swaylock 0644
 auth_inode /etc/greetd/config.toml 0644
@@ -28,7 +29,11 @@ actual_pam="$("$debugfs" -R 'cat /etc/pam.d/swaylock' "$rootfs" 2>/dev/null)"
 actual_rules="$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' <<<"$actual_pam" | awk '{$1=$1; print}')"
 expected_rules=$'auth required pam_unix.so\naccount required pam_unix.so\nsession required pam_unix.so'
 [[ "$actual_rules" == "$expected_rules" ]] || auth_fail 'unexpected swaylock PAM policy'
+auth_inode /etc/pam.d/gtklock 0644
+actual_pam="$("$debugfs" -R 'cat /etc/pam.d/gtklock' "$rootfs" 2>/dev/null)"
+actual_rules="$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' <<<"$actual_pam" | awk '{$1=$1; print}')"
+[[ "$actual_rules" == "$expected_rules" ]] || auth_fail 'unexpected gtklock PAM policy'
 actual_config="$("$debugfs" -R 'cat /etc/greetd/config.toml' "$rootfs" 2>/dev/null)"
 expected_config=$'[terminal]\nvt = 1\n\n[default_session]\ncommand = "/usr/local/bin/tdvp-greeter-session"\nuser = "greeter"'
 [[ "$actual_config" == "$expected_config" ]] || auth_fail 'expected authenticated greeter default; no autologin session'
-echo 'TDVP authentication image guard: PASS helper privilege, private shadow, unprivileged swaylock, PAM policy and greeter default'
+echo 'TDVP authentication image guard: PASS helper privilege, private shadow, unprivileged lockers, PAM policies and greeter default'

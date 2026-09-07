@@ -1,6 +1,6 @@
 #!/bin/sh
 # Persistent, user-scoped policy for TDVP's Wayland idle session. This is a
-# policy adapter around swayidle, swaylock and wlopm; it never takes ownership
+# policy adapter around swayidle, gtklock and wlopm; it never takes ownership
 # of the compositor, PAM, display mode or privileged backlight controls.
 set -eu
 

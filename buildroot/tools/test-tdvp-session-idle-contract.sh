@@ -17,7 +17,7 @@ printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$@" > "${TDVP_TEST_ARGUMENTS}"' > "${T
 chmod 0755 "${TEMP_DIR}/client"
 sed 's/\r$//' "${SOURCE}/tdvp-session-powerctl" > "${TEMP_DIR}/powerctl"
 sed -e 's/\r$//' \
-	-e "s|^readonly SWAYLOCK=.*|readonly SWAYLOCK=${TEMP_DIR}/client|" \
+	-e "s|^readonly GTKLOCK=.*|readonly GTKLOCK=${TEMP_DIR}/client|" \
 	"${SOURCE}/tdvp-session-lock" > "${TEMP_DIR}/lock"
 sed -e 's/\r$//' \
 	-e "s|^readonly POWERCTL=.*|readonly POWERCTL=${TEMP_DIR}/powerctl|" \
@@ -51,7 +51,7 @@ printf '%s\n' -w timeout 10 "${TEMP_DIR}/lock" before-sleep "${TEMP_DIR}/lock" >
 cmp "${TEMP_DIR}/expected" "${TDVP_TEST_ARGUMENTS}"
 
 bash "${TEMP_DIR}/lock"
-printf '%s\n' -f -c 1f1e1b > "${TEMP_DIR}/expected"
+printf '%s\n' --daemonize --config /etc/gtklock/config.ini > "${TEMP_DIR}/expected"
 cmp "${TEMP_DIR}/expected" "${TDVP_TEST_ARGUMENTS}"
 test ! -d "${XDG_RUNTIME_DIR}/tdvp-session-lock"
 
@@ -60,10 +60,12 @@ for helper in tdvp-session-idle tdvp-session-lock tdvp-session-powerctl; do
 	grep -Fq "\$(TARGET_DIR)/usr/local/bin/${helper}" \
 		"${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-labwc-desktop/tdvp-labwc-desktop.mk"
 done
-for symbol in SWAYLOCK SWAYIDLE WLOPM LINUX_PAM; do
+for symbol in SWAYLOCK GTKLOCK GTK_SESSION_LOCK SWAYIDLE WLOPM LINUX_PAM; do
 	grep -Fqx "BR2_PACKAGE_${symbol}=y" \
 		"${PROJECT_DIR}/buildroot/k230-sdk-overlay/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig"
 done
 grep -Fq 'auth       required   pam_unix.so' \
 	"${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/swaylock/src/swaylock"
+grep -Fqx 'auth required pam_unix.so' \
+	"${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/gtklock/src/gtklock"
 printf '%s\n' 'test-tdvp-session-idle-contract: PASS defaults, custom/disabled timers, Wayland lock, autostart, packages and PAM'

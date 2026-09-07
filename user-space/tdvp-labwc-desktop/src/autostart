@@ -71,7 +71,7 @@ if [ -x /usr/bin/tdvp-quick-settings ]; then
 fi
 
 # Keep the policy within the authenticated Wayland session. The script starts
-# swayidle, locks through swaylock and only then asks wlopm to power the output
+# swayidle, locks through gtklock and only then asks wlopm to power the output
 # down; it never turns off or rearranges Labwc outputs with wlr-randr.
 if [ -x /usr/local/bin/tdvp-session-idle ]; then
 	/usr/local/bin/tdvp-session-idle &

@@ -28,13 +28,6 @@
     </Include>
   </Menu>
   <Menu>
-    <Name>Sound &amp; Video</Name>
-    <Directory>tdvp-sound-video.directory</Directory>
-    <Include>
-      <Filename>vpl-camera.desktop</Filename>
-    </Include>
-  </Menu>
-  <Menu>
     <Name>Games</Name>
     <Directory>tdvp-games.directory</Directory>
     <!--
@@ -63,7 +56,6 @@
   </Menu>
   <Layout>
     <Menuname>Accessories</Menuname>
-    <Menuname>Sound &amp; Video</Menuname>
     <Menuname>Games</Menuname>
     <Menuname>Preferences</Menuname>
     <Menuname>System</Menuname>

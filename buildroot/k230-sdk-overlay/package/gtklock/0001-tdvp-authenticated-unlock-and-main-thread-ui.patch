@@ -1,18 +1,28 @@
 From: TDVP <tdvp@localhost>
-Subject: [PATCH] serialize PAM attempts and require authenticated Wayland unlock
+Subject: [PATCH] require authenticated unlock and compositor-confirmed readiness
 
 Pair with the TDVP synchronous auth.c replacement installed by the package.
 Keep GTK calls on the main thread, do not retain window pointers across PAM,
 clear copied secrets, and fail closed on unauthenticated application shutdown.
 Show the current user and reduce margins for the board's landscape screen.
+Replace the racy daemon-ready signal with a bounded pipe acknowledgement sent
+only after the compositor confirms the session is locked.
 
 Upstream: Not submitted (TDVP-specific authentication backend integration)
 
 diff --git a/include/gtklock.h b/include/gtklock.h
-index 64c2f72..47290f1 100644
+index 64c2f72..28e278e 100644
 --- a/include/gtklock.h
 +++ b/include/gtklock.h
-@@ -21,6 +21,8 @@ struct GtkLock {
+@@ -14,6 +14,7 @@ struct GtkLock {
+ 	GtkApplication *app;
+ 	GtkSessionLockLock *lock;
+ 	pid_t parent;
++	int ready_fd;
+ 
+ 	GArray *windows;
+ 	GArray *messages;
+@@ -21,6 +22,8 @@ struct GtkLock {
  
  	struct Window *focused_window;
  	gboolean hidden;
@@ -48,10 +58,33 @@ index 4a2ca89..4474d36 100644
  					<object class="GtkBox" id="time-box">
  						<property name="name">time-box</property>
 diff --git a/src/gtklock.c b/src/gtklock.c
-index 512b5ca..883f0c0 100644
+index 512b5ca..e8135d3 100644
 --- a/src/gtklock.c
 +++ b/src/gtklock.c
-@@ -148,6 +148,9 @@ void gtklock_shutdown(struct GtkLock *gtklock) {
+@@ -4,6 +4,8 @@
+ // gtklock application
+ 
+ #include <signal.h>
++#include <errno.h>
++#include <unistd.h>
+ #include <gtk/gtk.h>
+ 
+ #include "util.h"
+@@ -108,7 +110,12 @@ static void exec_command(const gchar *command) {
+ static void locked(GtkSessionLockLock *lock, void *data) {
+ 	struct GtkLock *gtklock = (struct GtkLock *)data;
+ 	module_on_locked(gtklock);
+-	if(gtklock->parent > 0) kill(gtklock->parent, SIGUSR1);
++	if(gtklock->ready_fd >= 0) {
++		ssize_t sent;
++		do { sent = write(gtklock->ready_fd, "L", 1); } while(sent < 0 && errno == EINTR);
++		close(gtklock->ready_fd);
++		gtklock->ready_fd = -1;
++	}
+ 	if(gtklock->lock_command) exec_command(gtklock->lock_command);
+ 	return;
+ }
+@@ -148,6 +155,9 @@ void gtklock_shutdown(struct GtkLock *gtklock) {
  		gtklock->idle_hide_source = 0;
  	}
  
@@ -62,10 +95,29 @@ index 512b5ca..883f0c0 100644
  	gdk_display_sync(gdk_display_get_default());
  
 diff --git a/src/source.c b/src/source.c
-index cceab5e..db6abd9 100644
+index cceab5e..3138db6 100644
 --- a/src/source.c
 +++ b/src/source.c
-@@ -97,13 +97,15 @@ static void monitors_removed(GdkDisplay *display, GdkMonitor *monitor, gpointer
+@@ -4,6 +4,10 @@
+ #define _POSIX_C_SOURCE 200809L
+ 
+ #include <signal.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <unistd.h>
+ #include <sys/wait.h>
+ #include <locale.h>
+ #include <glib-unix.h>
+@@ -85,6 +89,7 @@ static GOptionEntry debug_entries[] = {
+ };
+ 
+ static pid_t parent = -2;
++static int ready_fd = -1;
+ 
+ static void monitors_added(GdkDisplay *display, GdkMonitor *monitor, gpointer user_data) {
+ 	struct Window *w = NULL;
+@@ -97,13 +102,15 @@ static void monitors_removed(GdkDisplay *display, GdkMonitor *monitor, gpointer
  	struct Window *w = window_by_monitor(monitor);
  	if(w != NULL) {
  		if(gtklock->focused_window == w) {
@@ -86,6 +138,71 @@ index cceab5e..db6abd9 100644
  		gtk_widget_destroy(w->window);
  	}
  	module_on_output_change(gtklock);
+@@ -228,29 +235,41 @@ static void attach_custom_style(const gchar *path) {
+ }
+ 
+ static void daemonize(void) {
+-	parent = getpid();
++	/* Report success only after the compositor's locked event. A pipe avoids
++	 * the SIGUSR1-before-sigprocmask race and signaling a recycled parent PID.
++	 * It is created before GTK starts threads; exec'd helpers cannot hold it. */
++	int ready[2];
++	if(pipe(ready) < 0 || fcntl(ready[0], F_SETFD, FD_CLOEXEC) < 0 ||
++			fcntl(ready[1], F_SETFD, FD_CLOEXEC) < 0)
++		report_error_and_exit("Failed to create lock readiness pipe");
+ 	pid_t pid = fork();
+ 	if(pid == -1) report_error_and_exit("Failed to daemonize!\n");
+ 	else if(pid != 0) {
+-		int status;
+-		waitpid(pid, &status, 0);
+-		if(WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS) {
+-			sigset_t set;
+-			sigemptyset(&set);
+-			sigaddset(&set, SIGUSR1);
+-			sigprocmask(SIG_BLOCK, &set, NULL);
+-			int ret = sigtimedwait(&set, NULL, &(struct timespec){ 1, 0 });
+-			if(ret == SIGUSR1)
+-				exit(EXIT_SUCCESS);
+-			exit(EXIT_FAILURE);
++		int status = 0;
++		pid_t waited;
++		close(ready[1]);
++		do { waited = waitpid(pid, &status, 0); } while(waited < 0 && errno == EINTR);
++		if(waited == pid && WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS) {
++			struct pollfd notification = {.fd = ready[0], .events = POLLIN};
++			char state = 0;
++			int available = poll(&notification, 1, 30000);
++			/* EOF, timeout, signal interruption and malformed readiness all fail. */
++			int success = available > 0 && (notification.revents & POLLIN) &&
++				read(ready[0], &state, 1) == 1 && state == 'L';
++			close(ready[0]);
++			exit(success ? EXIT_SUCCESS : EXIT_FAILURE);
+ 		}
+ 		report_error_and_exit("Failed to daemonize!\n");
+ 	}
+ 
+-	if(setsid() == -1) exit(EXIT_FAILURE);
++	close(ready[0]);
++	if(setsid() == -1) _exit(EXIT_FAILURE);
+ 	pid = fork();
+-	if(pid == -1) exit(EXIT_FAILURE);
+-	else if(pid != 0) exit(EXIT_SUCCESS);
++	if(pid == -1) _exit(EXIT_FAILURE);
++	else if(pid != 0) _exit(EXIT_SUCCESS);
++	/* If the invoking process times out/exits, retain the lock UI. */
++	signal(SIGPIPE, SIG_IGN);
++	ready_fd = ready[1];
+ }
+ 
+ static gboolean signal_handler(gpointer data) {
+@@ -336,6 +355,7 @@ int main(int argc, char **argv) {
+ 
+ 	gtklock->app = gtk_application_new(NULL, GTKLOCK_FLAGS);
+ 	gtklock->parent = parent;
++	gtklock->ready_fd = ready_fd;
+ 
+ 	gtklock->windows = g_array_new(FALSE, TRUE, sizeof(struct Window *));
+ 	gtklock->messages = g_array_new(FALSE, TRUE, sizeof(char *));
 diff --git a/src/window.c b/src/window.c
 index b5859cb..4c84d57 100644
 --- a/src/window.c

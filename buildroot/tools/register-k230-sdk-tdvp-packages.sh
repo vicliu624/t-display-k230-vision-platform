@@ -54,6 +54,8 @@ register_package vg_lite
 # selection reaches Kconfig.
 register_package labwc
 register_package swaylock 1
+register_package gtklock 1
+register_package gtk-session-lock
 register_package swayidle
 register_package wlopm
 register_package tdvp-quick-settings
