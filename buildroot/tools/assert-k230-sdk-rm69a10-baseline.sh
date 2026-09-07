@@ -95,7 +95,6 @@ packages=(
 
 required_config=(
 	BR2_PACKAGE_TDVP_CAMERA_ISP
-	BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME
 	BR2_PACKAGE_HOST_DTC
 	BR2_INIT_SYSTEMD
 	BR2_PACKAGE_SYSTEMD
@@ -168,6 +167,32 @@ required_config=(
 	BR2_PACKAGE_VG_LITE
 )
 
+# Hidden Kconfig dependencies are selected by the visible product packages;
+# they need not be written in the source defconfig, but must be enabled in the
+# resolved build configuration. Do not weaken the final image requirement.
+selected_config=(
+	BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME
+)
+
+require_profile_config() {
+	local config_file="$1"
+	local phase="$2"
+	local symbol
+
+	for symbol in "${required_config[@]}"; do
+		require_line "${config_file}" "${symbol}=y"
+	done
+	case "${phase}" in
+		source) ;;
+		resolved)
+			for symbol in "${selected_config[@]}"; do
+				require_line "${config_file}" "${symbol}=y"
+			done
+			;;
+		*) fail "unknown config assertion phase: ${phase}" ;;
+	esac
+}
+
 require_file "${MANIFEST}"
 require_line "${MANIFEST}" "profile=${PROFILE}"
 RENDERER_STACK_LOCK_CHECK="${PROJECT_DIR}/buildroot/tools/verify-tdvp-renderer-stack-lock.sh"
@@ -191,9 +216,8 @@ for package in "${packages[@]}"; do
 	require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/${package}/${package}.mk"
 done
 
-for symbol in "${required_config[@]}"; do
-	require_line "${PROJECT_DIR}/buildroot/k230-sdk-overlay/configs/${PROFILE}" "${symbol}=y"
-done
+require_profile_config "${PROJECT_DIR}/buildroot/k230-sdk-overlay/configs/${PROFILE}" source
+require_profile_config "${STAGED_OVERLAY}/configs/${PROFILE}" source
 
 DESKTOP_SOURCE="${PROJECT_DIR}/user-space/tdvp-labwc-desktop/src"
 GREETER_SOURCE="${PROJECT_DIR}/user-space/tdvp-greeter/src"
@@ -896,9 +920,7 @@ require_file "${IMAGES}/sysimage-sdcard.img"
 require_file "${IMAGES}/tdvp-image-manifest"
 require_file "${IMAGES}/tdvp-cpu1-rtsmart.bin"
 require_file "${IMAGES}/tdvp-cpu1-rtsmart.manifest"
-for symbol in "${required_config[@]}"; do
-	require_line "${CONFIG}" "${symbol}=y"
-done
+require_profile_config "${CONFIG}" resolved
 require_line "${CONFIG}" 'BR2_JLEVEL=4'
 require_line "${CONFIG}" '# BR2_RISCV_ISA_RVV is not set'
 require_line "${CONFIG}" 'BR2_TARGET_OPTIMIZATION="-mcpu=c908 -mtune=c908"'
