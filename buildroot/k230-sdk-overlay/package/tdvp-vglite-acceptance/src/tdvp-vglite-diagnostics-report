@@ -28,7 +28,8 @@ Options:
                         minimum valid queued-to-current framebuffer transition
                         count whose submitted buffer consumed a successful
                         VGLite finish (default: ${required_page_flip_transition})
-  --skip-lines N       ignore N existing log lines before parsing (default: ${skip_lines})
+  --skip-lines N       exclude N existing lines from metrics; retain in-flight
+                       finish/page-flip context across the boundary (default: ${skip_lines})
 EOF
 }
 
@@ -174,10 +175,34 @@ function read_fields(    i, equals, key, value) {
 }
 
 NR <= skip_lines {
+	# The sampling boundary can split finish -> queue -> page_flip. Seed
+	# only verified, unconsumed finish credits and before snapshots; old
+	# records never count toward the required finishes or reported metrics.
+	if ($0 ~ /(^|[[:space:]])TDVP_VGLITE_DIAG([[:space:]]|$)/) {
+		read_fields()
+		if (stage == "vglite_finish" && finish_buffer != "" &&
+			is_number(elapsed_ms) && result == "0" && pass_ok == "1" &&
+			is_uint(texture_clip_rects) && is_uint(texture_blit_attempts) &&
+			is_uint(texture_cache_flushes) &&
+			(texture_cache_flushes + 0) <= (texture_blit_attempts + 0) &&
+			is_uint(solid_clip_rects) && is_uint(solid_blit_attempts) &&
+			(state_recovery_attempted == "0" || state_recovery_attempted == "1") &&
+			state_recovery_ok == "1") {
+			successful_finish_buffers[finish_buffer]++
+		} else if (stage == "page_flip_before" && is_uint(commit_seq) &&
+			is_uint(submitted_fb) && is_uint(queued_fb)) {
+			before_submitted_fb[commit_seq] = submitted_fb
+			before_queued_fb[commit_seq] = queued_fb
+		} else if (stage == "page_flip_after" && submitted_buffer != "" &&
+			is_uint(submitted_fb) && submitted_fb != 0 &&
+			successful_finish_buffers[submitted_buffer] > page_flip_vglite_buffers[submitted_buffer]) {
+			page_flip_vglite_buffers[submitted_buffer]++
+		}
+	}
 	next
 }
 
-/TDVP_VGLITE_DIAG/ {
+/(^|[[:space:]])TDVP_VGLITE_DIAG([[:space:]]|$)/ {
 	diagnostic_records++
 	read_fields()
 
@@ -215,11 +240,14 @@ NR <= skip_lines {
 			malformed("vglite_finish state_recovery_ok must be 1 when state_recovery_attempted is 0")
 			next
 		}
-		if (texture_cache_flushes > texture_blit_attempts) {
+		if ((texture_cache_flushes + 0) > (texture_blit_attempts + 0)) {
 			malformed("vglite_finish texture cache flushes exceed texture blits")
 			next
 		}
 		vglite_finish_records++
+		# substr() fields are strings in awk: compare timings numerically,
+		# otherwise 10.000 sorts before 2.000. Validate before coercion.
+		elapsed_ms += 0
 		elapsed_ms_total += elapsed_ms
 		if (vglite_finish_records == 1 || elapsed_ms < elapsed_ms_min) elapsed_ms_min = elapsed_ms
 		if (vglite_finish_records == 1 || elapsed_ms > elapsed_ms_max) elapsed_ms_max = elapsed_ms
@@ -259,6 +287,7 @@ NR <= skip_lines {
 			next
 		}
 		drm_commit_records++
+		elapsed_ms += 0
 		drm_commit_elapsed_ms_total += elapsed_ms
 		if (drm_commit_records == 1 || elapsed_ms < drm_commit_elapsed_ms_min) {
 			drm_commit_elapsed_ms_min = elapsed_ms

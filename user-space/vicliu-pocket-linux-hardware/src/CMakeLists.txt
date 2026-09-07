@@ -15,6 +15,7 @@ add_library(vpl-hardware-core STATIC
     hardware/daemon.cpp
     hardware/dock.cpp
     hardware/lr2021.cpp
+    hardware/lora_status.cpp
     hardware/network.cpp
     hardware/nrf9151.cpp
     hardware/paths.cpp
@@ -40,6 +41,13 @@ target_compile_features(tdvp-cpu1ctl PRIVATE c_std_11)
 target_compile_options(tdvp-cpu1ctl PRIVATE ${VPL_WARNING_FLAGS})
 target_link_libraries(tdvp-cpu1ctl PRIVATE tdvp_cpu1)
 
+# Shares the host regression vectors, but talks to the real CPU1 when built
+# for the image. Keep assertions enabled even in release configurations.
+add_executable(tdvp-cpu1-acceptance tdvp-cpu1-acceptance.c)
+target_compile_features(tdvp-cpu1-acceptance PRIVATE c_std_11)
+target_compile_options(tdvp-cpu1-acceptance PRIVATE ${VPL_WARNING_FLAGS} -UNDEBUG)
+target_link_libraries(tdvp-cpu1-acceptance PRIVATE tdvp_cpu1)
+
 add_executable(vpl-hwctl main.cpp)
 target_compile_features(vpl-hwctl PRIVATE cxx_std_17)
 target_compile_options(vpl-hwctl PRIVATE ${VPL_WARNING_FLAGS})
@@ -60,7 +68,7 @@ target_compile_features(vpl-nrf9151-probe PRIVATE cxx_std_17)
 target_compile_options(vpl-nrf9151-probe PRIVATE ${VPL_WARNING_FLAGS})
 target_link_libraries(vpl-nrf9151-probe PRIVATE vpl-hardware-core)
 
-install(TARGETS vpl-hwctl vpl-lora-probe vpl-nrf9151-probe tdvp-cpu1ctl RUNTIME DESTINATION local/bin)
+install(TARGETS vpl-hwctl vpl-lora-probe vpl-nrf9151-probe tdvp-cpu1ctl tdvp-cpu1-acceptance RUNTIME DESTINATION local/bin)
 install(TARGETS vpl-hardwared RUNTIME DESTINATION libexec/vicliu-pocket-linux-hardware)
 install(TARGETS tdvp_cpu1 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES tdvp_cpu1.h tdvp_cpu1_abi.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

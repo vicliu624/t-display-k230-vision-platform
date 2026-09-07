@@ -44,6 +44,23 @@ build input and is checked by the baseline assertion.
 
 ## CPU1 Coprocessor Contract
 
+The ABI v1 payload starts at byte 52 in a non-cacheable device mapping. Linux
+must copy it with volatile byte stores, not ordinary `memcpy`, whose widened
+unaligned stores fault on CPU0. Run `tdvp-cpu1-acceptance` on the real board:
+it checks the known CRC, empty input, 464 length/alignment vectors up to
+4096 bytes, invalid arguments, and request/response sequence agreement.
+
+## nRF52840 UART1 Contract
+
+`0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch` enables UART1 GPIO3 TX / GPIO4
+RX and serial1 after the CPU0/CPU1 ownership patches. The final image guard
+uses host `fdtget` to check enabled status, pinctrl phandle binding and pin
+functions; merely finding a ttyS1 file or strings inside a disabled DT node
+is insufficient. This is the transport for the LilyGO BLE AT firmware, not
+an HCI/BlueZ controller by itself. UART0 stays with Linux and UART3 with CPU1.
+
+## CPU1 Boot Ownership
+
 The K230 Linux device tree intentionally declares only local hart `cpu@0`;
 this name alone does not select a physical core. The pinned SDK normally
 runs U-Boot on physical CPU1. TDVP overrides `CONFIG_LINUX_RUN_CORE_ID=0`

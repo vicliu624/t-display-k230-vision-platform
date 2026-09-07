@@ -58,6 +58,23 @@ grep -Fq 'skip_lines=7 records texture_upload=1 vglite_finish=1 texture_readback
 grep -Fq 'elapsed_ms_min=0.500 elapsed_ms_avg=0.500 elapsed_ms_max=0.500' <<<"${new_records_output}" ||
 	fail "skip-lines did not retain the expected finish record"
 
+# A capture may start after the finish, or between before/after snapshots.
+# Prefix records supply context, never new-frame evidence or old metrics.
+for boundary in 2 6; do
+	boundary_output="$(sh "${REPORT}" --log "${GOOD_LOG}" --skip-lines "${boundary}" --require-finish 1 --require-page-flip-transition 1)"
+	grep -Fq 'vglite_finish=1 ' <<<"${boundary_output}" || fail "prefix finish counted as a new frame"
+	grep -Fq 'verified_vglite_transitions=1' <<<"${boundary_output}" || fail "in-flight boundary lost its finish"
+done
+if prefix_only_output="$(sh "${REPORT}" --log "${GOOD_LOG}" --skip-lines 9 --require-finish 1 2>&1)"; then
+	fail "historical finishes satisfied the new-frame requirement"
+fi
+CONSUMED_LOG="${TEST_ROOT}/consumed.log"
+{ head -n 7 "${GOOD_LOG}"; tail -n 2 "${GOOD_LOG}"; sed -n '6,7p' "${GOOD_LOG}"; } >"${CONSUMED_LOG}"
+if consumed_output="$(sh "${REPORT}" --log "${CONSUMED_LOG}" --skip-lines 7 2>&1)"; then
+	fail "already-consumed prefix finish was reused"
+fi
+grep -Fq 'no unconsumed successful VGLite finish' <<<"${consumed_output}" || fail "consumed prefix finish had no diagnostic"
+
 FAILURE_LOG="${TEST_ROOT}/failure.log"
 printf '%s\n' \
 	'TDVP_VGLITE_DIAG stage=vglite_finish buffer=0x3 elapsed_ms=3.000 result=-5 pass_ok=0 texture_clip_rects=0 texture_blit_attempts=0 texture_cache_flushes=0 solid_clip_rects=0 solid_blit_attempts=0 state_recovery_attempted=1 state_recovery_ok=0' \
@@ -166,5 +183,28 @@ if empty_output="$(sh "${REPORT}" --log "${EMPTY_LOG}" 2>&1)"; then
 fi
 grep -Fq 'no TDVP_VGLITE_DIAG records found' <<<"${empty_output}" ||
 	fail "empty diagnostic log had no clear diagnostic"
+
+# Real Labwc startup mentions TDVP_VGLITE_DIAGNOSTICS, which is an
+# environment option, not a structured TDVP_VGLITE_DIAG record.
+NUMERIC_LOG="${TEST_ROOT}/numeric.log"
+printf '%s\n' \
+	'Loading TDVP_VGLITE_DIAGNOSTICS option: 1' \
+	'TDVP_VGLITE_DIAG stage=vglite_finish buffer=0x9 elapsed_ms=2.000 result=0 pass_ok=1 texture_clip_rects=12 texture_blit_attempts=12 texture_cache_flushes=2 solid_clip_rects=0 solid_blit_attempts=0 state_recovery_attempted=0 state_recovery_ok=1' \
+	'TDVP_VGLITE_DIAG stage=vglite_finish buffer=0x9 elapsed_ms=10.000 result=0 pass_ok=1 texture_clip_rects=12 texture_blit_attempts=12 texture_cache_flushes=2 solid_clip_rects=0 solid_blit_attempts=0 state_recovery_attempted=0 state_recovery_ok=1' \
+	'TDVP_VGLITE_DIAG stage=drm_commit commit_seq=50 iface=atomic flags=0x1 result=success elapsed_ms=10.000 submitted_fb=20 submitted_buffer=0x9' \
+	'TDVP_VGLITE_DIAG stage=drm_commit commit_seq=51 iface=atomic flags=0x1 result=success elapsed_ms=2.000 submitted_fb=20 submitted_buffer=0x9' \
+	>"${NUMERIC_LOG}"
+numeric_output="$(sh "${REPORT}" --log "${NUMERIC_LOG}" --require-finish 2)"
+grep -Fq 'vglite_finish elapsed_ms_min=2.000 elapsed_ms_avg=6.000 elapsed_ms_max=10.000' <<<"${numeric_output}" ||
+	fail "VGLite timing extrema were compared as strings"
+grep -Fq 'drm_commit elapsed_ms_min=2.000 elapsed_ms_avg=6.000 elapsed_ms_max=10.000' <<<"${numeric_output}" ||
+	fail "DRM timing extrema were compared as strings"
+sed 's/texture_blit_attempts=12 texture_cache_flushes=2/texture_blit_attempts=2 texture_cache_flushes=12/g' \
+	"${NUMERIC_LOG}" >"${TEST_ROOT}/numeric-invalid.log"
+if numeric_invalid_output="$(sh "${REPORT}" --log "${TEST_ROOT}/numeric-invalid.log" 2>&1)"; then
+	fail "multi-digit impossible cache flush count was accepted"
+fi
+grep -Fq 'texture cache flushes exceed texture blits' <<<"${numeric_invalid_output}" ||
+	fail "multi-digit cache flush overflow had no diagnostic"
 
 printf '%s\n' 'test-tdvp-vglite-diagnostics-report: PASS'

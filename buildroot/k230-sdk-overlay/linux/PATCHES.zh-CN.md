@@ -42,6 +42,21 @@
 
 ## CPU1 协处理器约定
 
+ABI v1 的 payload 从非缓存映射偏移 52 字节开始。Linux 必须使用 volatile
+逐字节写入；普通 `memcpy` 的未对齐宽写入会在 CPU0 上触发异常。实机运行
+`tdvp-cpu1-acceptance`，验证标准 CRC、空输入、最大 4096 字节的 464 组长度/对齐
+组合、非法参数拒绝和请求/应答序列一致。主机模拟测试不能代替实机验收。
+
+## nRF52840 UART1 约定
+
+`0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch` 在 CPU0/CPU1 ownership 补丁之后
+启用 UART1 GPIO3 TX / GPIO4 RX 和 serial1。最终镜像通过 host `fdtget` 检查节点
+启用状态、pinctrl phandle 绑定和实际 pin function；`ttyS1` 文件或 disabled DT 节点
+中的字符串存在不再视为通过。这是 LilyGO BLE AT 固件的传输通道，本身不是
+HCI/BlueZ 控制器。Linux 保留 UART0，CPU1 保留 UART3。
+
+## CPU1 启动所有权
+
 K230 Linux 设备树只声明本地 hart `cpu@0`，这个名称本身不决定物理核心。
 固定版本的 SDK 默认让 U-Boot 在物理 CPU1 上运行；TDVP 覆盖
 `CONFIG_LINUX_RUN_CORE_ID=0`，避免启动 CPU1 时复位 U-Boot 自己。

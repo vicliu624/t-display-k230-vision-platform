@@ -9,7 +9,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <time.h>
@@ -65,8 +64,14 @@ static int submit(struct tdvp_cpu1 *cpu1, uint32_t command, const void *payload,
     mailbox->result = -EINPROGRESS;
     mailbox->result_crc32 = 0;
     mailbox->result_value = 0;
-    if (payload_length != 0)
-        memcpy((void *)mailbox->payload, payload, payload_length);
+    /* This is a non-cacheable device mapping, not ordinary heap memory.
+     * ABI v1 puts payload at +52, which is not 8-byte aligned. The target
+     * libc memcpy uses unaligned 64-bit stores here and faults on CPU0.
+     * Preserve volatile byte stores: neither libc nor the compiler may
+     * widen/coalesce these accesses. Keep the wire layout unchanged.
+     */
+    for (uint32_t index = 0; index < payload_length; ++index)
+        mailbox->payload[index] = ((const uint8_t *)payload)[index];
     mailbox_fence();
     mailbox->linux_sequence = sequence;
     mailbox_fence();

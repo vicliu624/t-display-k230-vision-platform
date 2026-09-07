@@ -3,6 +3,7 @@
 #include "battery.hpp"
 #include "bluetooth.hpp"
 #include "dock.hpp"
+#include "lora_status.hpp"
 #include "network.hpp"
 #include "paths.hpp"
 
@@ -242,9 +243,7 @@ State collect_state()
         cellular && cellular_signal && *cellular_signal >= 0 && *cellular_signal <= 100
         ? std::to_string(*cellular_signal) : "-1";
 
-    transport(&state, "lora", false, false, false);
-    put(&state, "lora_requested", false);
-    put(&state, "lora_control_available", false);
+    append_lora_state(&state);
 
     const bool keyboard = dock.keyboard_input;
     const bool keyboard_backlight = any_backlight("keyboard");

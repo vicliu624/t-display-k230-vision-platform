@@ -16,4 +16,6 @@ done
 grep -Fq '&uart3 { status = "disabled"; };' "${TEMP_DIR}/${DTS_PATH}"
 grep -Fq '&uart0 { status = "okay"; };' "${TEMP_DIR}/${DTS_PATH}"
 grep -Fq 'tdvp,k230-cpu1-mailbox' "${TEMP_DIR}/${DTS_PATH}"
+grep -Fq 'serial1 = &uart1;' "${TEMP_DIR}/${DTS_PATH}"
+grep -Fq 'pinctrl-0 = <&tdvp_nrf52840_pins>;' "${TEMP_DIR}/${DTS_PATH}"
 printf '%s\n' 'test-tdvp-cpu0-dts-queue: PASS full board queue retains UART0, reserves UART3 and CPU1 mailbox'

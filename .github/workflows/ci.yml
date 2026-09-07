@@ -59,6 +59,9 @@ jobs:
           bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
           bash buildroot/tools/test-tdvp-cpu1-boot-contract.sh
           bash buildroot/tools/test-tdvp-cpu1-build-env.sh
+          bash buildroot/tools/test-tdvp-cpu1-mailbox.sh
+          bash buildroot/tools/test-tdvp-lora-status.sh
+          bash buildroot/tools/test-tdvp-vglite-diagnostics-report.sh
           bash buildroot/tools/test-tdvp-cpu0-dts-queue.sh
           bash buildroot/tools/test-tdvp-session-idle-contract.sh
           bash buildroot/tools/test-tdvp-image-source-contract.sh
@@ -89,6 +92,9 @@ jobs:
 
       - name: Verify image and collect the release bundle
         run: |
+          bash buildroot/tools/test-tdvp-uart1-dtb.sh \
+            "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/images/k230-canmv-rm69a10.dtb" \
+            "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/host/bin"
           bash buildroot/tools/assert-k230-sdk-rm69a10-baseline.sh "$TDVP_WORKTREE"
           bash buildroot/tools/assert-public-release.sh "$TDVP_WORKTREE"
           bash buildroot/tools/collect-release-bundle.sh \

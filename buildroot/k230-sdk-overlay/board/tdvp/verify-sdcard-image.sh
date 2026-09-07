@@ -424,6 +424,7 @@ require_fs_path "${BOOTFS}" '/k.dtb'
 require_fs_path "${BOOTFS}" '/k230-canmv-rm69a10.dtb'
 compare_bootfs_payload '/Image' "${BINARIES_DIR}/Image" 'Linux Image'
 compare_bootfs_payload '/k230-canmv-rm69a10.dtb' "${SELECTED_DTB}" 'RM69A10 DTB'
+bash "$(dirname "$0")/verify-uart1-dtb.sh" "${SELECTED_DTB}" "${BUILDROOT_HOST_DIR}/bin/fdtget"
 for required_dtb_string in \
 	'canaan,external-i2s-output-default' \
 	'amp-shutdown-gpios' \
@@ -639,6 +640,7 @@ require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-greeter-labwc'
 require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-labwc-session'
 require_fs_path "${ROOTFS}" '/usr/libexec/vicliu-pocket-linux-hardware/vpl-hardwared'
 require_fs_regular_file "${ROOTFS}" '/usr/local/bin/tdvp-cpu1ctl'
+require_fs_regular_file "${ROOTFS}" '/usr/local/bin/tdvp-cpu1-acceptance'
 require_fs_path "${ROOTFS}" '/usr/lib/libtdvp_cpu1.so.1'
 reject_fs_path "${ROOTFS}" '/usr/local/libexec/vicliu-pocket-linux-hardware/vpl-hardwared'
 require_fs_path "${ROOTFS}" '/etc/tdvp/labwc/environment'

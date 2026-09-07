@@ -318,12 +318,14 @@ require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/build-rt
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/verify-boot-contract.sh"
 require_line "${STAGED_OVERLAY}/boot/uboot/u-boot-2022.10-overlay/board/canaan/common/sdk_autoconf.h" '#define CONFIG_LINUX_RUN_CORE_ID 0'
 require_file "${STAGED_OVERLAY}/linux/0064-tdvp-riscv-dts-use-scalar-cpu0.patch"
+require_file "${STAGED_OVERLAY}/linux/0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch"
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c"
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c" 'INIT_APP_EXPORT(tdvp_cpu1_service_init);'
 require_file "${HARDWARE_SOURCE}/tdvp_cpu1_abi.h"
 require_file "${HARDWARE_SOURCE}/tdvp_cpu1.h"
 require_file "${HARDWARE_SOURCE}/tdvp_cpu1.c"
 require_file "${HARDWARE_SOURCE}/tdvp-cpu1ctl.c"
+require_file "${HARDWARE_SOURCE}/tdvp-cpu1-acceptance.c"
 require_content "${HARDWARE_SOURCE}/tdvp_cpu1_abi.h" 'TDVP_CPU1_MAILBOX_PHYS 0x13ff0000UL'
 require_content "${HARDWARE_SOURCE}/tdvp-cpu1ctl.c" 'crc32 <text>'
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/post-image.sh" 'bootcmd_cpu1'

@@ -1,6 +1,7 @@
 #include "quick_settings_service.hpp"
 
 #include "bluetooth.hpp"
+#include "lora_status.hpp"
 #include "nrf9151.hpp"
 #include "paths.hpp"
 
@@ -235,13 +236,8 @@ void QuickSettingsService::refresh(State *state)
     update_gnss_startup();
     (*state)["dock_nrf9151_sku_state"] = lte_sku_state_;
 
-    const bool lora_available = is_keyboard_attached(*state) && lora_control_available();
-    const bool lora_enabled = lora_available && lora_is_enabled();
-    (*state)["lora_available"] = lora_available ? "1" : "0";
-    (*state)["lora_control_available"] = lora_available ? "1" : "0";
-    (*state)["lora_enabled"] = lora_enabled ? "1" : "0";
-    (*state)["lora_requested"] = lora_enabled ? "1" : "0";
-    (*state)["radio_profile"] = paths::read(kRadioProfilePath);
+    append_lora_state(state);
+    const bool lora_enabled = (*state)["lora_enabled"] == "1";
 
     const bool gps_available = lte_present();
     (*state)["gps_available"] = gps_available ? "1" : "0";

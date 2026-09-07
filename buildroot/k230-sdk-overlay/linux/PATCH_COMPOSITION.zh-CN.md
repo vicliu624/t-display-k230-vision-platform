@@ -18,7 +18,10 @@ SDK 0001..0024
   -> TDVP 0048..0049：LR2021 SPI0 传输、复位时序与有边界的 IRQ 枚举
   -> TDVP 0050：AHT20 hwmon binding
   -> TDVP 0051..0052：受控 external I2S amplifier route
-  -> TDVP 0053：CPU1 RT-Smart reserved memory 与受限 mailbox
+  -> TDVP 0053：DRM page-flip 生命周期
+  -> TDVP 0054..0062：VGLite resource、submit、watchdog 与恢复约定
+  -> TDVP 0063..0064：CPU1 mailbox 与 CPU0 scalar Linux/串口归属
+  -> TDVP 0065：nRF52840 UART1 GPIO3/4 传输通道
 ```
 
 Buildroot `linux/` package 目录是唯一的补丁输入。Buildroot 按文件名字典序应用其中的
@@ -59,6 +62,14 @@ Lewis `0036-add-gc2093-camera.patch` 不在活动队列中。其来源说明 MCL
 initialization 尚未完成；它还需要 `i2c4`，而 TDVP `0037` 在已验收 shell profile 中将 `i2c4`
 设为 disabled。启用 camera 时需要补齐 electrical configuration，并提供独立的 DTB/CSI capture
 acceptance test。
+
+2026-09-07 实机复核：原配 GC2093 已连接，但当前镜像只有 `mvx` 编解码节点，
+没有 camera capture 节点。较新的 LilyGO BSP 已包含 GC2093 DTS 和 vvcam MCLK
+实现，不能把上述历史排除说明当作对新 BSP 的结论。移植仍需保留 TDVP 的 I2C alias、
+键盘和 CPU1 ownership，并审查 CPU0 兼容性：固定 SDK 的 `isp_media_server` 与
+`isp_media_server_debian` 都含实际 RVV 指令，不能直接假定可以在 scalar CPU0 上运行。
+目前未启用 camera，也未将 ISP 服务移动到 CPU1；详情见
+[实机验证记录](../../../docs/device-validation-2026-09-07.md)。
 
 ### Colour Conversion
 
