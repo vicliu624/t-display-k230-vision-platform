@@ -21,8 +21,8 @@
 		tdvp,gpio-controller = <&gpio0>;
 		tdvp,power-controller = <&sysctl_power>;
 		tdvp,clock-controller = <&sysctl_clock>;
-		clocks = <&pll0_div4>, <&pll1_div4>, <&pll2_div4>;
-		clock-names = "pll0", "pll1", "pll2";
+		clocks = <&pll0_div4>, <&pll1_div4>, <&pll2_div4>, <&tdvp_isp_ddr>, <&tdvp_ai_ddr>;
+		clock-names = "pll0", "pll1", "pll2", "isp-ddr", "ai-ddr";
 		power-domains = <&sysctl_power 1>, <&sysctl_power 2>; /* AI, DISP */
 		power-domain-names = "ai", "disp";
 		status = "okay";
@@ -33,6 +33,33 @@
 &gpio0_ports { gpio-reserved-ranges = <21 1>; };
 &sysctl_power { tdvp,cpu1-vision-domains; };
 &sysctl_clock { tdvp,cpu1-i2c4-clock-sharing; };
+
+/* DDR controller is shared system infrastructure. Linux CCF serializes these
+ * two dedicated port gates with its other writes to the same 0x60 word and
+ * holds them before granting CPU1 access; CPU1 never writes DDR clock/reset.
+ */
+&sysctl_clock {
+	tdvp_isp_ddr: tdvp_isp_ddr {
+		compatible = "canaan,k230-clk-composite";
+		#clock-cells = <0>;
+		clocks = <&pll0_div4>;
+		read-only = <0>;
+		clk-gate-reg-offset = <0x60>;
+		clk-gate-reg-bit-enable = <4>;
+		clk-gate-reg-bit-reverse = <0>;
+		status = "okay";
+	};
+	tdvp_ai_ddr: tdvp_ai_ddr {
+		compatible = "canaan,k230-clk-composite";
+		#clock-cells = <0>;
+		clocks = <&pll0_div4>;
+		read-only = <0>;
+		clk-gate-reg-offset = <0x60>;
+		clk-gate-reg-bit-enable = <6>;
+		clk-gate-reg-bit-reverse = <0>;
+		status = "okay";
+	};
+};
 
 /* CPU1 alone owns sensor, I2C4, CSI, ISP and AI engines/interrupts. */
 &i2c4 {

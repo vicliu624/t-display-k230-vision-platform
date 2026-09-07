@@ -8,7 +8,7 @@
 struct tdvp_linux_owner {
     struct tdvp_owner_control __iomem *control;
     struct tdvp_owner_session session;
-    struct clk_bulk_data clocks[3];
+    struct clk_bulk_data clocks[5];
     struct device *domains[2];
     unsigned int exclusive, powered;
     bool clocks_acquired, clocks_enabled, started;

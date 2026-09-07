@@ -66,9 +66,32 @@ complete the camera ownership migration described below.
   unselected BSP entry is unchanged. The production build does not yet opt in.
 - The paired component patch (`0002-rtsmart-defer-vision-components.patch`)
   prevents automatic MPP/GNNE/AI2D initialization before main. MPP is called
-  explicitly after GRANT. GNNE/AI2D automatic registration remains removed
-  until the dedicated AI clock/power/error-handling path is integrated; this
-  candidate does NOT yet execute a KPU model or initialize FFT.
+  explicitly after GRANT. The candidate now follows MPP with a strong,
+  once-only AI startup chain: dedicated AI clock/reset preparation, GNNE,
+  AI2D and the CPU1 hardware FFT driver. A failed stage blocks READY/worker
+  launch, latches the failure and never retries or resets live sibling engines.
+- AI clock setup requires Linux-held AI power, repaired SRAM, both ISP/AI DDR
+  ports and the verified 1.6 GHz PLL0. CPU1 prepares only CMU `0x08` (800 MHz
+  AI core/400 MHz AXI) and the dedicated AI reset at `0x91101014`, with readback
+  checks and a bounded reset wait. It never writes shared PLL/power/DDR or GPU
+  clock registers. The single startup reset affects GNNE/AI2D/FFT together;
+  it is not a per-job recovery mechanism.
+- `0003-rtsmart-ai-initialization-errors.patch` makes paired GNNE/AI2D
+  initialization establish mappings, events, wait queues, file operations and
+  interrupt handlers before device publication/unmasking. It propagates KPU
+  hardlock reservation failures. It also fixes the BSP hardlock mapping check:
+  a failed mapping must not become the apparently valid address `0xa0`.
+  Unselected GNNE/AI2D initializer bodies remain unchanged. Their upstream
+  runtime operations still require bounded/fault-aware integration before a
+  model service is released; successful registration is not that acceptance.
+- CPU1 hardware FFT uses the pinned MPI ioctl ABI with bounded, serialized
+  PIO/FIFO transfers. The upstream FFT SDMA dependency is deliberately absent:
+  system SDMA stays outside CPU1's exclusive AI allocation. Inputs are
+  validated before MMIO, hardware/software waits are bounded, and hardware or
+  ownership faults latch AI failure and propagate to the main owner heartbeat.
+  Runtime readers use sequence-checked, fresh publications without advancing
+  the main thread's state machine; an in-progress publication gets a bounded
+  retry. No numerical FFT or model execution on the board is claimed yet.
 - A shared, versioned ownership policy and RT-Smart startup adapter. Linux
   publishes OFFER only after preparing/retaining resources, CPU1 requires an
   advancing heartbeat before writing HELLO, Linux validates the matching
@@ -77,8 +100,11 @@ complete the camera ownership migration described below.
   disabled Linux camera/AI declarations and exact named supplier references.
   `0070` verifies actual GPIO/power/clock initialization, not just DT flags.
   Before OFFER it holds AI/DISP runtime-PM references, enables the three shared
-  PLL divide-by-four suppliers and obtains rate-exclusive references (including
-  their parent protection). No PLL retuning is performed. This remains a
+  PLL divide-by-four suppliers plus ISP P1/AI P3 DDR port gates, and obtains
+  rate-exclusive references (including their parent protection). The two DDR
+  gates use Linux CCF's shared-register serialization; CPU1 never writes that
+  register. Ownership contract 2 refuses contract-1 firmware which did not
+  require these retained ports. No PLL retuning is performed. This remains a
   candidate path, not selected by the production image.
   Separate 128-byte records, sequence-checked snapshots and fences prevent
   mixed publications; boot/peer timeouts and identity changes latch faults.
@@ -134,8 +160,9 @@ it noncached but does not write until observing a live OFFER. Existing or
 malicious arbitrary physical writers are not authenticated by this protocol;
 matched image/DT reservations and kernel-only access remain mandatory. Linux
 must retain shared suppliers after any GRANT, including on timeout or module
-teardown, until a real quiesce/reboot policy permits release. The current
-candidate bridge's old remove/open lifecycle is not sufficient for this.
+teardown, until a real quiesce/reboot policy permits release. The candidate
+therefore pins successful bridge/provider instances and prohibits hot unbind;
+there is no supported in-place ownership release/regrant yet.
 
 The initial Linux read record is a 64-byte `tdvp_vision_frame_header` followed
 by packed NV12, exactly 3,110,400 payload bytes at the initial resolution.
@@ -159,6 +186,7 @@ bash buildroot/tools/test-tdvp-cpu1-i2c4-early.sh /path/to/pinned/maix3
 bash buildroot/tools/test-tdvp-cpu1-ownership.sh /path/to/pinned/maix3
 bash buildroot/tools/test-tdvp-cpu1-linux-owner.sh
 bash buildroot/tools/test-tdvp-cpu1-camera-clock.sh /path/to/pinned/maix3 /path/to/pinned/mpp
+bash buildroot/tools/test-tdvp-cpu1-ai.sh /path/to/pinned/maix3 /path/to/pinned/mpp
 bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh /path/to/fully/patched/linux
 bash buildroot/tools/test-tdvp-cpu1-capture.sh /path/to/pinned/canmv_k230/src/rtsmart/mpp
 ```
@@ -168,14 +196,14 @@ operations: 25 lifecycle/failure cases. The transport test covers packed row
 copying, backpressure, leases, stale epochs, invalid releases and overflow.
 These tests do not prove physical cache coherency, camera operation or FPS.
 The ownership test executes the common policy and actual RT-Smart startup,
-including 12 startup scenarios: absent/stale/invalid offers, live startup,
+including 14 startup scenarios: absent/stale/invalid offers, live startup,
 peer loss, each initialization/launch failure, grant loss during MPP and
 mapping failure. It patches actual pinned component sources with zero fuzz,
 compiles them and checks that automatic MPP/AI calls are absent while
 unselected source bodies remain unchanged. Those RT-Smart tests do not prepare
 real Linux resources, authenticate a mismatched image, or prove hardware behavior.
 The separate Linux adapter test executes its production C with DT/PM/clock/MMIO
-primitives mocked: 46 preparation refusals must issue no offer and leak no
+primitives mocked: 51 preparation refusals must issue no offer and leak no
 references. It also checks Linux/RT-Smart publication compatibility, a complete
 handshake, sequence wrap, torn snapshots and lifetime retention after boot/peer
 timeouts. Bridge FD/PM lifecycle assertions are source checks, not runtime
@@ -201,6 +229,16 @@ power/PLL refusal, ignored writes and a changing prerequisite are covered.
 One case uses the actual board's read-only CMU/PLL/power snapshot. This is not a
 live register-write or camera test. CI obtains the MPP layout header from the
 exact pinned Git commit even when its compute-only sparse checkout omits MPP.
+The AI regression compiles against pinned BSP register/address headers and the
+actual MPI FFT ABI. It runs 54 scenarios: 22 AI clock/reset cases, five startup
+dependency outcomes, 18 FFT initialization/runtime cases (including 84 legal
+size/layout/direction combinations), and nine GNNE/AI2D/hardlock initialization
+cases. For the latter it applies the real patch with zero fuzz to temporary
+BSP copies and executes the extracted initializer bodies, not a rewritten
+fixture. The FFT FIFO model checks transfer counts and failure handling, not
+FFT mathematics. CI fetches the exact pinned MPP type/ioctl headers for this
+regression. A 32-bit DFS ioctl comparison bug was caught and fixed by the
+strict-warning host build; transient ownership publication is also tested.
 The GPIO model runs 100,000 concurrent updates per core against the actual
 patch helper. Pinmux tests cover the four-pad whitelist and failure/conflict
 paths; MPP initialization covers eight stages plus early-I2C and camera-clock
@@ -275,7 +313,7 @@ readiness exports exist in the linked kernel. The candidate DTB passed the
 273-node comparison, 26 invalid-candidate tests and three camera-clock writer
 refusals. Renderer lock and VGLite session-gate host regressions still pass.
 
-The latest paired-source build evidence is:
+The earlier contract-1 paired-source build evidence was:
 
 - Linux bridge SHA-256: `eea1a87bfff9bdc51a3c5ccde15727b73981c11844ae20ed8cc57de81e2f5d2c`.
 - CPU1 worker: `2d38d00966760922a9966c0f7435f95f5b4b04fd5b53b484df84c6c9ca205c36`.
@@ -285,6 +323,22 @@ The latest paired-source build evidence is:
 This is build evidence only, not model inference, FFT execution, full AI SRAM/
 DMA ownership audit, complete image build or board deployment. Existing SDK
 warnings (including the RT-Smart RWX LOAD segment) remain.
+
+The contract-2 AI initializer/FFT candidate also passed the real Ubuntu 24.04
+regressions. The bridge linked with `W=1` against the patched Linux kernel;
+its SHA-256 is `515cf20bc94d8076a749f436325960aa6505ec72af95b999e2293cf92f2c63b1`.
+The candidate DTB passes the 273-existing-node comparison, 28 invalid-candidate
+tests and four forbidden AI/camera-clock writer tests. Renderer stack lock,
+VGLite session gate, the real 45-patch Linux queue and stale-patch reconciliation
+all pass. The final-source RT-Smart cross-link includes the ownership gate,
+controlled GNNE/AI2D/FFT initializers and asynchronous worker in ROMFS:
+
+- Worker SHA-256: `600fdd7c136c8a04880522ad509f1035bd59e5d5b34b17242325f5148f1ae2b6`.
+- RT-Smart ELF: `3f1f2ead7d105ab92d788d19836e751b3f51d5b801a3dd9c8b9e95f20b890810`.
+- RT-Smart binary: `c262d2652aacc4b473bf5e795409d93ab7ac63f3f34720109d19dbdf45a44780`.
+
+This does not activate the production profile or deploy a board image; the
+remaining release requirements still apply.
 
 The remaining release requirements are:
 

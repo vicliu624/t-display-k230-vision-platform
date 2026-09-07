@@ -22,7 +22,7 @@ flags=(-std=gnu11 -O2 -Wall -Wextra -Werror -UNDEBUG -I"$test_dir/include" -I"$v
 "${CC:-cc}" "${flags[@]}" -DRT_USING_TDVP_CPU1_VISION \
     "$vision/tdvp_vision_owner.c" "$vision/tdvp_cpu1_vision_startup.c" \
     "$project/buildroot/tools/tests/tdvp-cpu1-startup-test.c" -o "$test_dir/startup"
-for scenario in 0 1 2 3 4 5 6 7 8 9 10 12; do "$test_dir/startup" "$scenario"; done
+for scenario in 0 1 2 3 4 5 6 7 8 9 10 12 13 14; do "$test_dir/startup" "$scenario"; done
 "${CC:-cc}" "${flags[@]}" -DRT_USING_MPP -DRT_USING_TDVP_CPU1_VISION \
     -c "$test_dir/board/sdk_kernel_init.c" -o "$test_dir/sdk.o"
 "${CC:-cc}" "${flags[@]}" -DRT_USING_TDVP_CPU1_VISION \

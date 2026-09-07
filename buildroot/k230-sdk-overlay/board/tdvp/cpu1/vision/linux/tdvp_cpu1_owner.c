@@ -74,8 +74,8 @@ static int owner_declarations(struct device_node *node)
 
     if (of_count_phandle_with_args(node, "memory-region", NULL) != 2 ||
         of_property_count_strings(node, "memory-region-names") != 2 ||
-        of_count_phandle_with_args(node, "clocks", "#clock-cells") != 3 ||
-        of_property_count_strings(node, "clock-names") != 3 ||
+        of_count_phandle_with_args(node, "clocks", "#clock-cells") != 5 ||
+        of_property_count_strings(node, "clock-names") != 5 ||
         of_count_phandle_with_args(node, "power-domains", "#power-domain-cells") != 2 ||
         of_property_count_strings(node, "power-domain-names") != 2 ||
         of_find_property(node, "assigned-clocks", NULL))
@@ -116,6 +116,35 @@ static int owner_named_supplier(struct device_node *node, const char *list,
     return ret;
 }
 
+static int owner_ddr_layout(struct device_node *node, unsigned int index, u32 bit)
+{
+    static const char *const properties[] = {
+        "clk-gate-reg-offset", "clk-gate-reg-bit-enable", "clk-gate-reg-bit-reverse", "read-only"
+    };
+    const u32 expected[] = {0x60, bit, 0, 0};
+    struct of_phandle_args args;
+    struct device_node *parent, *pll;
+    u32 value;
+    unsigned int i;
+    int ret = of_parse_phandle_with_args(node, "clocks", "#clock-cells", index, &args);
+    if (ret) return ret;
+    ret = -EINVAL;
+    for (i = 0; i < ARRAY_SIZE(properties); ++i)
+        if (of_property_read_u32(args.np, properties[i], &value) || value != expected[i]) goto out;
+    if (of_find_property(args.np, "clk-rate-reg-offset", NULL) ||
+        of_find_property(args.np, "clk-rate-reg-offset_1", NULL) ||
+        of_find_property(args.np, "clk-parent-reg-offset", NULL) ||
+        of_find_property(args.np, "assigned-clocks", NULL)) goto out;
+    parent = of_parse_phandle(args.np, "clocks", 0);
+    pll = of_find_node_by_path("/soc/sysctl/sysctl_boot@91102000/pll0_div4");
+    if (parent && parent == pll) ret = 0;
+    of_node_put(parent);
+    of_node_put(pll);
+out:
+    of_node_put(args.np);
+    return ret;
+}
+
 void tdvp_linux_owner_abort(struct tdvp_linux_owner *owner)
 {
     unsigned int i;
@@ -145,15 +174,17 @@ void tdvp_linux_owner_abort(struct tdvp_linux_owner *owner)
 
 int tdvp_linux_owner_prepare(struct device *dev, struct tdvp_linux_owner *owner)
 {
-    static const char *const clocks[] = {"pll0", "pll1", "pll2"};
+    static const char *const clocks[] = {"pll0", "pll1", "pll2", "isp-ddr", "ai-ddr"};
     static const char *const paths[] = {
         "/soc/sysctl/sysctl_boot@91102000/pll0_div4",
         "/soc/sysctl/sysctl_boot@91102000/pll1_div4",
         "/soc/sysctl/sysctl_boot@91102000/pll2_div4",
+        "/soc/sysctl/sysctl_clock@91100000/tdvp_isp_ddr",
+        "/soc/sysctl/sysctl_clock@91100000/tdvp_ai_ddr",
     };
     static const char *const domains[] = {"ai", "disp"};
-    static const unsigned long min_rates[] = {400000000, 594000000, 666000000};
-    static const unsigned long max_rates[] = {400000000, 594000000, 666750000};
+    static const unsigned long min_rates[] = {400000000, 594000000, 666000000, 400000000, 400000000};
+    static const unsigned long max_rates[] = {400000000, 594000000, 666750000, 400000000, 400000000};
     struct device_node *node = dev->of_node;
     unsigned long rate;
     unsigned int i;
@@ -179,6 +210,11 @@ int tdvp_linux_owner_prepare(struct device *dev, struct tdvp_linux_owner *owner)
         if (ret)
             return ret;
         owner->clocks[i].id = clocks[i];
+        if (i >= 3) {
+            int index = of_property_match_string(node, "clock-names", clocks[i]);
+            ret = owner_ddr_layout(node, index, i == 3 ? 4 : 6);
+            if (ret) return ret;
+        }
     }
     for (i = 0; i < ARRAY_SIZE(domains); ++i) {
         ret = owner_named_supplier(node, "power-domains", "power-domain-names",

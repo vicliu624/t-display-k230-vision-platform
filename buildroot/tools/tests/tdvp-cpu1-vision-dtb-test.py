@@ -85,6 +85,7 @@ GPIO = "/soc/gpio@9140b000"
 MMZ = "/reserved-memory/cpu1-mmz@14000000"
 SHARED = "/reserved-memory/cpu1-transport@1c000000"
 VISION = "/cpu1-vision"
+DDR = (CLOCK + "tdvp_isp_ddr", CLOCK + "tdvp_ai_ddr")
 DISABLED = ["/soc/i2c@91409000", "/soc/i2c@91409000/gc2093@37",
             "/soc/isp.0", "/soc/mipi.0", "/soc/mipi.1", "/soc/mipi.2",
             "/soc/gnne@80400000", "/soc/ai2d@80400c00"]
@@ -110,7 +111,7 @@ def validate_shared_clock_layout(nodes):
         offsets = [values.get(key) for key in ("clk-gate-reg-offset", "clk-rate-reg-offset",
                                              "clk-rate-reg-offset_1", "clk-parent-reg-offset")]
         gate, rate, rate1, mux = offsets
-        assert not {0x64, 0x68, 0x6c}.intersection(offsets), ("Linux camera clock writer remains", path)
+        assert not {0x08, 0x64, 0x68, 0x6c}.intersection(offsets), ("Linux AI/camera clock writer remains", path)
         shared = {0x24, 0x2c, 0x30}
         if not shared.intersection(offsets):
             continue
@@ -134,7 +135,7 @@ def validate_shared_clock_layout(nodes):
 
 
 def validate(before, after):
-    assert set(after) - set(before) == {MMZ, SHARED, VISION}, "unexpected added nodes"
+    assert set(after) - set(before) == {MMZ, SHARED, VISION, *DDR}, "unexpected added nodes"
     assert set(before) <= set(after), "removed existing nodes"
     allowed = {path: {"status"} for path in DISABLED}
     for path, properties in REMOVED.items():
@@ -165,11 +166,20 @@ def validate(before, after):
         "memory-region": ((SHARED, ()), (MMZ, ())), "memory-region-names": b"transport\0mmz\0",
         "tdvp,gpio-controller": ((GPIO, ()),), "tdvp,power-controller": ((POWER, ()),),
         "tdvp,clock-controller": ((CLOCK.rstrip("/"), ()),),
-        "clocks": tuple((f"/soc/sysctl/sysctl_boot@91102000/pll{i}_div4", ()) for i in range(3)),
-        "clock-names": b"pll0\0pll1\0pll2\0",
+        "clocks": tuple((f"/soc/sysctl/sysctl_boot@91102000/pll{i}_div4", ()) for i in range(3)) + tuple((p, ()) for p in DDR),
+        "clock-names": b"pll0\0pll1\0pll2\0isp-ddr\0ai-ddr\0",
         "power-domains": ((POWER, (1,)), (POWER, (2,))),
         "power-domain-names": b"ai\0disp\0",
     }
+    for path, bit in zip(DDR, (4, 6)):
+        assert after[path] == {
+            "compatible": b"canaan,k230-clk-composite\0", "#clock-cells": struct.pack(">I", 0),
+            "clocks": (("/soc/sysctl/sysctl_boot@91102000/pll0_div4", ()),),
+            "read-only": struct.pack(">I", 0), "status": b"okay\0",
+            "clk-gate-reg-offset": struct.pack(">I", 0x60),
+            "clk-gate-reg-bit-enable": struct.pack(">I", bit),
+            "clk-gate-reg-bit-reverse": struct.pack(">I", 0),
+        }
     # The existing firmware allocation, mailbox and 512 MiB CMA must survive.
     assert cells(after["/reserved-memory/cpu1-runtime@10000000"]["reg"]) == (0, 0x10000000, 0, 0x4000000)
     assert cells(after["/cpu1-mailbox@13ff0000"]["reg"]) == (0, 0x13FF0000, 0, 0x10000)
@@ -189,6 +199,8 @@ before, after = (normalized(read_tree(p)) for p in sys.argv[1:])
 validate(before, after)
 mutations = [(p, "status", b"okay\0") for p in DISABLED]
 mutations += [(GPIO, "tdvp,cpu1-gpio-mask", struct.pack(">I", 0)),
+              (DDR[0], "clk-gate-reg-bit-enable", struct.pack(">I", 3)),
+              (DDR[1], "clk-gate-reg-offset", struct.pack(">I", 0x74)),
               (VISION, "clocks", None), (VISION, "clock-names", b"pll1\0pll0\0pll2\0"),
               (VISION, "power-domains", ((POWER, (0,)), (POWER, (2,)))),
               (VISION, "power-domain-names", b"disp\0ai\0"),
@@ -214,7 +226,7 @@ for path, key, value in mutations:
 active_clock = next(path for path, props in after.items()
                     if path.startswith(CLOCK) and props.get("status") != b"disabled\0"
                     and props.get("compatible") == b"canaan,k230-clk-composite\0")
-for offset in (0x64, 0x68, 0x6c):
+for offset in (0x08, 0x64, 0x68, 0x6c):
     changed = copy.deepcopy(after)
     changed[active_clock]["clk-gate-reg-offset"] = struct.pack(">I", offset)
     try:
@@ -222,4 +234,4 @@ for offset in (0x64, 0x68, 0x6c):
     except AssertionError:
         continue
     raise AssertionError(("accepted Linux camera clock writer", offset))
-print(f"CPU1 vision DTB: PASS {len(before)} existing nodes checked; only ownership deltas; {len(mutations)} invalid candidates and three camera clock writers rejected")
+print(f"CPU1 vision DTB: PASS {len(before)} existing nodes checked; only ownership deltas; {len(mutations)} invalid candidates and four AI/camera clock writers rejected")

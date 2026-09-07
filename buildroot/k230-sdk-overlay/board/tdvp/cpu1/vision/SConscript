@@ -15,8 +15,11 @@ flags = ' -Wl,--whole-archive ' + ' '.join('-l' + name for name in libraries)
 flags += ' -Wl,--no-whole-archive'
 group = DefineGroup('Mpp', ['mpp_init.c', 'tdvp_cpu1_vision_pins.c',
                            'tdvp_cpu1_i2c4_clock.c', 'tdvp_cpu1_camera_clock.c',
-                           'tdvp_vision_owner.c', 'tdvp_cpu1_vision_startup.c'],
+                           'tdvp_vision_owner.c', 'tdvp_cpu1_vision_startup.c',
+                           'tdvp_cpu1_ai_clock.c', 'tdvp_cpu1_ai_init.c',
+                           'tdvp_cpu1_fft.c'],
                     depend=['RT_USING_MPP'],
-                    CPPPATH=[cwd], LINKFLAGS=flags,
+                    CPPPATH=[cwd, os.path.join(mpp, 'include'),
+                             os.path.join(mpp, 'include', 'ioctl')], LINKFLAGS=flags,
                     LIBPATH=[os.path.join(mpp, 'kernel', 'lib')])
 Return('group')

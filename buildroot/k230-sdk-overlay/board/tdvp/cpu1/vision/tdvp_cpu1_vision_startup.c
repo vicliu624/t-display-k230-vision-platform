@@ -10,11 +10,14 @@
 #endif
 extern int tdvp_cpu1_i2c4_board_init(void);
 extern int mpp_init(void);
+extern int tdvp_cpu1_ai_init(void);
+extern int tdvp_cpu1_ai_status(void);
 extern int tdvp_cpu1_vision_launch(void);
 
 static volatile struct tdvp_owner_control *wire;
 static struct tdvp_owner_session owner;
 static int startup_attempted;
+static volatile tdvp_v_u64 last_publication_ms;
 
 static tdvp_v_u64 owner_now(void)
 {
@@ -26,8 +29,34 @@ static int owner_poll(void)
     struct tdvp_owner_record peer;
     int stable = tdvp_owner_snapshot(&wire->linux_side, &peer);
     int result = tdvp_owner_cpu1_step(&owner, stable ? &peer : RT_NULL, owner_now());
-    if (owner.publish) tdvp_owner_publish(&wire->cpu1_side, &owner.own);
+    if (owner.own.state == TDVP_OWNER_READY && tdvp_cpu1_ai_status()) {
+        tdvp_owner_fail(&owner, TDVP_OWNER_ERR_INIT);
+        result = -1;
+    }
+    if (owner.publish) {
+        tdvp_owner_publish(&wire->cpu1_side, &owner.own);
+        last_publication_ms = owner_now();
+    }
     return result;
+}
+
+/* Runtime callers must not mutate the main thread's owner state machine.
+ * Read its sequence-checked publication and local freshness timestamp only.
+ */
+int tdvp_cpu1_vision_runtime_status(void)
+{
+    struct tdvp_owner_record snapshot;
+    /* Read the publication timestamp before the clock: an intervening owner
+     * publication must not manufacture a timestamp apparently in the future.
+     */
+    tdvp_v_u64 published = last_publication_ms, now = owner_now();
+    if (!wire || !published || now < published || now - published >= TDVP_OWNER_PEER_MS)
+        return -RT_EIO;
+    if (!tdvp_owner_snapshot(&wire->cpu1_side, &snapshot)) return -RT_EBUSY;
+    if (snapshot.magic != TDVP_OWNER_MAGIC || snapshot.version != TDVP_OWNER_VERSION ||
+        snapshot.bytes != sizeof(snapshot) || snapshot.contract != TDVP_OWNER_CONTRACT ||
+        !snapshot.cookie || !snapshot.peer_cookie || !snapshot.heartbeat) return -RT_EIO;
+    return snapshot.state == TDVP_OWNER_READY && !snapshot.fault ? 0 : -RT_EIO;
 }
 
 /* Both I2C and MPP check this before their first hardware operation. */
@@ -56,6 +85,7 @@ int tdvp_cpu1_vision_startup(void)
         if (result == 1) {
             result = tdvp_cpu1_i2c4_board_init();
             if (!result) result = mpp_init();
+            if (!result) result = tdvp_cpu1_ai_init();
             /* A long/failed MPP call is not an excuse to use an expired grant. */
             if (!result) result = tdvp_cpu1_vision_ownership_status();
             if (!result) result = tdvp_owner_cpu1_ready(&owner);

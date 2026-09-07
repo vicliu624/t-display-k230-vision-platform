@@ -36,6 +36,7 @@ struct device_node *of_parse_phandle(struct device_node *, const char *, int);
 struct reserved_mem *of_reserved_mem_lookup(struct device_node *);
 bool of_device_is_available(struct device_node *);
 bool of_property_read_bool(struct device_node *, const char *);
+int of_property_read_u32(struct device_node *, const char *, u32 *);
 int of_address_to_resource(struct device_node *, int, struct resource *);
 void of_node_put(struct device_node *);
 struct device_node *of_find_node_by_path(const char *);

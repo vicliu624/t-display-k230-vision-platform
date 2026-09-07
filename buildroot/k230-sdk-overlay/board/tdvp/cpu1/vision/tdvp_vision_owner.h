@@ -14,7 +14,7 @@
 #define TDVP_OWNER_WINDOW 0x1000UL
 #define TDVP_OWNER_MAGIC 0x314f5654U /* TVO1 */
 #define TDVP_OWNER_VERSION 1U
-#define TDVP_OWNER_CONTRACT 1U /* paired GC2093/AI ownership, NOT model readiness */
+#define TDVP_OWNER_CONTRACT 2U /* adds retained ISP/AI DDR ports; NOT model readiness */
 #define TDVP_OWNER_BOOT_MS 60000U
 #define TDVP_OWNER_PEER_MS 5000U
 

@@ -1,0 +1,119 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] rtsmart: initialize granted AI drivers in fail-closed order
+
+For paired firmware, establish mappings/events/fops before publishing devices
+and unmasking IRQs. Propagate hardlock failures and latch partial initialization.
+Fix the hardlock mapping null check before applying its register offset.
+
+diff --git a/drivers/interdrv/gnne/ai2d_dev.c b/drivers/interdrv/gnne/ai2d_dev.c
+index cea9eaa..acde5a1 100644
+--- a/drivers/interdrv/gnne/ai2d_dev.c
++++ b/drivers/interdrv/gnne/ai2d_dev.c
+@@ -144,6 +144,28 @@ int ai_2d_device_init(void)
+     int ret = 0;
+     rt_device_t ai_2d_device = &g_ai_2d_device;
+ 
++#ifdef RT_USING_TDVP_CPU1_VISION
++    extern int tdvp_cpu1_vision_ownership_status(void);
++    static int attempted, status = -RT_EBUSY;
++
++    if (attempted) return status;
++    ret = tdvp_cpu1_vision_ownership_status();
++    if (ret) return ret;
++    attempted = 1;
++    status = -RT_EIO;
++    rt_hw_interrupt_mask(IRQN_AI2D_INTERRUPT);
++    if (!gnne_base_addr) return status;
++    ret = rt_event_init(&g_ai_2d_event, "ai_2d_event", RT_IPC_FLAG_PRIO);
++    if (ret) return status = ret;
++    rt_wqueue_init(&ai_2d_device->wait_queue);
++    ai_2d_device->fops = &ai_2d_input_fops;
++    rt_hw_interrupt_install(IRQN_AI2D_INTERRUPT, irq_callback, &ai_2d_device->wait_queue, "ai_2d_irq");
++    ret = rt_device_register(ai_2d_device, "ai_2d_device", RT_DEVICE_FLAG_RDWR);
++    if (ret) return status = ret;
++    rt_hw_interrupt_umask(IRQN_AI2D_INTERRUPT);
++    return status = 0;
++#else
++
+     ret = rt_event_init(&g_ai_2d_event, "ai_2d_event", RT_IPC_FLAG_PRIO);
+     if (ret) {
+         ai_2d_err("event init failed\n");
+@@ -167,4 +189,5 @@ int ai_2d_device_init(void)
+         ai_2d_info("%s OK\n", __func__);
+ #endif
+     return ret;
++#endif /* RT_USING_TDVP_CPU1_VISION */
+ }
+diff --git a/drivers/interdrv/gnne/gnne_dev.c b/drivers/interdrv/gnne/gnne_dev.c
+index 07f2674..76fa619 100644
+--- a/drivers/interdrv/gnne/gnne_dev.c
++++ b/drivers/interdrv/gnne/gnne_dev.c
+@@ -181,6 +181,33 @@ int gnne_device_init(void)
+     int ret = 0;
+     rt_device_t gnne_device = &g_gnne_device;
+ 
++#ifdef RT_USING_TDVP_CPU1_VISION
++    extern int tdvp_cpu1_vision_ownership_status(void);
++    extern int tdvp_cpu1_hardlock_ready(void);
++    static int attempted, status = -RT_EBUSY;
++
++    if (attempted) return status;
++    ret = tdvp_cpu1_vision_ownership_status();
++    if (ret) return ret;
++    attempted = 1;
++    status = -RT_EIO;
++    rt_hw_interrupt_mask(IRQN_GNNE_INTERRUPT);
++    if (!tdvp_cpu1_hardlock_ready()) return status;
++    if (kd_request_lock(HARDLOCK_KPU)) return status;
++    g_kpu_lock = HARDLOCK_KPU;
++    gnne_base_addr = rt_ioremap((void *)KPU_BASE_ADDR, KPU_IO_SIZE + FFT_IO_SIZE + AI2D_IO_SIZE);
++    if (!gnne_base_addr) return status = -RT_ENOMEM;
++    ret = rt_event_init(&g_gnne_event, "gnne_event", RT_IPC_FLAG_PRIO);
++    if (ret) return status = ret;
++    rt_wqueue_init(&gnne_device->wait_queue);
++    gnne_device->fops = &gnne_input_fops;
++    rt_hw_interrupt_install(IRQN_GNNE_INTERRUPT, irq_callback, &gnne_device->wait_queue, "gnne_irq");
++    ret = rt_device_register(gnne_device, "gnne_device", RT_DEVICE_FLAG_RDWR);
++    if (ret) return status = ret;
++    rt_hw_interrupt_umask(IRQN_GNNE_INTERRUPT);
++    return status = 0;
++#else
++
+     ret = rt_event_init(&g_gnne_event, "gnne_event", RT_IPC_FLAG_PRIO);
+     if (ret) {
+         gnne_err("event init failed\n");
+@@ -217,5 +244,6 @@ int gnne_device_init(void)
+         gnne_info("%s OK\n", __func__);
+ #endif
+     return ret;
++#endif /* RT_USING_TDVP_CPU1_VISION */
+ }
+ 
+diff --git a/drivers/interdrv/hardlock/drv_hardlock.c b/drivers/interdrv/hardlock/drv_hardlock.c
+index 461a143..3f8d0eb 100644
+--- a/drivers/interdrv/hardlock/drv_hardlock.c
++++ b/drivers/interdrv/hardlock/drv_hardlock.c
+@@ -94,14 +94,21 @@ int kd_request_lock(hardlock_type num)
+ }
+ RTM_EXPORT(kd_request_lock);
+ 
++int tdvp_cpu1_hardlock_ready(void)
++{
++    return hardlock.hw_base != RT_NULL;
++}
++
+ int rt_hw_hardlock_init(void)
+ {
+     struct device_hardlock  *hard = &hardlock;
+-    hard->hw_base = 0xA0 + rt_ioremap((void *)MAILBOX_BASE_ADDR, MAILBOX_IO_SIZE);
+-    if(hard->hw_base == RT_NULL) {
++    void *base = rt_ioremap((void *)MAILBOX_BASE_ADDR, MAILBOX_IO_SIZE);
++    if(base == RT_NULL) {
+         rt_kprintf("hardlock ioremap error\n");
+         return -1;
+     }
++	/* Adding 0xa0 to a failed mapping previously hid failure as address 0xa0. */
++	hard->hw_base = (char *)base + 0xa0;
+ 
+     memset(hard->used, 0, sizeof(hard->used));
+ #if 0

@@ -38,6 +38,14 @@ mkdir -p "${MPP_LAYOUT}/kernel/mediafreq/src/sysctl/sysctl_media_clock"
 git -C "${CHECKOUT}" show "HEAD:${MPP_CLOCK_HEADER}" \
 	> "${MPP_LAYOUT}/kernel/mediafreq/src/sysctl/sysctl_media_clock/sysctl_media_clk.h"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-camera-clock.sh" "${BSP}" "${MPP_LAYOUT}"
+# The AI regression compiles against the matching pinned FFT ioctl ABI and
+# patches real GNNE/AI2D/hardlock initializers, never substitute fixture code.
+mkdir -p "${MPP_LAYOUT}/include/ioctl"
+for header in k_type.h ioctl/k_ioctl.h ioctl/k_fft_ioctl.h; do
+	git -C "${CHECKOUT}" show "HEAD:canmv_k230/src/rtsmart/mpp/include/${header}" \
+		> "${MPP_LAYOUT}/include/${header}"
+done
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-ai.sh" "${BSP}" "${MPP_LAYOUT}"
 "${NM}" "${BSP}/rtthread.elf" > "${OUTPUT_DIR}/rtthread-symbols.txt"
 grep -Eq ' [tT] tdvp_cpu1_service$' "${OUTPUT_DIR}/rtthread-symbols.txt"
 grep -Eq ' [tT] dfs_file_open$' "${OUTPUT_DIR}/rtthread-symbols.txt"
