@@ -151,6 +151,15 @@ CPU ISA 分派保护。这是 CPU0 兼容性风险，不只是可忽略的 ELF �
 需要取得兼容 CPU0 的 ISP 构建/源码，或另行评估将 camera/ISP 放入 CPU1 的
 ownership、内存与应用桥方案，不能通过添加 V4L2 节点掩盖这一点。
 
+后续审查找到新的 Linux CPU0 候选：官方 `main` 的 v0.6.1 ISP
+（`155359af`）为标量 RV64GC，可执行代码段未发现向量指令，下载文件也与固定
+Git blob 一致。它与当前 sensor 回调表不兼容：新头文件插入四个 flip 回调，
+但 API version 未递增。已新增隔离的旧 ABI 注册适配层，其九个回调槽位和浮点
+参数传递在 Ubuntu 24.04 与真实 CPU0 上均通过模拟传感器测试。
+这使“不迁移 CPU1、继续 Linux 采集”的路线可以继续验证，但**尚未替换设备
+ISP、改相机 DTB、启动采集或纳入镜像**。详见
+[CPU0 camera ISP integration work](../user-space/tdvp-camera-isp/README.md)。
+
 ## 主机验证与回退
 
 局域网主机的独立 Ubuntu **24.04.4** 容器（Python **3.12.3**）通过 CPU1、LoRa、
