@@ -17,6 +17,10 @@ Ubuntu 24.04 容器中构建并通过最终打包校验。以下哈希标识这�
 清单声明 CPU0 Linux、CPU1 RT-Smart、AI/视觉 ownership contract 2，以及
 VGLite 桌面、greetd/gtkgreet；这些构建属性需要通过实际启动再次确认。
 
+后续发现并修复了启动解压器的 DMA/shared SRAM 收尾检查缺口，详见
+[启动 SRAM 交接保护](cpu1-boot-sram-handoff.zh-CN.md)。`a57e99c` 不包含该修复；
+仍可用于保留回退卡的初始诊断，但不能作为最终 AI/shared SRAM 交付验收版本。
+
 ## 首次启动
 
 1. 保留原卡，使用备用 microSD。核对烧录工具选择的物理磁盘，避免覆盖电脑磁盘。

@@ -40,4 +40,13 @@ case "${magic}" in
 		fail "boot_baremetal cannot execute a K230/uImage/ELF/gzip container"
 		;;
 esac
-printf '%s\n' 'TDVP CPU boot contract: PASS CPU0 U-Boot + raw CPU1 payload'
+# Check the actual build, not only the overlay waiting to be copied. The BSP
+# sync is additive and a reused output must not package an old unguarded SPL.
+DECOMPRESSOR="$(dirname "$0")/../../../boot/uboot/u-boot-2022.10-overlay/arch/riscv/cpu/k230/unzip.c"
+cmp -s "${DECOMPRESSOR}" "$1/arch/riscv/cpu/k230/unzip.c" ||
+	fail 'built U-Boot decompressor differs from the paired overlay'
+for binary in u-boot.bin spl/u-boot-spl.bin; do
+	[ -s "$1/${binary}" ] && grep -aFq 'TDVP boot decompressor: DMA/SRAM handoff refused' "$1/${binary}" ||
+		fail "built ${binary} lacks the DMA/SRAM handoff guard"
+done
+printf '%s\n' 'TDVP CPU boot contract: PASS CPU0 U-Boot + raw CPU1 payload + boot DMA/SRAM guard'

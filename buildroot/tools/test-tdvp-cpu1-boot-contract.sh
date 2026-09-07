@@ -11,6 +11,13 @@ FIRMWARE="${TEMP_DIR}/fw_payload.bin"
 MANIFEST="${TEMP_DIR}/manifest"
 mkdir -p "${UBOOT}/board/canaan/common"
 HEADER="${UBOOT}/board/canaan/common/sdk_autoconf.h"
+UNZIP="${PROJECT_DIR}/buildroot/k230-sdk-overlay/boot/uboot/u-boot-2022.10-overlay/arch/riscv/cpu/k230/unzip.c"
+mkdir -p "${UBOOT}/arch/riscv/cpu/k230" "${UBOOT}/spl"
+cp "${UNZIP}" "${UBOOT}/arch/riscv/cpu/k230/unzip.c"
+# Synthetic marker files only exercise packaging refusals. The separate real
+# SPL/U-Boot cross-build must establish that these are linked into boot code.
+printf '%s\n' 'TDVP boot decompressor: DMA/SRAM handoff refused' > "${UBOOT}/u-boot.bin"
+cp "${UBOOT}/u-boot.bin" "${UBOOT}/spl/u-boot-spl.bin"
 
 fixture() {
 	printf '#define CONFIG_LINUX_RUN_CORE_ID 0\n' > "${HEADER}"
@@ -65,4 +72,15 @@ reject 'fit the 20 MiB slot'
 fixture
 truncate -s $((0x20000)) "${FIRMWARE}"
 reject 'include RT-Smart at +0x20000'
-printf '%s\n' 'test-tdvp-cpu1-boot-contract: PASS valid payload and 10 rejected regressions'
+fixture
+printf '\n/* stale build */\n' >> "${UBOOT}/arch/riscv/cpu/k230/unzip.c"
+reject 'built U-Boot decompressor differs'
+cp "${UNZIP}" "${UBOOT}/arch/riscv/cpu/k230/unzip.c"
+printf 'old unguarded U-Boot\n' > "${UBOOT}/u-boot.bin"
+reject 'built u-boot.bin lacks the DMA/SRAM handoff guard'
+cp "${UBOOT}/spl/u-boot-spl.bin" "${UBOOT}/u-boot.bin"
+printf 'old unguarded SPL\n' > "${UBOOT}/spl/u-boot-spl.bin"
+reject 'built spl/u-boot-spl.bin lacks the DMA/SRAM handoff guard'
+cp "${UBOOT}/u-boot.bin" "${UBOOT}/spl/u-boot-spl.bin"
+bash "${VERIFY}" "${UBOOT}" "${FIRMWARE}" "${MANIFEST}"
+printf '%s\n' 'test-tdvp-cpu1-boot-contract: PASS valid payload and 13 rejected regressions'

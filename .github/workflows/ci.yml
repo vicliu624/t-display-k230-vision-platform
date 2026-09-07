@@ -60,6 +60,7 @@ jobs:
           sudo bash buildroot/tools/test-tdvp-renderer-profile.sh
           sudo bash buildroot/tools/test-tdvp-labwc-session-recovery.sh
           bash buildroot/tools/test-tdvp-cpu1-boot-contract.sh
+          bash buildroot/tools/test-tdvp-boot-decompressor.sh
           bash buildroot/tools/test-tdvp-cpu1-build-env.sh
           bash buildroot/tools/test-tdvp-cpu1-mailbox.sh
           bash buildroot/tools/test-tdvp-cpu1-vision-init.sh
