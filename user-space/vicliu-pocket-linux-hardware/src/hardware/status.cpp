@@ -237,11 +237,15 @@ State collect_state()
     append_lora_state(&state);
 
     const bool keyboard = dock.keyboard_input;
-    const bool keyboard_backlight = any_backlight("keyboard");
+    std::string keyboard_backlight_percent;
+    const bool keyboard_backlight =
+        get_control("keyboard-brightness", &keyboard_backlight_percent) == 0;
     transport(&state, "keyboard", keyboard, keyboard, true);
     transport(&state, "keyboard_backlight", keyboard_backlight, keyboard_backlight,
               keyboard_backlight);
-    state["keyboard_backlight_brightness_percent"] = backlight_percent({"keyboard"});
+    if (!keyboard_backlight)
+        keyboard_backlight_percent = backlight_percent({"keyboard"});
+    state["keyboard_backlight_brightness_percent"] = keyboard_backlight_percent;
 
     const bool touch = directory_has("/sys/class/input", "input") &&
         (paths::exists("/sys/bus/i2c/devices/0-005d") || paths::exists("/sys/bus/i2c/devices/1-005d"));

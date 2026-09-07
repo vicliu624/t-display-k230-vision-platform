@@ -70,6 +70,7 @@ jobs:
           bash buildroot/tools/test-tdvp-cpu1-vision-status.sh
           bash buildroot/tools/test-tdvp-cpu1-gpio-amp.sh
           bash buildroot/tools/test-tdvp-lora-status.sh
+          bash buildroot/tools/test-tdvp-keyboard-backlight.sh
           bash buildroot/tools/test-tdvp-vglite-diagnostics-report.sh
           bash buildroot/tools/test-tdvp-vglite-session-gate.sh
           bash buildroot/tools/test-tdvp-camera-legacy-abi.sh

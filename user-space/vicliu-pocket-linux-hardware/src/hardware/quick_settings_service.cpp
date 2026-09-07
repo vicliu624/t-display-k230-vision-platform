@@ -107,6 +107,13 @@ bool QuickSettingsService::initialise()
     desktop_uid_ = desktop->pw_uid;
     desktop_gid_ = desktop_group->gr_gid;
 
+    // The generic pwm-backlight provider drives IO52 at 20 kHz, where this
+    // keyboard's LED rail cannot show meaningful intermediate levels.  Take
+    // exclusive ownership here before the desktop client can issue a preset.
+    // A missing keyboard is non-fatal: the rest of the hardware API remains
+    // available on bare-board variants.
+    (void)initialise_keyboard_backlight();
+
     if (mkdir(kRuntimeDirectory, 0755) != 0 && errno != EEXIST)
         return false;
     (void)unlink(kSocketPath);
