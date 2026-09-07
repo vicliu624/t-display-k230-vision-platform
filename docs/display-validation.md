@@ -2,21 +2,22 @@
 
 The image drives the internal RM69A10 panel through K230 DRM/KMS, connector
 `DSI-1`, transform `90`, and logical size `1232x568`. On 2026-09-07 the product
-policy was changed to default the authenticated desktop to VGLite. Pixman
-remains the independent greeter renderer, explicit maintenance option and
-render-failure recovery path.
+policy requires the authenticated desktop to use VGLite exclusively. Pixman
+is confined to the independent login compositor, never a desktop selection
+or render-failure fallback.
 
 A default selection is not a hardware acceptance result. The display team's
-earlier VGLite results belong to their measured stack and session. The newly
-flashed board was observed using Pixman; this policy edit does not restart the
-user's desktop. The new image still requires real VGLite Gates and gtklock
-lock/blank/wake coexistence validation.
+earlier VGLite results belong to their measured stack and session. Device
+activation and each hardware Gate must be recorded separately; merely
+changing this policy does not prove gtklock lock/blank/wake coexistence.
 
 Both `renderer-profile` and the image-owned `vglite-enabled` policy are
-installed. Missing enable policy still resolves safely to Pixman. The enable
-file is not a test report. Existing failure detection, the three-consecutive-
-failure controlled exit and Pixman session recovery remain unchanged; no
-renderer switch happens within a frame. Image checks bind the environment,
+installed. Missing/invalid policy, a failed helper or a tripped failure marker
+blocks desktop startup. The enable file is not a test report. The existing
+three-consecutive-failure detector still exits the compositor and the launcher
+cleans up its clients, records failure and returns to greetd. It does not
+launch another renderer. Root must diagnose and clear the failure marker
+before a subsequent VGLite login. Image checks bind the environment,
 profile, enable file and manifest so merely shipping a driver cannot count as
 enabling the default renderer.
 
@@ -176,10 +177,9 @@ direct-scan-out coverage; those remain separate acceptance domains.
 
 ### Experimental VGLite Gate 1 (approved candidate sessions only)
 
-The release image defaults to Pixman, so a normal SHM benchmark PASS is not
-VGLite evidence. Only after an experimental image has been explicitly approved
-for VGLite and a fresh graphical session is running that profile may the
-graphical login user run:
+The release desktop requires VGLite, but a normal SHM benchmark PASS alone is
+not GPU evidence. After verifying a fresh graphical session is running that
+profile with a clear failure marker, the graphical login user may run:
 
 ```sh
 tdvp-vglite-session-gate --expect-vglite-compositor \
@@ -188,23 +188,23 @@ tdvp-vglite-session-gate --expect-vglite-compositor \
 
 Before and after the workload, this command reads the actual Labwc process
 environment. It requires `WLR_RENDERER=vglite`, the guarded three-consecutive-
-render-failure recovery switch, and VGLite's direct-scan-out guard before it
-runs the panel-logical-size two-buffer `wl_shm` benchmark followed by
-per-client VGLite churn. On a candidate containing kernel patch 0059 it also
+render-failure exit switch, and VGLite's direct-scan-out guard before it
+runs the panel-logical-size two-buffer `wl_shm` benchmark. It never runs
+concurrent VGLite client churn on this single-context GPU. With kernel patch 0059 it also
 reads the loaded VGLite module's
 `/sys/module/vglite/parameters/infinite_wait_watchdog_ms` parameter before the
-first workload and after every churn round; the approved default is exactly
+first workload and after every SHM round; the approved default is exactly
 `5000` ms. This is a read-only identity and configuration check, not a
 deliberate GPU-hang injection. It neither selects a renderer nor starts/stops
 Labwc, and never opens DRM/KMS. `--repeat 3` repeats the selected SHM workload
-and churn three times and revalidates Labwc, the profile, and the watchdog
+three times and revalidates Labwc, the profile, and the watchdog
 parameter after every round. Run both `--format xr24` and `--format ar24`, each
 with full damage (`--damage-size 0`) and the same geometry with small damage
 (`--damage-size 64`); retain stdout/stderr, `$XDG_RUNTIME_DIR/tdvp-labwc.log`,
 and kernel logs for every format/load pair. A missing, unreadable, or mismatched
-watchdog parameter, callback or release timeout, unsupported format, churn
-failure, Labwc exit, or automatic Pixman recovery is a Gate 1 failure; a
-recovered Pixman desktop is not a VGLite pass.
+watchdog parameter, callback or release timeout, unsupported format, or Labwc
+exit is a Gate 1 failure. A software desktop is a policy violation, never a
+VGLite pass or an accepted recovery path.
 
 ### 2026-09-03 low-load hardware baseline
 

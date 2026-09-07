@@ -809,7 +809,7 @@ reject_rootfs_line '/etc/tdvp/labwc/renderer-profile' '^TDVP_RENDERER_PROFILE=pi
 require_fs_path "${ROOTFS}" '/etc/tdvp/labwc/vglite-enabled'
 require_rootfs_line '/etc/tdvp/labwc/vglite-enabled' '^tdvp_vglite_policy_version=1$'
 require_rootfs_line '/etc/tdvp/labwc/environment' '^WLR_DRM_NO_MODIFIERS=1$'
-require_rootfs_line '/etc/tdvp/labwc/environment' '^WLR_RENDERER_ALLOW_SOFTWARE=1$'
+reject_rootfs_line '/etc/tdvp/labwc/environment' '^WLR_RENDERER_ALLOW_SOFTWARE=1$'
 require_rootfs_line '/etc/tdvp/labwc/environment' '^LIBSEAT_BACKEND=seatd$'
 require_rootfs_line '/etc/tdvp/labwc/environment' '^TDVP_K230_OUTPUT=DSI-1$'
 require_rootfs_line '/etc/tdvp/labwc/environment' '^TDVP_K230_OUTPUT_TRANSFORM=90$'
@@ -829,12 +829,16 @@ require_rootfs_line '/usr/local/bin/tdvp-greeter-session' '^export WLR_RENDERER=
 require_rootfs_content '/usr/local/bin/tdvp-greeter-session' 'XDG_RUNTIME_DIR="${HOME}/.cache/wayland-runtime"'
 require_rootfs_content '/usr/local/bin/tdvp-greeter-labwc' '--transform "${TDVP_K230_OUTPUT_TRANSFORM}"'
 # The VGLite delivery supervises the session instead of replacing the shell
-# with Labwc, so compositor failure still runs child cleanup and recovery.
+# with Labwc, so compositor failure still runs child cleanup before exit.
 require_rootfs_content '/usr/local/bin/tdvp-labwc-session' '/usr/bin/setsid /usr/bin/dbus-run-session -- /usr/bin/labwc'
 require_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'wait "${session_group_leader}"'
 require_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'kill -TERM "-${session_group_leader}"'
 require_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'kill -TERM "-${autostart_group}"'
-require_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'TDVP_LABWC_FORCE_PIXMAN=1'
+require_rootfs_line '/usr/local/bin/tdvp-labwc-session' '^export WLR_RENDERER=vglite$'
+require_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'refusing desktop without VGLite; no renderer fallback'
+reject_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'TDVP_LABWC_FORCE_PIXMAN'
+reject_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'WLR_RENDERER=pixman'
+reject_rootfs_content '/usr/local/bin/tdvp-renderer-profile' 'write_profile pixman'
   require_rootfs_content '/etc/xdg/labwc/autostart' '/usr/local/bin/tdvp-pcmanfm-desktop-session &'
   require_rootfs_content '/etc/xdg/labwc/autostart' '/usr/local/bin/tdvp-wf-panel-session &'
 	require_rootfs_content '/usr/local/bin/tdvp-wf-panel-session' 'export GDK_BACKEND=wayland'

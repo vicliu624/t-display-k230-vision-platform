@@ -15,6 +15,7 @@ Config.in text eol=lf
 Makefile text eol=lf
 
 /buildroot/tools/* text eol=lf
+/buildroot/tools/fixtures/* text eol=lf
 /buildroot/k230-sdk-overlay/configs/* text eol=lf
 /buildroot/k230-sdk-overlay/package/**/src/** text eol=lf
 /buildroot/k230-sdk-overlay/board/tdvp/cpu1/** text eol=lf

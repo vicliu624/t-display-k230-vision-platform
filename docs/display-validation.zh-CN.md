@@ -2,15 +2,16 @@
 
 镜像通过 K230 DRM/KMS 路径驱动内置 RM69A10 面板，使用 `DSI-1`、输出旋转
 `90` 和逻辑尺寸 `1232x568`。2026-09-07 按产品要求将认证后桌面的默认策略
-改为 VGLite；Pixman 保留给独立 greeter、显式维护选择及渲染失败恢复。
+限定为 VGLite；Pixman 仅用于独立登录页，不能用于用户桌面或渲染失败回退。
 
 默认选择不等于设备验收通过。此前 VGLite 工程师的受控会话通过结果属于
-对应的软件栈和会话；重刷后的设备本次检查仍为 Pixman，本次没有强行重启
-用户桌面。新镜像仍须完成真实 VGLite Gate，以及 gtklock 锁屏/息屏唤醒共存验证。
+对应的软件栈和会话。设备实际启用情况和每项硬件 Gate 必须单独记录，
+不能仅凭策略改变宣称 gtklock 锁屏/息屏唤醒共存验证通过。
 
-`renderer-profile` 和镜像内 `vglite-enabled` 必须同时安装，缺少后者仍安全回退
-Pixman。启用文件只是产品策略，不是测试报告。异常退出仍触发现有熔断机制；
-连续三次渲染失败后的受控退出和 Pixman 会话恢复保持不变，不在帧内切换 renderer。
+`renderer-profile` 和镜像内 `vglite-enabled` 必须同时安装；策略缺失/错误、helper
+失效或已有故障标记都会阻止桌面启动。启用文件只是产品策略，不是测试报告。
+连续三次渲染失败仍触发受控退出，启动器清理会话子进程、记录故障并返回 greetd，
+绝不启动其他 renderer。管理员诊断并清除故障标记后，才可再次登录 VGLite 桌面。
 镜像校验同时检查环境、profile、启用文件及 manifest，防止“有驱动但默认不启用”。
 
 ## 镜像检查
@@ -141,8 +142,8 @@ VGLite 结论必须同时通过下述 Gate 1 的真实 Labwc 环境、profile �
 
 ### 实验性 VGLite Gate 1（仅限获准的候选会话）
 
-通用发布镜像以 Pixman 为回退基线，因而不能把普通 SHM benchmark 的 PASS 写成 VGLite 结论。
-只有受控 candidate 已由 root 创建 VGLite approval marker、以 VGLite profile 新建图形会话，且未
+发布镜像要求桌面仅使用 VGLite，但普通 SHM benchmark 的 PASS 本身仍不是 GPU 证据。
+只有镜像内已有有效 VGLite 策略、以 VGLite profile 新建图形会话，且未
 触发会话熔断时，才由**该图形登录用户**运行：
 
 ```sh
@@ -151,7 +152,7 @@ tdvp-vglite-session-gate --expect-vglite-compositor \
 ```
 
 该命令在执行前后都读取真实 Labwc 环境，要求 `WLR_RENDERER=vglite`、三次连续渲染失败
-后退回 Pixman 的恢复开关已启用，并要求 VGLite 会话禁用 direct scan-out；随后才运行该
+后受控退出的开关已启用，并要求 VGLite 会话禁用 direct scan-out；随后才运行该
 会话的双 buffer `wl_shm` benchmark。包含内核 0059–0061 patch 的 candidate 还必须在首轮负载前
 及每一轮 SHM 后只读检查已加载 VGLite module 的
 `/sys/module/vglite/parameters/infinite_wait_watchdog_ms`，获准默认值必须精确为 `5000` ms。
@@ -161,8 +162,8 @@ compositor、不打开 DRM/KMS 或 `/dev/vg_lite`。`--repeat 3` 会将选择的
 `--format ar24` 运行，且每一种格式都覆盖全帧 (`--damage-size 0`) 与同尺寸的局部 damage
 (`--damage-size 64`)。分别保存每个格式/负载组合的命令输出、`$XDG_RUNTIME_DIR/tdvp-labwc.log`
 与 kernel log。watchdog 参数缺失、不可读或不匹配，以及任意一次 callback/release 超时、格式不
-受支持、Labwc 退出或 profile 自动退回 Pixman 都是 Gate 1 失败，不能以重新登录后的 Pixman
-画面掩盖。K230 VGLite 是单 context driver：当 live Labwc 已持有 `/dev/vg_lite` 时，第二个
+受支持或 Labwc 退出都是 Gate 1 失败；软件 renderer 桌面违反产品策略，不能作为恢复方案
+掩盖失败。K230 VGLite 是单 context driver：当 live Labwc 已持有 `/dev/vg_lite` 时，第二个
 无 ioctl `open()` 应返回 `EBUSY`；该检查必须与 session gate 分开执行。`client-churn` 和
 `inflight-close` 仅可在 Labwc 已停止、没有 VGLite owner 的隔离维护模式运行，不能作为 live Gate 1。
 

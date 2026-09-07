@@ -16,7 +16,7 @@ if [ -n "${LD_LIBRARY_PATH:-}" ] || [ -n "${LD_PRELOAD:-}" ]; then
 fi
 unset LD_LIBRARY_PATH LD_PRELOAD
 # Only this launcher enables the Labwc render-failure recovery gate. Do not
-# inherit a manual setting into a Pixman session or a later experiment.
+# inherit a manual setting into a later session.
 unset TDVP_LABWC_VGLITE_FAILURE_RECOVERY TDVP_VGLITE_DIAGNOSTICS
 
 # Preserve the normal XDG lookup model: user configuration takes precedence,
@@ -50,43 +50,18 @@ mkdir -p "${XDG_STATE_HOME}"
 chmod 0700 "${XDG_STATE_HOME}"
 
 # Renderer changes are session boundaries, never an in-frame fallback.  The
-# helper accepts only image-owned profile values and maps an unavailable or
-# previously failed VGLite profile back to Pixman.  Keep the result in the
-# session log so a recovered Pixman desktop cannot be mistaken for a VGLite
-# run.
+# helper accepts only the image-owned VGLite policy. Missing policy, a broken
+# helper or a previous GPU failure blocks the desktop; no software fallback
+# or in-session compositor restart is permitted.
 renderer_profile_tool=/usr/local/bin/tdvp-renderer-profile
-renderer_profile=pixman
-renderer_profile_status="helper=missing effective=pixman"
-forced_pixman_recovery=no
-if [ "${TDVP_LABWC_FORCE_PIXMAN:-}" = 1 ]; then
-	# This flag is set only by the controlled self-exec below after a VGLite
-	# crash has been recorded. It can only select the safe renderer; it can
-	# never force VGLite for a manually launched session.
-	renderer_profile=pixman
-	renderer_profile_status="auto-recovery=forced-pixman"
-	forced_pixman_recovery=yes
-	unset TDVP_LABWC_FORCE_PIXMAN
-elif [ -x "${renderer_profile_tool}" ]; then
-	if renderer_profile="$("${renderer_profile_tool}" resolve 2>/dev/null)"; then
-		renderer_profile_status="$("${renderer_profile_tool}" status 2>/dev/null || \
-			printf '%s' 'helper=status-failed')"
-	else
-		renderer_profile=pixman
-		renderer_profile_status="helper=resolve-failed effective=pixman"
-	fi
+if [ ! -x "${renderer_profile_tool}" ] ||
+	! renderer_profile="$("${renderer_profile_tool}" resolve)" ||
+	[ "${renderer_profile}" != vglite ]; then
+	printf '%s\n' 'tdvp-labwc-session: refusing desktop without VGLite; no renderer fallback' >&2
+	exit 1
 fi
-case "${renderer_profile}" in
-	pixman|vglite)
-		WLR_RENDERER="${renderer_profile}"
-		export WLR_RENDERER
-		;;
-	*)
-		renderer_profile=pixman
-		WLR_RENDERER=pixman
-		export WLR_RENDERER
-		renderer_profile_status="helper=invalid-output effective=pixman"
-		;;
-esac
+renderer_profile_status="$("${renderer_profile_tool}" status)"
+export WLR_RENDERER=vglite
 
 # The first VGLite profile deliberately owns every presentation buffer through
 # its synchronous render-pass path. wlroots otherwise enables its generic
@@ -95,9 +70,8 @@ esac
 # DRM driver exposes and validates IN_FENCE_FD/OUT_FENCE_PTR it would bypass
 # the measured VGLite -> finish -> atomic page-flip ownership contract.
 #
-# This is scoped to the default VGLite profile: Pixman recovery keeps its
-# existing behavior, and a later fence-qualified direct-scanout gate
-# can remove this guard without changing Labwc's window policy.
+# A later fence-qualified direct-scanout gate can remove this guard without
+# changing Labwc's window policy.
 direct_scanout_policy=existing
 vglite_failure_recovery=not-applicable
 vglite_diagnostics=off
@@ -113,8 +87,7 @@ if [ "${renderer_profile}" = vglite ]; then
 	vglite_failure_recovery=enabled-after-three-consecutive-failures
 	# Diagnostic logs are useful during a deliberately scheduled Gate 1 run,
 	# but are high-volume enough that they must be opt-in. Consume the marker
-	# before Labwc starts; a later crash-and-Pixman self-exec cannot inherit the
-	# flag, while a Pixman session never consumes a pending VGLite capture.
+	# before Labwc starts; a later login cannot inherit the flag.
 	if [ -f "${diagnostics_marker}" ]; then
 		if rm -f "${diagnostics_marker}"; then
 			TDVP_VGLITE_DIAGNOSTICS=1
@@ -130,11 +103,6 @@ if [ "${renderer_profile}" = vglite ]; then
 			vglite_diagnostics=marker-retained
 		fi
 	fi
-elif [ "${forced_pixman_recovery}" = yes ]; then
-	# Drop only the guard inherited through the self-exec. A fresh Pixman
-	# login keeps its pre-existing environment unchanged.
-	unset WLR_SCENE_DISABLE_DIRECT_SCANOUT
-	direct_scanout_policy=restored-for-pixman-recovery
 fi
 
 # greetd's session worker otherwise leaves Labwc's stdout/stderr attached to
@@ -190,15 +158,14 @@ set +e
 wait "${session_group_leader}"
 session_status="$?"
 set -e
-restart_with_pixman=no
 printf '%s\n' "tdvp-labwc-session: compositor group exited status=${session_status}" \
 	>>"${log_file}"
 
 # A normal logout and the expected terminal signals used by greetd/systemd
 # maintenance do not prove a renderer failure.  Other non-zero exits from an
 # approved VGLite session trip a user-owned circuit breaker.  The next login
-# and the immediate controlled recovery both explicitly use Pixman until root
-# clears the marker.
+# is blocked until root clears the marker after diagnosis. No renderer
+# substitution is allowed for this authenticated desktop.
 if [ "${renderer_profile}" = vglite ]; then
 	case "${session_status}" in
 		0|129|130|143)
@@ -206,7 +173,6 @@ if [ "${renderer_profile}" = vglite ]; then
 		*)
 			if [ -x "${renderer_profile_tool}" ]; then
 				if "${renderer_profile_tool}" trip "${session_status}" >>"${log_file}" 2>&1; then
-					restart_with_pixman=yes
 					printf '%s\n' "tdvp-labwc-session: VGLite circuit breaker recorded" \
 						>>"${log_file}"
 				else
@@ -241,15 +207,5 @@ rm -f "${autostart_group_file}"
 rmdir "${session_directory}" 2>/dev/null || true
 rmdir "${session_root}" 2>/dev/null || true
 
-# Do not make an authenticated user log in again merely because the
-# VGLite compositor crashed. This occurs only after trip_vglite() has
-# persisted the breaker, so the self-exec is deterministically Pixman and
-# cannot retry or mix the failed renderer in the same session.
-if [ "${restart_with_pixman}" = yes ]; then
-	printf '%s\n' "tdvp-labwc-session: restarting authenticated desktop with Pixman" \
-		>>"${log_file}"
-	TDVP_LABWC_FORCE_PIXMAN=1
-	export TDVP_LABWC_FORCE_PIXMAN
-	exec /usr/local/bin/tdvp-labwc-session
-fi
+# Return to greetd on exit; a GPU fault never starts a replacement desktop.
 exit "${session_status}"

@@ -139,7 +139,7 @@ fi
 
 # Negative controls must be rejected by those same image assertions. Keep
 # mutations in the temporary fixture; production desktop policy is untouched.
-for mutation in login-command login-user session renderer-profile renderer-policy greeter-renderer; do
+for mutation in login-command login-user session renderer-profile renderer-policy greeter-renderer desktop-fallback profile-fallback software-allow; do
 	case "${mutation}" in
 		login-command)
 			path=/etc/greetd/config.toml
@@ -159,6 +159,15 @@ for mutation in login-command login-user session renderer-profile renderer-polic
 		greeter-renderer)
 			path=/usr/local/bin/tdvp-greeter-session
 			sed 's/export WLR_RENDERER=pixman/export WLR_RENDERER=vglite/' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;
+		desktop-fallback)
+			path=/usr/local/bin/tdvp-labwc-session
+			sed '/^export WLR_RENDERER=vglite$/a TDVP_LABWC_FORCE_PIXMAN=1' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;
+		profile-fallback)
+			path=/usr/local/bin/tdvp-renderer-profile
+			sed '/^command=/i write_profile pixman' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;
+		software-allow)
+			path=/etc/tdvp/labwc/environment
+			sed '/^WLR_RENDERER=vglite$/a WLR_RENDERER_ALLOW_SOFTWARE=1' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;
 	esac
 	debugfs -w -R "rm ${path}" "${ROOTFS}" >/dev/null 2>&1
 	debugfs -w -R "write ${TEMP_DIR}/mutant ${path}" "${ROOTFS}" >/dev/null 2>&1
@@ -175,4 +184,4 @@ for mutation in login-command login-user session renderer-profile renderer-polic
 	debugfs -R "dump ${path} ${TEMP_DIR}/readback" "${ROOTFS}" >/dev/null 2>&1
 	cmp "${TEMP_DIR}/root${path}" "${TEMP_DIR}/readback"
 done
-printf '%s\n' 'test-tdvp-image-source-contract: PASS actual delivery files match image rules; six regressions rejected'
+printf '%s\n' 'test-tdvp-image-source-contract: PASS actual delivery files match image rules; nine regressions rejected'

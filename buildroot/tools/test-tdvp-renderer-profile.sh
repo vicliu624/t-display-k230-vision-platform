@@ -43,13 +43,22 @@ expect_equal() {
 	exit 1
 }
 
-expect_equal pixman "$(run_tool resolve)" missing-policy-safe-pixman
+expect_blocked() {
+	if output="$(run_tool resolve 2>"${temporary_root}/error")"; then
+		printf 'test-tdvp-renderer-profile: FAIL %s accepted blocked policy\n' "$1" >&2
+		exit 1
+	fi
+	expect_equal '' "${output}" "$1-no-renderer-output"
+	grep -Fq 'desktop blocked' "${temporary_root}/error"
+}
+
+expect_blocked missing-policy
 expect_equal off "$(run_tool diagnostics-status)" diagnostics-default-off
 
 printf '%s\n' 'TDVP_RENDERER_PROFILE=vglite' > "${profile_file}"
-expect_equal pixman "$(run_tool resolve)" vglite-without-approval
+expect_blocked vglite-without-approval
 
-: > "${enabled_file}"
+printf '%s\n' 'tdvp_vglite_policy_version=1' > "${enabled_file}"
 expect_equal vglite "$(run_tool resolve)" approved-vglite
 
 run_tool trip 139
@@ -57,10 +66,10 @@ run_tool trip 139
 	printf '%s\n' 'test-tdvp-renderer-profile: FAIL trip did not create marker' >&2
 	exit 1
 }
-expect_equal pixman "$(run_tool resolve)" tripped-fallback
+expect_blocked tripped-no-fallback
 status="$(run_tool status)"
 case "${status}" in
-	*'configured=vglite effective=pixman vglite_enabled=yes breaker=tripped'*)
+	*'configured=vglite effective=blocked vglite_enabled=yes breaker=tripped'*)
 		printf '%s\n' 'test-tdvp-renderer-profile: PASS status-records-breaker'
 		;;
 	*)
@@ -73,7 +82,13 @@ rm -f "${failure_file}"
 expect_equal vglite "$(run_tool resolve)" clear-breaker-restores-approved-profile
 
 printf '%s\n' 'TDVP_RENDERER_PROFILE=unexpected' > "${profile_file}"
-expect_equal pixman "$(run_tool resolve)" invalid-profile-falls-back
+expect_blocked invalid-profile
+printf '%s\n' 'TDVP_RENDERER_PROFILE=pixman' > "${profile_file}"
+expect_blocked retired-software-profile
+printf '%s\n' 'TDVP_RENDERER_PROFILE=vglite' 'TDVP_RENDERER_PROFILE=pixman' > "${profile_file}"
+expect_blocked mixed-profile
+printf '%s\n' 'TDVP_RENDERER_PROFILE=vglite' 'TDVP_RENDERER_PROFILE=vglite' > "${profile_file}"
+expect_blocked duplicate-profile
 
 # Bind the default to the actual files installed by the product recipe, not
 # just a synthetic VGLite assignment. The image-source test checks that the
@@ -82,9 +97,11 @@ sed 's/\r$//' "${project_dir}/user-space/tdvp-labwc-desktop/src/renderer-profile
 sed 's/\r$//' "${project_dir}/user-space/tdvp-labwc-desktop/src/vglite-enabled" > "${enabled_file}"
 expect_equal vglite "$(run_tool resolve)" real-product-default-vglite
 run_tool trip 1
-expect_equal pixman "$(run_tool resolve)" real-product-failure-recovers-pixman
+expect_blocked real-product-failure
 rm -f "${failure_file}" "${enabled_file}"
-expect_equal pixman "$(run_tool resolve)" real-product-missing-enable-policy-safe-pixman
+expect_blocked real-product-missing-enable-policy
+: > "${enabled_file}"
+expect_blocked empty-enable-policy
 
 if [ "$(id -u)" = 0 ]; then
 	rm -f "${enabled_file}"
@@ -93,12 +110,15 @@ if [ "$(id -u)" = 0 ]; then
 		exit 1
 	fi
 	printf '%s\n' 'test-tdvp-renderer-profile: PASS unapproved-vglite-selection-refused'
-	: > "${enabled_file}"
+	printf '%s\n' 'tdvp_vglite_policy_version=1' > "${enabled_file}"
 	run_tool select vglite
 	expect_equal vglite "$(run_tool resolve)" root-select-vglite
 	run_tool clear-vglite-failure
-	run_tool select pixman
-	expect_equal pixman "$(run_tool resolve)" root-select-pixman
+	if run_tool select pixman >/dev/null 2>&1; then
+		printf '%s\n' 'test-tdvp-renderer-profile: FAIL root selected retired software renderer' >&2
+		exit 1
+	fi
+	expect_equal vglite "$(run_tool resolve)" root-cannot-select-software-renderer
 	run_tool diagnostics-next-vglite-session
 	[ -f "${diagnostics_file}" ] || {
 		printf '%s\n' 'test-tdvp-renderer-profile: FAIL diagnostic marker was not created' >&2
