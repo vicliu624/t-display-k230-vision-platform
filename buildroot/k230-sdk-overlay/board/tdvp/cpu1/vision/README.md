@@ -136,11 +136,12 @@ complete the camera ownership migration described below.
   I2C, GPU/VO clock or reset writes. The 23.76 MHz MCLK matches the selected
   GC2093 CSI2 mode table. This guard is not the missing Linux ownership-ready
   handshake: the paired Linux/RT-Smart adapters supply that protocol, but the
-  complete paired image still requires production wiring and hardware tests.
+  complete paired image still requires the full build and hardware tests.
 - A compiled candidate device-tree wrapper and ownership include, with the
   new MMZ/transport reservations and GPIO/power policies. Linux camera/AI
-  devices and dedicated clock providers are disabled. This wrapper is NOT
-  selected by the production profile yet and is not a live DT overlay.
+  devices and dedicated clock providers are disabled. Production patch 0071
+  now applies the same include to the selected RM69A10 DTS; the wrapper remains
+  a comparison-test input, not a live DT overlay.
 
 ## Memory and wire contract
 
@@ -350,7 +351,7 @@ the production cutover and remaining release requirements are described below.
 
 ## Production firmware build and packaging-pair gate
 
-`build-rtsmart.sh` now invokes `stage-build.sh` to apply the three vision
+`build-rtsmart.sh` now invokes `stage-build.sh` to apply the four vision
 patches, install the curated kernel sources, select the explicit RT-Smart
 drivers and set the GC2093 CSI2/MMZ configuration through real SDK syncconfig.
 It rebuilds the sensor and media-clock archives (removing old archive members),
@@ -498,6 +499,67 @@ cancel in-flight DMA, establish engine idle, or make close/unlock a safe
 recovery operation. The model service must use finite job deadlines and retain
 possibly in-flight allocations after unproven completion; no shared AI reset,
 automatic process restart or buffer reuse is authorized by a timeout.
+
+### Pinned userspace runtime audit
+
+The standalone cross-link check is reproducible without downloads or SDK edits:
+
+```sh
+bash buildroot/tools/test-tdvp-cpu1-nncase-link.sh \
+    /path/to/pinned/canmv_k230 /path/to/riscv64-unknown-linux-musl- /path/to/audit-output
+```
+
+The pinned checkout must already contain `src/rtsmart/libs/nncase/riscv64` and
+the MPI `libsys`/linker-script dependencies. The check verifies the SDK commit,
+unchanged tracked nncase sources, version 2.9.0 and all three archive hashes;
+it rejects a Linux/glibc cross compiler. It retains references to real model
+loading/invocation, shared tensors/cache synchronization and AI2D scheduling
+so the link cannot pass using an empty `main` alone. It is a standalone audit,
+not part of the image's boot path or proof of model availability. Nothing is
+installed or executed, including the resulting test executable.
+
+On 2026-09-07 this committed-source check passed with the network disabled on
+the LAN Ubuntu 24.04 container, including rejection of the Linux toolchain.
+The ELF SHA-256 was
+`642c80def99217e14f4412980f6b08acac5d844834bcd6123063163d23fb9194`;
+its text/data/BSS sizes were 4,617,816/55,116/17,911 bytes. Those are link sizes,
+not peak inference memory. Upstream multi-character constant and RWX-segment
+warnings remain. The actual RT-Smart archives are locked by the test to:
+
+| Archive | SHA-256 |
+| --- | --- |
+| `libNncase.Runtime.Native.a` | `f6674a664be8133e368ab0f08df3e42d351e1f50811fdbddb6cf195cab6c0264` |
+| `libnncase.rt_modules.k230.a` | `5f6baf7c785916beb7e18bda2535585cabaa62315dd8446f256d651900c06564` |
+| `libfunctional_k230.a` | `1ac694e7197944e7217e21b50acfa2a8b14956355cf28e2f887d16d2a608fb01` |
+
+Disassembly of these libraries linked with the pinned MPI/runtime confirms:
+
+- K230 `invoke_core`, AI2D `invoke` and the dynamic functional path request
+  `poll(..., -1)`. Fixing the kernel callback does not remove these userspace
+  infinite waits. A finite outer job deadline alone does not cancel execution.
+- `gnne_init` branches to `gnne_disable`, which writes GNNE control then busy-
+  waits on status with no software deadline. It is not a shared PLL/power
+  reset, but still cannot be used as an assumed bounded recovery primitive.
+- Real MPI MMZ allocation, cache-sync and free symbols are linked. The raw
+  dynamic `gnne_get_l2()` returns physical `0x80000000`; that is not permission
+  to expose SRAM or arbitrary physical mappings through the Linux API.
+
+A production model worker must isolate these waits from its control/status
+thread, stop accepting jobs after a deadline/ownership fault, and retain the
+worker and potentially in-flight buffers until quiescence is actually proven.
+Do not simply convert an infinite wait to an error and let library destructors
+free memory that an accelerator could still access. This audit does not prove
+all runtime MMIO paths, failure recovery, numerical results or cache coherency.
+
+The [K230 datasheet](https://www.kendryte.com/k230/en/main/00_hardware/K230_datasheet.html)
+also distinguishes 2 MiB default KPU SRAM from 2 MiB shared SRAM; decompression
+uses 768 KiB of the shared bank. That bank is not automatically private merely
+because the Linux GNNE/AI2D nodes are disabled. The current selected K230 DT
+has no SRAM allocator, FFT or decompression device node and the built Linux
+configuration has `CONFIG_SRAM` disabled, but a model-specific SRAM allocation
+and the boot-time decompressor quiescence still require explicit verification.
+Do not grant CPU1 ownership of system SDMA or reset shared infrastructure as a
+shortcut. VGLite and non-AI2D display resources remain Linux-owned.
 
 ## Remaining release requirements
 
