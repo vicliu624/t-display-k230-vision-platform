@@ -77,6 +77,13 @@ FAKE_LOG="${TEST_ROOT}/calls.log"
 FAKE_MODULE="${TEST_ROOT}/sys/module/vglite"
 mkdir -p "${FAKE_BIN}" "${FAKE_PROC}" "${FAKE_MODULE}/parameters"
 
+# Package sources are deliberately tracked as 0644; exercise the installed
+# executable contract without chmod-ing the checkout or depending on its mode.
+install -m 0755 "${WATCHDOG_OBSERVER}" "${TEST_ROOT}/watchdog-observer"
+WATCHDOG_OBSERVER="${TEST_ROOT}/watchdog-observer"
+DIAGNOSTICS_REPORT="${TEST_ROOT}/diagnostics-report"
+install -m 0755 "${PROJECT_DIR}/k230-sdk-overlay/package/tdvp-vglite-acceptance/src/tdvp-vglite-diagnostics-report" "${DIAGNOSTICS_REPORT}"
+
 cat >"${FAKE_BIN}/id" <<'EOF'
 #!/bin/sh
 case "$1" in
@@ -143,7 +150,7 @@ gate_output="$(PATH="${FAKE_BIN}:${PATH}" \
 	TDVP_VGLITE_WATCHDOG_OBSERVER="${WATCHDOG_OBSERVER}" \
 	TDVP_VGLITE_SYS_MODULE_ROOT="${FAKE_MODULE}" \
 	sh "${GATE}" --expect-vglite-compositor --frames 2 --churn-iterations 0 \
-	--format ar24 --repeat 3)"
+	--format ar24 --surface-role layer-shell --repeat 3)"
 grep -Fq 'workload_round=1/3' <<<"${gate_output}"
 grep -Fq 'workload_round=2/3' <<<"${gate_output}"
 grep -Fq 'workload_round=3/3' <<<"${gate_output}"
@@ -155,6 +162,8 @@ grep -Fq 'labwc_rss_kb_before=12000 labwc_rss_kb_after=12000' <<<"${gate_output}
 	fail "repeat gate did not run the SHM workload three times"
 grep -Fq -- '--format ar24' "${FAKE_LOG}" ||
 	fail "session gate did not pass the selected AR24 format to the SHM benchmark"
+grep -Fq -- '--surface-role layer-shell' "${FAKE_LOG}" ||
+	fail "session gate did not pass the selected layer-shell role"
 
 FAKE_DIAGNOSTICS_LOG="${TEST_ROOT}/tdvp-labwc.log"
 printf '%s\n' 'pre-gate non-diagnostic record' >"${FAKE_DIAGNOSTICS_LOG}"
@@ -165,7 +174,7 @@ diagnostics_output="$(PATH="${FAKE_BIN}:${PATH}" \
 	TDVP_RENDERER_PROFILE_TOOL="${TEST_ROOT}/profile" \
 	TDVP_WAYLAND_SHM_BENCH_SESSION="${TEST_ROOT}/bench" \
 	TDVP_VGLITE_WATCHDOG_OBSERVER="${WATCHDOG_OBSERVER}" \
-	TDVP_VGLITE_DIAGNOSTICS_REPORT="${PROJECT_DIR}/k230-sdk-overlay/package/tdvp-vglite-acceptance/src/tdvp-vglite-diagnostics-report" \
+	TDVP_VGLITE_DIAGNOSTICS_REPORT="${DIAGNOSTICS_REPORT}" \
 	TDVP_VGLITE_SYS_MODULE_ROOT="${FAKE_MODULE}" \
 	sh "${GATE}" --expect-vglite-compositor --frames 1 --repeat 1 \
 	--diagnostics-log "${FAKE_DIAGNOSTICS_LOG}")"
@@ -186,7 +195,7 @@ if readback_failure_output="$(PATH="${FAKE_BIN}:${PATH}" \
 	TDVP_RENDERER_PROFILE_TOOL="${TEST_ROOT}/profile" \
 	TDVP_WAYLAND_SHM_BENCH_SESSION="${TEST_ROOT}/bench" \
 	TDVP_VGLITE_WATCHDOG_OBSERVER="${WATCHDOG_OBSERVER}" \
-	TDVP_VGLITE_DIAGNOSTICS_REPORT="${PROJECT_DIR}/k230-sdk-overlay/package/tdvp-vglite-acceptance/src/tdvp-vglite-diagnostics-report" \
+	TDVP_VGLITE_DIAGNOSTICS_REPORT="${DIAGNOSTICS_REPORT}" \
 	TDVP_VGLITE_SYS_MODULE_ROOT="${FAKE_MODULE}" \
 	sh "${GATE}" --expect-vglite-compositor --frames 1 --repeat 1 \
 	--diagnostics-log "${READBACK_FAILURE_LOG}" 2>&1)"; then
@@ -246,5 +255,13 @@ if invalid_output="$(sh "${GATE}" --expect-vglite-compositor --format nv12 2>&1)
 fi
 grep -Fq -- '--format must be xr24 or ar24' <<<"${invalid_output}" ||
 	fail "unsupported SHM format did not produce a clear diagnostic"
+
+if invalid_role_output="$(sh "${GATE}" --expect-vglite-compositor --surface-role fake 2>&1)"; then
+	fail "session gate accepted an unsupported surface role"
+fi
+grep -Fq -- '--surface-role must be xdg or layer-shell' <<<"${invalid_role_output}" ||
+	fail "unsupported surface role did not produce a clear diagnostic"
+grep -Fq -- '--surface-role xdg' "${FAKE_LOG}" ||
+	fail "existing invocations did not retain the XDG default"
 
 printf '%s\n' 'test-tdvp-vglite-session-gate: PASS'

@@ -19,6 +19,7 @@
 #include <wayland-client.h>
 
 #include "xdg-shell-client-protocol.h"
+#include "wlr-layer-shell-client-protocol.h"
 
 #define TDVP_DEFAULT_WIDTH 320
 #define TDVP_DEFAULT_HEIGHT 240
@@ -54,6 +55,7 @@ struct tdvp_options {
 	unsigned int frames;
 	unsigned int max_frame_ms;
 	enum tdvp_shm_format shm_format;
+	bool layer_shell;
 };
 
 struct tdvp_damage {
@@ -72,6 +74,8 @@ struct tdvp_bench {
 	struct wl_surface *surface;
 	struct xdg_surface *xdg_surface;
 	struct xdg_toplevel *toplevel;
+	struct zwlr_layer_shell_v1 *layer_shell;
+	struct zwlr_layer_surface_v1 *layer_surface;
 	struct wl_callback *frame_callback;
 	struct tdvp_buffer buffers[TDVP_BENCH_BUFFER_COUNT];
 	struct tdvp_options options;
@@ -110,9 +114,11 @@ static void tdvp_usage(const char *program)
 {
 	fprintf(stderr,
 		"usage: %s [--width N] [--height N] [--damage-size N] [--frames N] "
-		"[--max-frame-ms N] [--format xr24|ar24]\n"
+		"[--max-frame-ms N] [--format xr24|ar24] [--surface-role xdg|layer-shell]\n"
 		"\n"
-		"Create one XDG toplevel using two linear wl_shm XR24 or AR24 buffers,\n"
+		"Create one XDG toplevel (default) or layer-shell overlay with two linear\n"
+		"wl_shm XR24 or AR24 buffers. The overlay never takes keyboard focus\n"
+		"or pointer/touch input.\n"
 		"measure bounded frame-callback and wl_buffer.release latency, then\n"
 		"unmap the surface and verify both buffers are released. This never\n"
 		"opens DRM.  The default size is 320x240; use 1232x568 for the K230\n"
@@ -161,6 +167,19 @@ static int tdvp_parse_uint(const char *value, unsigned int *result)
 		return -1;
 	*result = (unsigned int)parsed;
 	return 0;
+}
+
+static int tdvp_parse_surface_role(const char *value, bool *layer_shell)
+{
+	if (strcmp(value, "xdg") == 0) {
+		*layer_shell = false;
+		return 0;
+	}
+	if (strcmp(value, "layer-shell") == 0) {
+		*layer_shell = true;
+		return 0;
+	}
+	return -1;
 }
 
 static void tdvp_fail(struct tdvp_bench *bench, const char *message)
@@ -559,6 +578,35 @@ static const struct xdg_toplevel_listener tdvp_toplevel_listener = {
 	.close = tdvp_toplevel_close,
 };
 
+static void tdvp_layer_configure(void *data,
+		struct zwlr_layer_surface_v1 *layer_surface, uint32_t serial,
+		uint32_t width, uint32_t height)
+{
+	struct tdvp_bench *bench = data;
+	zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
+	/* Do not report a panel-size acceptance if the compositor constrained it. */
+	if ((width && width != bench->options.width) ||
+	    (height && height != bench->options.height)) {
+		tdvp_fail(bench, "layer-shell configure size differs from requested workload");
+		return;
+	}
+	bench->configured = true;
+	bench->last_activity_ns = tdvp_now_ns();
+	if (tdvp_submit_next_frame(bench) < 0)
+		tdvp_fail(bench, "could not submit the first layer-shell SHM frame");
+}
+
+static void tdvp_layer_closed(void *data, struct zwlr_layer_surface_v1 *surface)
+{
+	(void)surface;
+	tdvp_fail(data, "the compositor closed the layer-shell benchmark surface");
+}
+
+static const struct zwlr_layer_surface_v1_listener tdvp_layer_listener = {
+	.configure = tdvp_layer_configure,
+	.closed = tdvp_layer_closed,
+};
+
 static const struct wl_shm_listener tdvp_shm_listener;
 
 static void tdvp_registry_global(void *data, struct wl_registry *registry,
@@ -577,6 +625,9 @@ static void tdvp_registry_global(void *data, struct wl_registry *registry,
 		bench->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
 		if (bench->shm)
 			wl_shm_add_listener(bench->shm, &tdvp_shm_listener, bench);
+	} else if (strcmp(interface, "zwlr_layer_shell_v1") == 0 && !bench->layer_shell) {
+		bench->layer_shell = wl_registry_bind(registry, name,
+			&zwlr_layer_shell_v1_interface, version < 3 ? version : 3);
 	} else if (strcmp(interface, "xdg_wm_base") == 0 && !bench->wm_base) {
 		bench->wm_base = wl_registry_bind(registry, name,
 						 &xdg_wm_base_interface, 1);
@@ -711,8 +762,17 @@ static void tdvp_destroy_bench(struct tdvp_bench *bench)
 		xdg_toplevel_destroy(bench->toplevel);
 	if (bench->xdg_surface)
 		xdg_surface_destroy(bench->xdg_surface);
+	if (bench->layer_surface)
+		zwlr_layer_surface_v1_destroy(bench->layer_surface);
 	if (bench->surface)
 		wl_surface_destroy(bench->surface);
+	if (bench->layer_shell) {
+		/* The manager's protocol destructor was introduced in version 3. */
+		if (wl_proxy_get_version((struct wl_proxy *)bench->layer_shell) >= 3)
+			zwlr_layer_shell_v1_destroy(bench->layer_shell);
+		else
+			wl_proxy_destroy((struct wl_proxy *)bench->layer_shell);
+	}
 	if (bench->wm_base)
 		xdg_wm_base_destroy(bench->wm_base);
 	if (bench->shm)
@@ -850,6 +910,12 @@ int main(int argc, char **argv)
 					"tdvp-wayland-shm-bench: --format must be xr24 or ar24\n");
 				return 1;
 			}
+		} else if (strcmp(argv[i], "--surface-role") == 0 &&
+			   i + 1 < (unsigned int)argc) {
+			if (tdvp_parse_surface_role(argv[++i], &options.layer_shell) < 0) {
+				fprintf(stderr, "tdvp-wayland-shm-bench: --surface-role must be xdg or layer-shell\n");
+				return 1;
+			}
 		} else if (strcmp(argv[i], "--help") == 0 ||
 			   strcmp(argv[i], "-h") == 0) {
 			tdvp_usage(argv[0]);
@@ -896,9 +962,9 @@ int main(int argc, char **argv)
 	}
 	wl_registry_add_listener(bench.registry, &tdvp_registry_listener, &bench);
 	if (wl_display_roundtrip(bench.display) < 0 || !bench.compositor ||
-	    !bench.shm || !bench.wm_base) {
+	    !bench.shm || (options.layer_shell ? !bench.layer_shell : !bench.wm_base)) {
 		tdvp_fail(&bench,
-			  "requires wl_compositor, wl_shm and xdg_wm_base");
+			  "requires wl_compositor, wl_shm and the requested shell protocol");
 		goto out;
 	}
 	/*
@@ -922,22 +988,46 @@ int main(int argc, char **argv)
 		tdvp_fail(&bench, "cannot create a Wayland surface");
 		goto out;
 	}
-	bench.xdg_surface = xdg_wm_base_get_xdg_surface(bench.wm_base,
-							 bench.surface);
-	if (!bench.xdg_surface) {
-		tdvp_fail(&bench, "cannot create an xdg_surface");
-		goto out;
+	if (options.layer_shell) {
+		struct wl_region *empty_input = wl_compositor_create_region(bench.compositor);
+		if (!empty_input) {
+			tdvp_fail(&bench, "cannot create empty layer-shell input region");
+			goto out;
+		}
+		wl_surface_set_input_region(bench.surface, empty_input);
+		wl_region_destroy(empty_input);
+		bench.layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+			bench.layer_shell, bench.surface, NULL,
+			ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "tdvp-wayland-shm-bench");
+		if (!bench.layer_surface) {
+			tdvp_fail(&bench, "cannot create a layer-shell surface");
+			goto out;
+		}
+		zwlr_layer_surface_v1_add_listener(bench.layer_surface, &tdvp_layer_listener, &bench);
+		zwlr_layer_surface_v1_set_size(bench.layer_surface, options.width, options.height);
+		zwlr_layer_surface_v1_set_anchor(bench.layer_surface,
+			ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+		zwlr_layer_surface_v1_set_exclusive_zone(bench.layer_surface, -1);
+		zwlr_layer_surface_v1_set_keyboard_interactivity(bench.layer_surface,
+			ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+	} else {
+		bench.xdg_surface = xdg_wm_base_get_xdg_surface(bench.wm_base,
+							     bench.surface);
+		if (!bench.xdg_surface) {
+			tdvp_fail(&bench, "cannot create an xdg_surface");
+			goto out;
+		}
+		xdg_surface_add_listener(bench.xdg_surface, &tdvp_xdg_surface_listener,
+					 &bench);
+		bench.toplevel = xdg_surface_get_toplevel(bench.xdg_surface);
+		if (!bench.toplevel) {
+			tdvp_fail(&bench, "cannot create an xdg_toplevel");
+			goto out;
+		}
+		xdg_toplevel_add_listener(bench.toplevel, &tdvp_toplevel_listener, &bench);
+		xdg_toplevel_set_title(bench.toplevel, "TDVP Wayland SHM benchmark");
+		xdg_toplevel_set_app_id(bench.toplevel, "vicliu624.tdvp-wayland-shm-bench");
 	}
-	xdg_surface_add_listener(bench.xdg_surface, &tdvp_xdg_surface_listener,
-				 &bench);
-	bench.toplevel = xdg_surface_get_toplevel(bench.xdg_surface);
-	if (!bench.toplevel) {
-		tdvp_fail(&bench, "cannot create an xdg_toplevel");
-		goto out;
-	}
-	xdg_toplevel_add_listener(bench.toplevel, &tdvp_toplevel_listener, &bench);
-	xdg_toplevel_set_title(bench.toplevel, "TDVP Wayland SHM benchmark");
-	xdg_toplevel_set_app_id(bench.toplevel, "vicliu624.tdvp-wayland-shm-bench");
 	wl_surface_commit(bench.surface);
 
 	if (tdvp_dispatch_until_done(&bench) < 0)
@@ -947,7 +1037,7 @@ int main(int argc, char **argv)
 	       "size=%ux%u damage=%s damage_size=%u submitted=%u callbacks=%u released=%u "
 	       "callback_us min=%llu avg=%.1f max=%llu "
 	       "release_us min=%llu avg=%.1f max=%llu "
-	       "release_before_callback=%u release_after_callback=%u\n",
+	       "release_before_callback=%u release_after_callback=%u surface_role=%s\n",
 	       TDVP_BENCH_BUFFER_COUNT, tdvp_shm_format_name(options.shm_format),
 	       options.width, options.height,
 	       options.damage_size == 0 ? "full" : "fixed-square", options.damage_size,
@@ -958,7 +1048,8 @@ int main(int argc, char **argv)
 	       (unsigned long long)bench.release_min_us,
 	       (double)bench.release_total_us / (double)bench.released_frames,
 	       (unsigned long long)bench.release_max_us,
-	       bench.releases_before_callback, bench.releases_after_callback);
+	       bench.releases_before_callback, bench.releases_after_callback,
+	       options.layer_shell ? "layer-shell" : "xdg");
 	ret = 0;
 
 out:

@@ -56,6 +56,59 @@ VGLite kernel、wlroots renderer 或 Labwc recovery patch。
 原始日志保存在检查工作树 `.tmp/device-validation/vglite-session-20260907.log`
 与 `vglite-session-20260907b.log`，不作为仓库源码提交。
 
+### 补充：真实 layer-shell 会话验收
+
+在 `cca890e` 基础上给同一个 SHM benchmark 增加 `--surface-role layer-shell`，
+不是用普通 XDG 窗口模拟 panel。协议 XML 原样取自镜像已有的 gtk-layer-shell
+v0.8.0，保留许可；由构建主机的 wayland-scanner 生成客户端代码，不增加 GTK
+依赖或构建时下载。默认仍为 `xdg`。overlay 不抢键盘焦点，输入区域为空，
+不预留桌面工作区域；若 compositor 给出不同的非零尺寸则拒绝通过。
+
+实际 Linux CPU0 工具链/sysroot 在 Ubuntu 24.04.4 中以
+`-Wall -Wextra -Werror` 交叉编译通过。候选 benchmark SHA256 为
+`7fa4f9f0cce3595b5243d5de43a38f7e31591656791c5d74eb3de6b3ba900aaa`。
+session Gate、diagnostics 和 renderer stack lock 回归均通过。Gate 测试不再
+依赖 0644 源码 helper 的可执行位，而是在临时目录按镜像的 0755 安装权限测试；
+该回归现已纳入 PR workflow。
+
+临时 VGLite 会话 Labwc PID `6895`，layer-shell overlay 为 `1232x568`，
+每项 2 轮 × 120 帧：
+
+| 格式 | 更新区域 | 两轮平均 frame callback 间隔（ms） | GPU finish 关联 page-flip | 结果 |
+| --- | --- | --- | ---: | --- |
+| XR24 | 全屏 | 26.658 / 26.928 | 257 | PASS |
+| XR24 | 16×16 | 24.390 / 24.320 | 259 | PASS |
+| AR24 | 全屏 | 82.190 / 78.711 | 304 | PASS |
+| AR24 | 16×16 | 26.538 / 26.441 | 261 | PASS |
+
+所有轮次均 `submitted=120 callbacks=120 released=120`，PID 不变，GPU result、
+pass、recovery、readback 及 DRM commit failure 计数均为 0。page-flip 统计包含
+采样时段的其他桌面更新，不把它误报为 benchmark 独占帧数。XR24 第一组 RSS
+18560→18648 KiB，其后三组为 18648→18648 KiB；这是短期有界测试，不能证明
+长期无泄漏。最后默认 XDG 320×240、60 帧回归也通过。
+
+**功能通过不是 60 FPS 性能验收**：AR24 全屏透明合成的回调间隔约 79–82 ms。
+这次覆盖了真实 layer-shell 生命周期与局部更新路径，但没有像素截图对比，
+不代替肉眼确认局部更新无残影、真实 Quick Settings 交互或 swaylock 解锁验收。
+没有改动 VGLite kernel、wlroots renderer 或 Labwc runtime patch，也没有把
+测试授权标记提升为正式 VGLite enabled 标记。
+
+示例命令（仅在已授权的 VGLite 桌面会话中，以图形用户执行）：
+
+```sh
+tdvp-vglite-session-gate --expect-vglite-compositor \
+  --surface-role layer-shell --width 1232 --height 568 \
+  --format ar24 --damage-size 16 --frames 120 --repeat 2 \
+  --diagnostics-log "$HOME/.cache/wayland-runtime/tdvp-labwc.log"
+```
+
+测试前预设 180 秒自动回退。完成后备份日志、主动恢复并逐字节确认原 greetd
+配置，正式 profile 为 `configured=pixman effective=pixman vglite_enabled=no
+breaker=clear`，Labwc PID `8078` 正常运行，再取消本次回退 timer。
+候选客户端仅放在 `/run/tdvp-vglite-validation/`，未覆盖系统正式客户端。
+原始日志为 `.tmp/device-validation/vglite-layer-shell-20260907.log`。
+恢复后 CPU1 验收再次通过，序列 `935/935`，heartbeat `204256→204739`。
+
 ## nRF52840：UART1 已修复，无 AT 应答，蓝牙未通过
 
 原 DTB SHA256：`6f02a5381f962d09b60a94ee234a3978e0f45123cefae3f305d267f90551aec5`，

@@ -15,12 +15,19 @@ define TDVP_WAYLAND_ACCEPTANCE_BUILD_CMDS
 	$(HOST_DIR)/bin/wayland-scanner private-code \
 		$(STAGING_DIR)/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml \
 		$(@D)/xdg-shell-protocol.c
+	$(HOST_DIR)/bin/wayland-scanner client-header \
+		$(@D)/protocols/wlr-layer-shell-unstable-v1.xml \
+		$(@D)/wlr-layer-shell-client-protocol.h
+	$(HOST_DIR)/bin/wayland-scanner private-code \
+		$(@D)/protocols/wlr-layer-shell-unstable-v1.xml \
+		$(@D)/wlr-layer-shell-protocol.c
 	$(TARGET_CC) $(TARGET_CFLAGS) -Wall -Wextra -Werror -O2 \
 		$(@D)/tdvp-wayland-acceptance.c \
 		-o $(@D)/tdvp-wayland-acceptance \
 		$(TARGET_LDFLAGS) -lwayland-client -lxkbcommon
 	$(TARGET_CC) $(TARGET_CFLAGS) -Wall -Wextra -Werror -O2 -I$(@D) \
 		$(@D)/tdvp-wayland-shm-bench.c $(@D)/xdg-shell-protocol.c \
+		$(@D)/wlr-layer-shell-protocol.c \
 		-o $(@D)/tdvp-wayland-shm-bench \
 		$(TARGET_LDFLAGS) -lwayland-client
 endef
