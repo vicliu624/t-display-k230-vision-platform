@@ -62,6 +62,7 @@ for header in k_type.h ioctl/k_ioctl.h ioctl/k_fft_ioctl.h; do
 		> "${MPP_LAYOUT}/include/${header}"
 done
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-ai.sh" "${BSP}" "${MPP_LAYOUT}"
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-ai-waits.sh" "${BSP}"
 "${NM}" "${BUILD_BSP}/rtthread.elf" > "${OUTPUT_DIR}/rtthread-symbols.txt"
 grep -Eq ' [tT] tdvp_cpu1_service$' "${OUTPUT_DIR}/rtthread-symbols.txt"
 grep -Eq ' [tT] dfs_file_open$' "${OUTPUT_DIR}/rtthread-symbols.txt"

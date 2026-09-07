@@ -88,8 +88,10 @@ complete the camera ownership migration described below.
   hardlock reservation failures. It also fixes the BSP hardlock mapping check:
   a failed mapping must not become the apparently valid address `0xa0`.
   Unselected GNNE/AI2D initializer bodies remain unchanged. Their upstream
-  runtime operations still require bounded/fault-aware integration before a
-  model service is released; successful registration is not that acceptance.
+  runtime operations still require a fault-aware model service before release;
+  successful registration is not that acceptance. Patch 0004 now supplies
+  nonblocking poll callbacks and bounded, yielding KPU hardlock attempts as
+  described below; it does not implement job cancellation or buffer reclaim.
 - CPU1 hardware FFT uses the pinned MPI ioctl ABI with bounded, serialized
   PIO/FIFO transfers. The upstream FFT SDMA dependency is deliberately absent:
   system SDMA stays outside CPU1's exclusive AI allocation. Inputs are
@@ -111,7 +113,7 @@ complete the camera ownership migration described below.
   gates use Linux CCF's shared-register serialization; CPU1 never writes that
   register. Ownership contract 2 refuses contract-1 firmware which did not
   require these retained ports. No PLL retuning is performed. This remains a
-  candidate path, not selected by the production image.
+  production-selected path whose board acceptance is still pending.
   Separate 128-byte records, sequence-checked snapshots and fences prevent
   mixed publications; boot/peer timeouts and identity changes latch faults.
   Startup is attempted once. Failure does not reset shared resources or free
@@ -462,6 +464,40 @@ Its bridge module SHA-256 is
 `vpl-hwctl` is
 `949217beb1fec484e8a81d9fd8b5b95f2a521797c104096f4741e6fd229e29c3`.
 These hashes identify component evidence, not a released or deployed image.
+
+## CPU1 inference runtime compatibility and wait semantics
+
+The pinned RT-Smart SDK's `libs/nncase/riscv64/nncase/include/nncase/version.h`
+declares nncase 2.9.0. The retired Linux package selected 2.11.0. Its runtime,
+sample model and old pass marker are not an interchangeable CPU1 acceptance
+bundle. A CPU1 model service must pin a mutually compatible runtime/compiler,
+model, tensors and numerical reference before it advertises model availability.
+
+In the upstream GNNE and AI2D drivers, the DFS `poll` callbacks call
+`rt_event_recv(..., RT_WAITING_FOREVER, ...)`; even userspace `poll(..., 0)`
+can therefore block. Paired patch 0004 instead registers the poll waiter,
+checks AI/ownership state and samples the event with zero wait. IRQ callbacks
+publish the event before waking the wait queue, closing the old lost-wakeup
+window. Transient ownership publications return not-ready without consuming
+the completion event; terminal failures return POLLERR.
+
+The same patch limits GNNE LOCK to 100 attempts with a one-millisecond yield
+after each unsuccessful attempt. TRYLOCK remains nonblocking, and neither path
+acquires a new lock without valid live ownership. This is a retry bound, not a
+hard real-time 100 ms deadline under arbitrary scheduling delays. The unpaired
+BSP branches retain their previous behavior.
+
+The regression applies 0003 and 0004 without fuzz to pristine pinned sources,
+then executes the actual resulting ioctl/poll/IRQ callback bodies with mocked
+RT services. It checks empty/ready/fault/stale-publication polling, event-before-
+wakeup, invalid requests, contention, delayed success and ownership loss. The
+production CPU1 preflight runs it alongside the real firmware cross-build.
+
+This does not bound a caller which explicitly requests infinite POSIX poll,
+cancel in-flight DMA, establish engine idle, or make close/unlock a safe
+recovery operation. The model service must use finite job deadlines and retain
+possibly in-flight allocations after unproven completion; no shared AI reset,
+automatic process restart or buffer reuse is authorized by a timeout.
 
 ## Remaining release requirements
 

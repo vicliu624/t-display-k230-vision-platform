@@ -1,0 +1,139 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] rtsmart: honor paired AI poll and hardlock wait bounds
+
+A DFS poll callback must not wait forever internally: it defeats even poll
+with a zero timeout. Register the waiter before sampling the event and publish
+the event before waking that waiter. Paired KPU lock attempts yield and stop
+after 100 attempts rather than spinning indefinitely on the CPU1 core.
+
+These operations do not reset an engine, cancel DMA, reclaim a job buffer or
+certify inference. The future CPU1 model service must use finite poll timeouts
+and retain possibly in-flight allocations after any unproven completion.
+Unselected BSP behavior is unchanged.
+
+diff --git a/drivers/interdrv/gnne/gnne_dev.c b/drivers/interdrv/gnne/gnne_dev.c
+--- a/drivers/interdrv/gnne/gnne_dev.c
++++ b/drivers/interdrv/gnne/gnne_dev.c
+@@ -117,6 +117,37 @@ static int gnne_device_ioctl(struct dfs_fd *file, int cmd, void *args)
+     handle = (struct gnne_dev_handle *)file->data;
+     if((g_kpu_lock == HARDLOCK_MAX))
+         return ret;
++#ifdef RT_USING_TDVP_CPU1_VISION
++    extern int tdvp_cpu1_ai_status(void);
++    extern int tdvp_cpu1_vision_runtime_status(void);
++    unsigned int attempt;
++
++    if (!handle) return -RT_EINVAL;
++    if (cmd == GNNE_CMD_UNLOCK) {
++        if (handle->is_lock) kd_hardlock_unlock(g_kpu_lock);
++        handle->is_lock = RT_FALSE;
++        return 0;
++    }
++    if (cmd != GNNE_CMD_LOCK && cmd != GNNE_CMD_TRYLOCK) return -RT_EINVAL;
++    for (attempt = 0; attempt < 100; ++attempt) {
++        ret = tdvp_cpu1_ai_status();
++        if (ret) return ret;
++        ret = tdvp_cpu1_vision_runtime_status();
++        /* An ownership publication in progress is retryable, never permission
++         * to acquire a new lock. A terminal ownership error is not retried. */
++        if (ret && ret != -RT_EBUSY) return ret;
++        if (!ret) {
++            if (handle->is_lock) return 0;
++            if (!kd_hardlock_lock(g_kpu_lock)) {
++                handle->is_lock = RT_TRUE;
++                return 0;
++            }
++        }
++        if (cmd == GNNE_CMD_TRYLOCK) return -RT_EBUSY;
++        rt_thread_mdelay(1);
++    }
++    return -RT_ETIMEOUT;
++#else
+     if(cmd == GNNE_CMD_LOCK) {
+         if(handle->is_lock == RT_TRUE)
+             return 0;
+@@ -138,6 +169,7 @@ static int gnne_device_ioctl(struct dfs_fd *file, int cmd, void *args)
+         }
+     }
+     return ret;
++#endif
+ }
+ 
+ int gnne_device_poll(struct dfs_fd *file, struct rt_pollreq *req)
+@@ -149,9 +181,22 @@ int gnne_device_poll(struct dfs_fd *file, struct rt_pollreq *req)
+         gnne_err("gnne_dev_handle NULL!");
+         return -EINVAL;
+     }
++#ifdef RT_USING_TDVP_CPU1_VISION
++    extern int tdvp_cpu1_ai_status(void);
++    extern int tdvp_cpu1_vision_runtime_status(void);
++    int ret;
++
++    rt_poll_add(handle->wait, req);
++    if (tdvp_cpu1_ai_status()) return POLLERR;
++    ret = tdvp_cpu1_vision_runtime_status();
++    if (ret) return ret == -RT_EBUSY ? 0 : POLLERR;
++    ret = rt_event_recv(&g_gnne_event, 0x01, RT_EVENT_FLAG_OR | RT_EVENT_FLAG_CLEAR, 0, NULL);
++    return !ret ? POLLIN : (ret == -RT_ETIMEOUT ? 0 : POLLERR);
++#else
+     rt_event_recv(&g_gnne_event, 0x01, RT_EVENT_FLAG_OR | RT_EVENT_FLAG_CLEAR, RT_WAITING_FOREVER, NULL);
+     rt_poll_add(handle->wait, req);
+     return POLLIN;
++#endif
+ }
+ 
+ static const struct dfs_file_ops gnne_input_fops = {
+@@ -172,8 +217,13 @@ static void irq_callback(int irq, void *data)
+     /*clear kpu intr*/
+     __iowmb();
+     *(rt_uint64_t *)write_addr = 0x400000004;
++#ifdef RT_USING_TDVP_CPU1_VISION
++    rt_event_send(&g_gnne_event, 0x1);
++    rt_wqueue_wakeup(wait, (void*)POLLIN);
++#else
+     rt_wqueue_wakeup(wait, (void*)POLLIN);
+     rt_event_send(&g_gnne_event, 0x1);
++#endif
+ }
+ 
+ int gnne_device_init(void)
+diff --git a/drivers/interdrv/gnne/ai2d_dev.c b/drivers/interdrv/gnne/ai2d_dev.c
+--- a/drivers/interdrv/gnne/ai2d_dev.c
++++ b/drivers/interdrv/gnne/ai2d_dev.c
+@@ -111,9 +111,22 @@ int ai_2d_device_poll(struct dfs_fd *file, struct rt_pollreq *req)
+         ai_2d_err("ai_2d_dev_handle NULL!");
+         return -EINVAL;
+     }
++#ifdef RT_USING_TDVP_CPU1_VISION
++    extern int tdvp_cpu1_ai_status(void);
++    extern int tdvp_cpu1_vision_runtime_status(void);
++    int ret;
++
++    rt_poll_add(handle->wait, req);
++    if (tdvp_cpu1_ai_status()) return POLLERR;
++    ret = tdvp_cpu1_vision_runtime_status();
++    if (ret) return ret == -RT_EBUSY ? 0 : POLLERR;
++    ret = rt_event_recv(&g_ai_2d_event, 0x01, RT_EVENT_FLAG_OR | RT_EVENT_FLAG_CLEAR, 0, NULL);
++    return !ret ? POLLIN : (ret == -RT_ETIMEOUT ? 0 : POLLERR);
++#else
+     rt_event_recv(&g_ai_2d_event, 0x01, RT_EVENT_FLAG_OR | RT_EVENT_FLAG_CLEAR, RT_WAITING_FOREVER, NULL);
+     rt_poll_add(handle->wait, req);
+     return POLLIN;
++#endif
+ }
+ 
+ static const struct dfs_file_ops ai_2d_input_fops = {
+@@ -135,8 +148,13 @@ static void irq_callback(int irq, void *data)
+     write_addr[1] = 0;
+     write_addr[2] = 0;
+     write_addr[3] = 0;
++#ifdef RT_USING_TDVP_CPU1_VISION
++    rt_event_send(&g_ai_2d_event, 0x1);
++    rt_wqueue_wakeup(wait, (void*)POLLIN);
++#else
+ 	rt_wqueue_wakeup(wait, (void*)POLLIN);
+     rt_event_send(&g_ai_2d_event, 0x1);
++#endif
+ }
+ 
+ int ai_2d_device_init(void)
