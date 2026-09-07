@@ -48,6 +48,8 @@ cpu1_gpio_amp_patch = buildroot/k230-sdk-overlay/linux/0067-tdvp-gpio-cpu1-share
 cpu1_gpio_amp_patch_sha256 = 29204960b894af5738740d3d045cd449247d0607c14a30a6a8b41900bf2d9c44
 cpu1_power_amp_patch = buildroot/k230-sdk-overlay/linux/0068-tdvp-power-retain-cpu1-vision-domains.patch
 cpu1_power_amp_patch_sha256 = 2d345578166ce67729828b7a10e61277d0c58fe4c7eba6b0c0aa6f38c890e5a4
+cpu1_clock_amp_patch = buildroot/k230-sdk-overlay/linux/0069-tdvp-clock-cpu1-i2c4-arbitration.patch
+cpu1_clock_amp_patch_sha256 = 87b4411d1cff39365bd6b49bfa41906d323a600c7ebb33bf1a012bc7eb8ceb25
 nrf52840_uart1_patch_sha256 = 76aa2e07a908b07e32617a68c061fc8fc37cdbe1f680ebf766fb47578c925ddc
 
 [cpu1_rtsmart]

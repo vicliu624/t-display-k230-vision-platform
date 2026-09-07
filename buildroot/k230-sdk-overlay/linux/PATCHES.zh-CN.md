@@ -213,6 +213,20 @@ Linux 不得复位或关闭共享控制器时钟。实现跨核休眠协调前�
 回归测试执行实际打补丁后的驱动，模拟 Linux/MMIO 服务并覆盖重试和失败路径；
 芯片上的供电时序仍需硬件验证。
 
+## CPU1 I2C4 共享时钟仲裁
+
+`0069-tdvp-clock-cpu1-i2c4-arbitration.patch` 仅在 CMU 声明
+`tdvp,cpu1-i2c4-clock-sharing` 时启用。Linux 对 `0x91100024`、
+`0x9110002c`、`0x91100030` 的 UART/I2C/GPIO 时钟读改写使用硬件锁 0，
+等待上限 10 ms，超时不写寄存器。CPU1 的 I2C4 gate/divider provider 必须
+禁用；冲突位域、共享 mux 和涉及共享 divider 寄存器的双寄存器操作在注册阶段拒绝。
+PDM 的共享 gate 受锁保护，其 Linux 独占的小数分频寄存器保留原行为。共享 LS APB
+父时钟不得被关闭或调频。GPU、显示和 PLL 路径保持不变。配对 RT-Smart
+必须在 `rt_hw_i2c_init` 访问硬件前，以同一硬件锁完成 I2C4 时钟准备，
+不能等到 MPP 初始化再做。该补丁本身不代表摄像头完成交接。回归编译实际
+打补丁后的 CCF 操作，每核并发 100,000 次，并覆盖超时拒写、父时钟保持、
+错误布局拒绝及非 AMP/GPU 对照。
+
 ## Required Check
 
 ```sh

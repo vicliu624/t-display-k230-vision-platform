@@ -355,6 +355,7 @@ require_file "${STAGED_OVERLAY}/linux/0065-tdvp-riscv-dts-enable-nrf52840-uart1.
 require_file "${STAGED_OVERLAY}/linux/0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch"
 require_file "${STAGED_OVERLAY}/linux/0067-tdvp-gpio-cpu1-shared-port-arbitration.patch"
 require_file "${STAGED_OVERLAY}/linux/0068-tdvp-power-retain-cpu1-vision-domains.patch"
+require_file "${STAGED_OVERLAY}/linux/0069-tdvp-clock-cpu1-i2c4-arbitration.patch"
 require_line "${STAGED_OVERLAY}/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" 'BR2_PACKAGE_TDVP_CAMERA_ISP=y'
 require_line "${STAGED_OVERLAY}/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" '# BR2_PACKAGE_VVCAM is not set'
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c"

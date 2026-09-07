@@ -240,6 +240,23 @@ system suspend. The regression executes the actual patched driver with mocked
 Linux/MMIO services, including retry and failure paths; silicon timing still
 requires hardware validation.
 
+## CPU1 I2C4 shared-clock arbitration
+
+`0069-tdvp-clock-cpu1-i2c4-arbitration.patch` is enabled only by
+`tdvp,cpu1-i2c4-clock-sharing` on CMU. Linux UART/I2C/GPIO clock RMW at
+`0x91100024`, `0x9110002c` and `0x91100030` uses hardware semaphore 0, with
+a bounded 10 ms wait and no writes on timeout. CPU1 I2C4 gate/divider providers
+must be disabled; conflicting fields, shared muxes and dual-register dividers
+touching a shared divider word are rejected at registration. PDM's shared gate
+is protected while its Linux-only fractional divider is retained unchanged.
+The shared LS APB parent is not gated or retuned.
+GPU/display and PLL paths are unchanged. The paired RT-Smart early I2C4 setup
+must use the same semaphore **before** `rt_hw_i2c_init` accesses hardware;
+adding clocks only inside MPP is too late. This patch alone is not a camera
+ownership cutover. The regression compiles the actual patched CCF operations
+and runs 100,000 concurrent model iterations per core, plus timeout/refusal,
+retained-parent, malformed-layout and non-AMP/GPU controls.
+
 ## Required Checks
 
 ```sh

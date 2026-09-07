@@ -53,7 +53,7 @@ def normalized(nodes):
                   "dmas": "#dma-cells", "resets": "#reset-cells",
                   "power-domains": "#power-domain-cells", "interrupts-extended": "#interrupt-cells"}
     plain = {"interrupt-parent", "remote-endpoint", "ports", "memory-region",
-             "tdvp,gpio-controller", "tdvp,power-controller",
+             "tdvp,gpio-controller", "tdvp,power-controller", "tdvp,clock-controller",
              "canaan,k230-audio-codec", "canaan,k230-i2s-controller"}
     result = {}
     for path, props in nodes.items():
@@ -97,6 +97,41 @@ REMOVED = {
 }
 
 
+def validate_shared_clock_layout(nodes):
+    """Prove active real DT clock nodes fit 0069's guarded register layout."""
+    count = 0
+    for path, props in nodes.items():
+        if not path.startswith(CLOCK) or props.get("status") == b"disabled\0":
+            continue
+        if props.get("compatible") != b"canaan,k230-clk-composite\0":
+            continue
+        values = {key: cells(value)[0] for key, value in props.items()
+                  if key.startswith("clk-") and len(value) == 4}
+        offsets = [values.get(key) for key in ("clk-gate-reg-offset", "clk-rate-reg-offset",
+                                             "clk-rate-reg-offset_1", "clk-parent-reg-offset")]
+        gate, rate, rate1, mux = offsets
+        shared = {0x24, 0x2c, 0x30}
+        if not shared.intersection(offsets):
+            continue
+        count += 1
+        assert mux not in shared and rate1 not in shared, ("unsupported shared clock layout", path)
+        assert rate not in shared or rate1 is None, ("shared dual-register divider", path)
+        if gate in shared:
+            assert gate == 0x24
+            assert values["clk-gate-reg-bit-enable"] not in (10, 25)
+            assert 0 <= values["clk-gate-reg-bit-enable"] < 32
+            assert values["clk-gate-reg-bit-reverse"] == 0
+        if rate in shared:
+            assert rate != 0x24 and values["clk-rate-calc-method"] == 1
+            assert values["clk-rate-reg-write-enable-bit"] == 31
+            assert values["clk-rate-reg-mul-value-mask"] == 0
+            shift = values["clk-rate-reg-div-value-shift"]
+            mask = values["clk-rate-reg-div-value-mask"] << shift
+            assert 0 <= shift < 32 and mask < 0x80000000
+            assert rate != 0x2c or not mask & (7 << 27), ("Linux I2C4 divider ownership", path)
+    assert count >= 20, "real LS clock provider layout was not examined"
+
+
 def validate(before, after):
     assert set(after) - set(before) == {MMZ, SHARED, VISION}, "unexpected added nodes"
     assert set(before) <= set(after), "removed existing nodes"
@@ -106,6 +141,7 @@ def validate(before, after):
     allowed[GPIO] = {"tdvp,cpu1-gpio-mask"}
     allowed[GPIO + "/gpio-port@0"] = {"gpio-reserved-ranges"}
     allowed[POWER] = {"tdvp,cpu1-vision-domains"}
+    allowed[CLOCK.rstrip("/")] = {"tdvp,cpu1-i2c4-clock-sharing"}
     for path, properties in before.items():
         for key in properties.keys() | after[path].keys():
             if properties.get(key) != after[path].get(key):
@@ -117,6 +153,8 @@ def validate(before, after):
     assert cells(after[GPIO]["tdvp,cpu1-gpio-mask"]) == (0x200000,)
     assert cells(after[GPIO + "/gpio-port@0"]["gpio-reserved-ranges"]) == (21, 1)
     assert after[POWER]["tdvp,cpu1-vision-domains"] == b""
+    assert after[CLOCK.rstrip("/")]["tdvp,cpu1-i2c4-clock-sharing"] == b""
+    validate_shared_clock_layout(after)
     for path, base, length in [(MMZ, 0x14000000, 0x8000000), (SHARED, 0x1C000000, 0x2000000)]:
         assert cells(after[path]["reg"]) == (0, base, 0, length)
         assert after[path]["no-map"] == b"" and "reusable" not in after[path]
@@ -125,6 +163,7 @@ def validate(before, after):
         "compatible": b"tdvp,cpu1-vision-v1\0", "status": b"okay\0",
         "memory-region": ((SHARED, ()), (MMZ, ())), "memory-region-names": b"transport\0mmz\0",
         "tdvp,gpio-controller": ((GPIO, ()),), "tdvp,power-controller": ((POWER, ()),),
+        "tdvp,clock-controller": ((CLOCK.rstrip("/"), ()),),
     }
     # The existing firmware allocation, mailbox and 512 MiB CMA must survive.
     assert cells(after["/reserved-memory/cpu1-runtime@10000000"]["reg"]) == (0, 0x10000000, 0, 0x4000000)
@@ -146,6 +185,8 @@ validate(before, after)
 mutations = [(p, "status", b"okay\0") for p in DISABLED]
 mutations += [(GPIO, "tdvp,cpu1-gpio-mask", struct.pack(">I", 0)),
               (POWER, "tdvp,cpu1-vision-domains", None), (MMZ, "no-map", None),
+              (CLOCK.rstrip("/"), "tdvp,cpu1-i2c4-clock-sharing", None),
+              (VISION, "tdvp,clock-controller", ((POWER, ()),)),
               (SHARED, "reg", struct.pack(">4I", 0, 0x14000000, 0, 0x2000000)),
               ("/cpu1-mailbox@13ff0000", "status", b"disabled\0"),
               ("/soc/serial@91401000", "status", b"disabled\0")]

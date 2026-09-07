@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
-/* Candidate only: requires Linux 0067/0068 and the paired CPU1 vision image.
+/* Candidate only: requires Linux 0067-0069 and the paired CPU1 vision image.
  * Include AFTER the complete RM69A10 board DTS (including CPU0 GC2093 setup).
  * Do not apply this as a live overlay or boot it with compute-only CPU1.
  */
@@ -20,6 +20,7 @@
 		memory-region-names = "transport", "mmz";
 		tdvp,gpio-controller = <&gpio0>;
 		tdvp,power-controller = <&sysctl_power>;
+		tdvp,clock-controller = <&sysctl_clock>;
 		status = "okay";
 	};
 };
@@ -27,6 +28,7 @@
 &gpio0 { tdvp,cpu1-gpio-mask = <0x00200000>; };
 &gpio0_ports { gpio-reserved-ranges = <21 1>; };
 &sysctl_power { tdvp,cpu1-vision-domains; };
+&sysctl_clock { tdvp,cpu1-i2c4-clock-sharing; };
 
 /* CPU1 alone owns sensor, I2C4, CSI, ISP and AI engines/interrupts. */
 &i2c4 {

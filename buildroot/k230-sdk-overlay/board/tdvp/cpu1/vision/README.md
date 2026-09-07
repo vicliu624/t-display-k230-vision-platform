@@ -41,6 +41,10 @@ complete the camera ownership migration described below.
 - Opt-in AI/DISP power retention (`0068`), including the ISP/display shared
   domain. Linux does not cycle already-on domains and rejects power-off while
   CPU1 ownership is enabled. Initialization failures are not silently ignored.
+- Opt-in shared LS clock arbitration (`0069`): serialize Linux UART/I2C/GPIO
+  CMU register writes with hardware semaphore 0, retain the shared LS APB
+  parent and reject Linux-owned declarations for I2C4 fields. The matched
+  RT-Smart early clock initialization is still required before I2C board init.
 - A compiled candidate device-tree wrapper and ownership include, with the
   new MMZ/transport reservations and GPIO/power policies. Linux camera/AI
   devices and dedicated clock providers are disabled. This wrapper is NOT
@@ -83,6 +87,7 @@ bash buildroot/tools/test-tdvp-cpu1-vision-pins.sh
 bash buildroot/tools/test-tdvp-cpu1-transport.sh
 bash buildroot/tools/test-tdvp-cpu1-gpio-amp.sh
 bash buildroot/tools/test-tdvp-cpu1-power-amp.sh /path/to/pristine/pinned/linux
+bash buildroot/tools/test-tdvp-cpu1-clock-amp.sh /path/to/pinned/linux
 bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh /path/to/fully/patched/linux
 bash buildroot/tools/test-tdvp-cpu1-capture.sh /path/to/pinned/canmv_k230/src/rtsmart/mpp
 ```
@@ -100,9 +105,14 @@ power-off refusal and error cleanup. CI runs this against `linux-patch` output
 with `--patched`, first checking that the patch can be reversed without fuzz.
 The candidate DTB test compiles both the actual CPU0 board and the vision
 wrapper, resolves phandles, and compares all 273 existing nodes with a narrow
-property allowlist. Twenty invalid candidates (Linux ownership, missing
+property allowlist. Twenty-two invalid candidates (Linux ownership, missing
 protection/reservation, overlap, mailbox/UART1 regression) are rejected. This
 proves declarations and absence of unrelated DT drift, not runtime ownership.
+The clock regression executes the actual patched CCF operations with a
+read-to-acquire semaphore model, 100,000 concurrent iterations on each side,
+timeout refusal, APB retention and unchanged non-AMP/GPU controls. The complete
+clock driver compiled as a RISC-V object with `W=1` on Ubuntu 24.04. Neither
+the model nor compilation proves physical clock timing or camera operation.
 
 On the LAN Ubuntu 24.04 validation container, the pinned CPU1 musl toolchain
 cross-linked the real MPI/ISP libraries with both executables:
@@ -128,10 +138,13 @@ is made. Nothing in this migration has been deployed to the board yet.
    `tdvp,cpu1-vision-domains` on the power provider in the ownership device
    tree. The software guards are implemented, but their physical coexistence
    behavior has not been tested. Simply disabling Linux CSI/I2C is insufficient.
-2. Retire Linux camera/AI clock providers without gating active CPU1 clocks,
+2. Enable `tdvp,cpu1-i2c4-clock-sharing` on CMU and retire Linux camera/AI
+   clock providers without gating active CPU1 clocks,
    preserve Linux display/VGLite clocks, and validate CPU1 power/clock setup
    before sensor and KPU access. Do not import the full CanMV board initializer:
-   it configures functions outside CPU1's ownership.
+   it configures functions outside CPU1's ownership. `rt_hw_i2c_init` is a
+   BOARD initializer and immediately touches I2C registers: the matched CPU1
+   semaphore/100 MHz I2C4 preparation must precede it, not run inside MPP.
 3. Atomically add Linux MMZ/transport reservations and retire Linux camera,
    ISP, KPU/AI2D bindings and the CPU0 ISP service. Add an ownership gate that
    rejects mixed firmware/DT/profile combinations and checks GPIO protection.

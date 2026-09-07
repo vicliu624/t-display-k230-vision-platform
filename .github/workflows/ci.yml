@@ -102,6 +102,7 @@ jobs:
           [[ "$kernel_commit" =~ ^[0-9a-f]{40}$ ]]
           kernel_source="$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/build/linux-$kernel_commit"
           bash buildroot/tools/test-tdvp-cpu1-power-amp.sh "$kernel_source" --patched
+          bash buildroot/tools/test-tdvp-cpu1-clock-amp.sh "$kernel_source" --patched
           bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh "$kernel_source"
 
       - name: Build the bootable SD image
