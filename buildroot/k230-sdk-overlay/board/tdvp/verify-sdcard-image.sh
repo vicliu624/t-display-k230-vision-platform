@@ -425,6 +425,32 @@ require_fs_path "${BOOTFS}" '/k230-canmv-rm69a10.dtb'
 compare_bootfs_payload '/Image' "${BINARIES_DIR}/Image" 'Linux Image'
 compare_bootfs_payload '/k230-canmv-rm69a10.dtb' "${SELECTED_DTB}" 'RM69A10 DTB'
 bash "$(dirname "$0")/verify-uart1-dtb.sh" "${SELECTED_DTB}" "${BUILDROOT_HOST_DIR}/bin/fdtget"
+bash "$(dirname "$0")/verify-camera-dtb.sh" "${SELECTED_DTB}" "${BUILDROOT_HOST_DIR}/bin/fdtget"
+# Inspect the actual ext4 payload, not just TARGET_DIR or an install stamp.
+camera_image_isp="$(mktemp)"
+debugfs -R "dump /usr/bin/isp_media_server ${camera_image_isp}" "${ROOTFS}" >/dev/null 2>&1
+camera_image_hash="$(sha256sum "$camera_image_isp" | awk '{print $1}')"
+rm -f "$camera_image_isp"
+[ "$camera_image_hash" = 5d3e7bd8914cd2a3d9ca9da03a2743e7bd8ab24b9cb090929950b632ffb833ce ] || {
+	echo 'TDVP image guard: missing or non-pinned scalar ISP in rootfs' >&2
+	exit 1
+}
+require_fs_path "${ROOTFS}" '/usr/lib/libvvcam.so'
+require_fs_path "${ROOTFS}" '/usr/libexec/tdvp-camera-device'
+require_fs_path "${ROOTFS}" '/usr/libexec/tdvp-camera-capture-check'
+require_fs_path "${ROOTFS}" '/usr/libexec/tdvp-gc2093-chip-id'
+for camera_module in vvcam_mipi vvcam_vb vvcam_isp vvcam_video v4l2/isp/vvcam_isp_subdev; do
+	require_fs_path "${ROOTFS}" "/lib/modules/6.6.36/updates/${camera_module}.ko"
+done
+require_rootfs_content '/usr/lib/libvvcam.so' '/dev/i2c-4'
+require_rootfs_content '/lib/modules/6.6.36/updates/vvcam_mipi.ko' 'sensor clock mismatch before enable'
+require_rootfs_content '/usr/lib/udev/rules.d/70-tdvp-camera.rules' 'SYMLINK+="tdvp-camera/capture"'
+require_rootfs_fixed_line '/usr/lib/systemd/system/tdvp-camera-isp.service' 'DevicePolicy=closed'
+require_rootfs_fixed_line '/usr/lib/systemd/system/tdvp-camera-isp.service' 'ExecStart=/usr/bin/isp_media_server'
+require_rootfs_fixed_line '/usr/lib/systemd/system/tdvp-camera-modules.service' 'ExecStart=/usr/libexec/tdvp-camera-modules start'
+require_fs_symlink_target "${ROOTFS}" '/etc/systemd/system/multi-user.target.wants/tdvp-camera-isp.service' \
+	'../../../../usr/lib/systemd/system/tdvp-camera-isp.service'
+reject_fs_path "${ROOTFS}" '/etc/init.d/S31canaan_isp'
 for required_dtb_string in \
 	'canaan,external-i2s-output-default' \
 	'amp-shutdown-gpios' \

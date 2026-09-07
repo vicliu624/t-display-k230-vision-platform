@@ -1,7 +1,7 @@
 From: TDVP <tdvp@localhost>
 Subject: [PATCH] GC2093: bind to the verified TDVP I2C4 transport
 
-For the isolated camera candidate; not enabled by the production image.
+For the TDVP GC2093 package; requires the matching managed-clock board DTS.
 Based on pinned SDK 5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7.
 
 diff --git a/src/gc2093.c b/src/gc2093.c

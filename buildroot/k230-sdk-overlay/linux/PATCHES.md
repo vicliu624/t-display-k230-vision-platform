@@ -208,6 +208,14 @@ checks the effective driver source, kernel configuration and final DTB. The
 physical acceptance record contains a touch trace and a Wayland pointer/touch
 interaction on the selected output transform.
 
+## GC2093 camera
+
+`0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch` follows UART1 and adds
+only the physically validated I2C4, CSI2 and split managed MCLK configuration.
+Use it with the dedicated `tdvp-camera-isp` package, not the vendor OV5647/RVV
+runtime. The camera DTB guard checks phandle bindings and clock fields; merely
+finding the string `gc2093` is not evidence of integration or frame capture.
+
 ## Required Checks
 
 ```sh

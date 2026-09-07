@@ -42,6 +42,8 @@ cpu1_mailbox_patch_sha256 = 902867d70a488119bb23a8cb2548a37c0dd3ff80a0f970ced777
 cpu0_scalar_patch = buildroot/k230-sdk-overlay/linux/0064-tdvp-riscv-dts-use-scalar-cpu0.patch
 cpu0_scalar_patch_sha256 = 8c24150fc99ed092e8587208a9d65bd08a3e023787b7be1ea0fb384d3f6921eb
 nrf52840_uart1_patch = buildroot/k230-sdk-overlay/linux/0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch
+gc2093_dts_patch = buildroot/k230-sdk-overlay/linux/0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch
+gc2093_dts_patch_sha256 = acaaebce8137db9145944fdfee2869a496fd1c397d86d61b1335510b8b7110bb
 nrf52840_uart1_patch_sha256 = 76aa2e07a908b07e32617a68c061fc8fc37cdbe1f680ebf766fb47578c925ddc
 
 [cpu1_rtsmart]
@@ -91,6 +93,15 @@ sdk_package_path = buildroot-overlay/package/vg_lite
 runtime_library = /usr/lib/libvg_lite.so
 close_on_exec_patch = buildroot/k230-sdk-overlay/package/vg_lite/0001-tdvp-vglite-close-on-exec.patch
 close_on_exec_patch_sha256 = 3ba530078ea2a5cb6153c2657702d7ac0ab0cc16a1c3b136b612e144d4a00782
+
+[camera_isp]
+source = https://github.com/kendryte/k230_linux_sdk
+commit = 155359af908a5fb38e870e81ee82c91bceb30800
+version = 0.6.1
+binary_sha256 = 5d3e7bd8914cd2a3d9ca9da03a2743e7bd8ab24b9cb090929950b632ffb833ce
+sensor = gc2093
+adapter = user-space/tdvp-camera-isp/src/tdvp-vvcam-legacy-adapter.c
+vvcam_patch_hashes = user-space/tdvp-camera-isp/src/patches/SHA256SUMS
 
 [greetd]
 source = https://git.sr.ht/~kennylevinsen/greetd

@@ -57,6 +57,8 @@ require_absent_content() {
 }
 
 packages=(
+	tdvp-camera-isp
+	tdvp-camera-isp-runtime
 	gtk-layer-shell
 	labwc
 	swaylock
@@ -92,6 +94,9 @@ packages=(
 )
 
 required_config=(
+	BR2_PACKAGE_TDVP_CAMERA_ISP
+	BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME
+	BR2_PACKAGE_HOST_DTC
 	BR2_INIT_SYSTEMD
 	BR2_PACKAGE_SYSTEMD
 	BR2_PACKAGE_SEATD
@@ -319,6 +324,9 @@ require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/verify-b
 require_line "${STAGED_OVERLAY}/boot/uboot/u-boot-2022.10-overlay/board/canaan/common/sdk_autoconf.h" '#define CONFIG_LINUX_RUN_CORE_ID 0'
 require_file "${STAGED_OVERLAY}/linux/0064-tdvp-riscv-dts-use-scalar-cpu0.patch"
 require_file "${STAGED_OVERLAY}/linux/0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch"
+require_file "${STAGED_OVERLAY}/linux/0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch"
+require_line "${STAGED_OVERLAY}/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" 'BR2_PACKAGE_TDVP_CAMERA_ISP=y'
+require_line "${STAGED_OVERLAY}/configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig" '# BR2_PACKAGE_VVCAM is not set'
 require_file "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c"
 require_content "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/cpu1/tdvp_cpu1_service.c" 'INIT_APP_EXPORT(tdvp_cpu1_service_init);'
 require_file "${HARDWARE_SOURCE}/tdvp_cpu1_abi.h"

@@ -185,6 +185,14 @@ coordinates: controller-native 1060 x 2400
 kernel configuration 和最终 DTB。物理验收记录包含 touch trace，以及在选定 output transform
 上的 Wayland pointer/touch interaction。
 
+## GC2093 摄像头
+
+`0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch` 排在 UART1 之后，
+只加入已实测的 I2C4、CSI2 和拆分式内核 MCLK 配置。必须配合专用
+`tdvp-camera-isp` 包，不能继续使用 vendor OV5647/RVV runtime。
+camera DTB guard 检查实际 phandle 绑定和时钟字段；出现 `gc2093` 字符串
+本身不代表驱动已集成或已经能够取帧。
+
 ## Required Check
 
 ```sh

@@ -39,6 +39,10 @@ reject_buildroot_selection() {
 }
 
 require_file "$OUTPUT_DIR/.config"
+require_buildroot_selection BR2_PACKAGE_TDVP_CAMERA_ISP
+require_buildroot_selection BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME
+reject_buildroot_selection BR2_PACKAGE_VVCAM
+bash "$(dirname "$0")/../k230-sdk-overlay/board/tdvp/verify-camera-rootfs.sh" "$TARGET_DIR"
 for symbol in \
 	BR2_INIT_SYSTEMD \
 	BR2_PACKAGE_SYSTEMD \
@@ -170,6 +174,7 @@ dtb="$IMAGE_DIR/k230-canmv-rm69a10.dtb"
 	printf 'TDVP K230 preflight: RM69A10 board DTB is missing: %s\n' "$dtb" >&2
 	exit 1
 }
+bash "$(dirname "$0")/../k230-sdk-overlay/board/tdvp/verify-camera-dtb.sh" "$dtb" "$OUTPUT_DIR/host/bin/fdtget"
 for compatible in k230-gnne k230-ai2d; do
 	strings "$dtb" | grep -Fxq "$compatible" || {
 		printf 'TDVP K230 preflight: %s is missing from %s\n' "$compatible" "$dtb" >&2

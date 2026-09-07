@@ -33,6 +33,7 @@ WORKTREE="$(realpath -m "$1")"
 SDK_COMMIT="5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7"
 PROFILE="k230_canmv_t_display_rm69a10_labwc_desktop_defconfig"
 COMPONENTS=(
+	"tdvp-camera-isp"
 	"tdvp-greeter"
 	"tdvp-kpu-acceptance"
 	"tdvp-labwc-desktop"

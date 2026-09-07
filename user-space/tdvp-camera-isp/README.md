@@ -1,11 +1,14 @@
 # CPU0 camera ISP integration work
 
-This directory is **not yet enabled in the image**. It contains a scalar-ISP
-sensor ABI adapter, a board-specific GC2093 transport, candidate device-tree
-configuration and VVCAM lifecycle patches. **Physical GC2093 identification
+The product profile now selects the dedicated GC2093 camera packages, replacing
+vendor VVCAM/OV5647. This is **not a claim that a new complete image has been
+built or deployed**. It contains a scalar-ISP sensor ABI adapter, a board-specific
+transport, managed device-tree configuration and VVCAM lifecycle patches.
+**Physical GC2093 identification
 and bounded 1920x1080 NV12 frame capture passed on 2026-09-07**, including two
 complete module load/capture/unload cycles. This is not yet a production image
-integration, Wayland preview, VGLite coexistence or long-duration acceptance.
+deployment, VGLite coexistence or long-duration acceptance. The subsequent
+package build and bounded Wayland preview results are recorded below.
 
 ## Pinned candidate and reason for the adapter
 
@@ -75,7 +78,7 @@ adapter, or replace the existing ISP binary.
 
 ## Board candidate and physical identification
 
-Apply all `patches/0001-*.patch` through `0005-*.patch` in order to a **private copy** of the
+Apply all `src/patches/0001-*.patch` through `0005-*.patch` in order to a **private copy** of the
 pinned SDK `buildroot-overlay/package/vvcam`; do not patch an existing SDK
 build directory in place. Compile the shared plugin from:
 
@@ -217,7 +220,7 @@ fresh with the matching Ubuntu 24.04 / SDK CPU0 toolchain.
 | MIPI module | `3565e0262f2a1e1c08279222085ff750932f1abeb5dd2493330758bd69c9cf49` |
 | Capture checker | `5f5c4e4ca7e44b039da5cd43ad14cc2f867595f34582e9fcf144fe39376eee3d` |
 
-`tests/v4l2-capture-check.c` uses only QUERYCAP, S_FMT and the MMAP streaming
+`src/tdvp-camera-capture-check.c` uses only QUERYCAP, S_FMT and the MMAP streaming
 path. It refuses non-VVCAM devices, unexpected stride/size, error buffers,
 invalid/non-increasing timestamps and discontinuous sequences. It captures
 60 frames and optionally saves the last raw frame with exclusive creation.
@@ -234,21 +237,94 @@ not over the system ISP/plugin/modules. Test daemons and modules were stopped
 and unloaded. The temporary boot-recovery unit was removed after verifying
 that the SD boot DTB was restored to the UART1 baseline.
 
-## Remaining integration requirements
+## Production packaging
 
-1. Build an isolated, pinned scalar-ISP plus matching sensor-plugin package;
-   retain the tested clock ownership and device restrictions. Do not ship
-   the incompatible modern RVV ISP on CPU0.
-2. Promote the validated I2C/clock/CSI2 candidate and all five VVCAM patches
-   into the production package and ordered Linux queue with source/hash locks.
-   Preserve CPU1's reservation and all Linux display, GPU, SD, keyboard and
-   radio ownership, including on incremental builds.
+`tdvp-camera-isp-runtime` downloads the exact upstream scalar executable through
+Buildroot's normal hash-checked download path. It is a separate package because
+Buildroot local-source packages skip the normal download/patch graph. The
+profile excludes **only** `isp_media_server` from stripping so the audited SHA256
+remains valid at startup and inside the final ext4 image.
+
+`tdvp-camera-isp` stages this directory's `src`, checks the five patch hashes,
+refreshes its own private VVCAM copy on every rsync (without rsync's `-u`), applies
+the queue with zero fuzz, and uses Buildroot's actual kernel-module backend.
+It installs only the GC2093 legacy plugin, five modules and diagnostic helpers.
+The vendor `BR2_PACKAGE_VVCAM` must be disabled; its binary/plugin/deb recipe is
+not another owner of the same output paths. Source changes participate in the
+existing stage manifest and incremental package-clean contract.
+
+Linux patch `0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch` includes the
+validated camera DT configuration after the complete CPU0/mailbox/UART1 queue.
+The post-build hook removes the vendor overlay's additive `S31canaan_isp`.
+`tdvp-camera-modules.service` loads the guarded MIPI driver, verifies chip ID,
+then loads the remaining modules. It rejects pre-existing VVCAM modules and
+cleans up its own partially loaded queue on failure. The ISP service is only a
+`multi-user.target` **want**, not a desktop/SSH requirement. Its closed device
+policy permits named camera/I2C devices and never `/dev/mem` or whole classes.
+
+The scalar daemon requires the VVCAM graph at `/dev/media0`; startup validates
+its media-device model and fails closed if that assignment changes. Udev gives
+the VVCAM nodes stable identities. `tdvp-camera-device` validates the primary
+capture interface; it does not mistake `/dev/video0` (MVX codec) for a sensor.
+The desktop launcher selects that device and Wayland SHM preview at NV12 1080p.
+Discovery/service availability is not successful frame-capture acceptance.
+
+Capture stays at 1920x1080 NV12, while the preview filter converts/copies it to
+640x360 BGRA for the small display. The final launcher disables threaded
+demuxing/readahead and uses separate `--demuxer-lavf-o-add` options: assigning
+`--demuxer-lavf-o` would overwrite the low-latency profile's `fflags=+nobuffer`.
+The original full-resolution path retained MMAP packet buffers and logged
+`Bad file descriptor` while returning them after the V4L2 device had closed.
+The final actual launcher completed a bounded 90-frame Wayland SHM run without
+those ownership/descriptor warnings or MPV error-level messages. This is not
+a 30 FPS preview or pixel-perfect visual-acceptance claim: playback took about
+6.3 seconds excluding startup/shutdown, and the ISP still logged occasional
+dequeue return `16` during slower consumer operation. G_PARM remains unsupported.
+
+Run `bash buildroot/tools/test-tdvp-camera-package.sh` for source hashes,
+production prepare-hook replay **twice**, and image/service contract checks.
+Long-duration operation, cold boot and VGLite coexistence still require physical
+validation; the bounded package/preview checks below do not replace those gates.
+
+### Package validation on 2026-09-07
+
+An independent copy of the prepared SDK output was used in Ubuntu 24.04.4;
+the original SDK output was mounted read-only. Actual Buildroot Kconfig,
+download/hash verification, generic-package and kernel-module backends built
+and installed both packages. A clean package build and a subsequent
+`tdvp-camera-isp-reconfigure` both passed. The final rootfs camera guard,
+41-patch validation, real queue reconciliation, renderer stack lock and image
+source contract passed. The real DTB passed the camera guard and all ten
+negative mutations, as well as the UART1 guard. Its SHA256 is **identical** to
+the physically validated candidate:
+`2d273d6f9871f000922db3c8ab723d6ae48db40b42c156411c92dc85c6ac4ce2`.
+
+Actual installed package artifacts were copied to a separate board directory,
+not over system files. The exact units were loaded from `/run` with read-only
+test bind mounts and an extra time limit. In the final two cycles, 60 complete
+1080p NV12 frames passed at **29.956 / 30.013 FPS**, sequence `0..59`. The actual
+desktop launcher then completed the 90-frame preview as user `tdvp`. Stopping
+the module unit stopped the ISP first, unloaded all five modules and returned
+MCLK gate state to `0x003a7708`. No new kernel lifecycle WARNING/BUG/Oops/Call
+Trace appeared. CPU1 remained ready at sequence `1401/1401`; greetd and Labwc
+were not restarted. Temporary units and udev rules were removed afterward.
+
+Evidence: `.tmp/device-validation/camera-package/` and the board's
+`/var/lib/tdvp-repair-backups/20260907/camera-candidate/package-v4/`. No SD boot
+file or production acceptance marker was changed by these package tests.
+
+## Remaining release requirements
+
+1. Validate cold-boot startup in the complete image, including final stripping,
+   rootfs and SD-image guards; the isolated package build is not that image.
+2. Recheck CPU1/display/keyboard/radio ownership after persistent deployment,
+   including a missing/disconnected camera and ISP restart behavior.
 3. Implement truthful camera device discovery/status and test the old daemon's
    unsupported controls, crop/selection and frame-interval API behavior.
 4. Test camera preview through Wayland alongside VGLite and CPU1, including
    process restart and longer-running buffer/clock lifecycle checks.
-5. Only after this works, enable the service/package, update hardware status
-   and produce a complete image. No fake camera node or acceptance marker.
+5. Only after this works, update hardware status and produce/deploy a complete
+   image. No fake camera node or acceptance marker.
 
 Moving the camera to CPU1 is a separate fallback, not an action taken here.
 The donor MPP startup initializes VO, audio, DMA and other shared peripherals;

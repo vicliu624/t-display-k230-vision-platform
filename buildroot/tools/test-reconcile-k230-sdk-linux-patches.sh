@@ -59,7 +59,8 @@ for active_patch in \
 	0062-tdvp-vglite-yield-after-early-completion.patch \
 	0063-tdvp-cpu1-rtsmart-mailbox.patch \
 	0064-tdvp-riscv-dts-use-scalar-cpu0.patch \
-	0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch; do
+	0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch \
+	0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch; do
 	cmp -s "${OVERLAY_DIR}/${active_patch}" "${PATCH_DIR}/${active_patch}" || {
 		printf '%s\n' "test-reconcile-k230-sdk-linux-patches: FAIL active patch differs: ${active_patch}" >&2
 		exit 1

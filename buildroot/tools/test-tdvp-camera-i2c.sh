@@ -24,8 +24,8 @@ cp "$vendor_dir/v4l2/isp/vvcam_isp_driver.c" \
     "$vendor_dir/v4l2/isp/vvcam_isp_platform.c" "$test_dir/v4l2/isp/"
 # Exercise the entire actual candidate queue against pinned source, including
 # the kernel clock and completion patches, without building a kernel in CI.
-bash "$SCRIPT_DIR/validate-k230-sdk-linux-patches.sh" "$source_dir/patches"
-for patch_file in "$source_dir"/patches/*.patch; do
+bash "$SCRIPT_DIR/validate-k230-sdk-linux-patches.sh" "$source_dir/src/patches"
+for patch_file in "$source_dir"/src/patches/*.patch; do
     patch --batch --fuzz=0 -d "$test_dir" -p1 < "$patch_file"
 done
 "${CC:-cc}" -std=gnu11 -Wall -Wextra -O2 -fPIC -shared \
@@ -42,7 +42,7 @@ done
 
 # Compile the real capture checker, but never open a host camera in CI.
 "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -O2 \
-    "$source_dir/tests/v4l2-capture-check.c" -o "$test_dir/v4l2-capture-check"
+    "$source_dir/src/tdvp-camera-capture-check.c" -o "$test_dir/v4l2-capture-check"
 capture_status=0
 "$test_dir/v4l2-capture-check" /dev/null || capture_status=$?
 if [ "$capture_status" -ne 1 ]; then

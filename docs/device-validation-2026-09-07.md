@@ -243,6 +243,40 @@ FFmpeg 另一次正常采集三帧退出，PTS 为 0 / 33972 / 66658 微秒，�
 下一步是正式 package / DTB 队列与增量构建集成，以及 Wayland/VGLite 共存测试，
 不是继续把“只存在文件或节点”当作相机已经交付。
 
+## 正式相机包与桌面入口验证
+
+后续实现了独立的 `tdvp-camera-isp-runtime` 和 `tdvp-camera-isp` 包，替换旧的
+VVCAM/OV5647 配置。前者下载并校验官方标量 ISP，后者构建 GC2093 ABI 插件和
+五个内核模块。启动前校验 ISP 哈希，systemd 只允许访问指定的相机/I²C 设备，
+不允许 `/dev/mem`。post-build 清除 additive vendor overlay 遗留的 `S31canaan_isp`。
+真实构建产物与最终 ext4 镜像均增加相机文件、哈希、模块和服务启用检查。
+
+在 Ubuntu 24.04.4 中复制独立 SDK output、只读挂载原 SDK，使用真实 Buildroot
+Kconfig、generic-package 和 kernel-module 后端完成 clean build、install 和
+reconfigure/rebuild。不是只调用一次交叉编译器。实际 target 相机检查通过，
+41 个 Linux patch、真实 reconciliation、renderer stack lock、镜像源文件合同
+也通过。新增 `0066` 生成的 DTB 与先前已实测的候选 **字节完全相同**：
+`2d273d6f9871f000922db3c8ab723d6ae48db40b42c156411c92dc85c6ac4ce2`。
+真实 DTB 的相机 guard、10 个负向变异及 UART1 guard 均通过。
+
+真实安装产物在设备独立目录中测试，使用 `/run` 下的正式 unit 和只读 bind mount，
+没有覆盖设备原系统文件或改写 SD boot DTB。最终两轮分别取得 60 帧、序号 0..59，
+1080p NV12 实测 **29.956 / 30.013 FPS**。停止 module unit 会先停止 ISP，
+全部模块卸载、MCLK 门控关闭，没有新增内核生命周期告警，greetd/Labwc 没有重启。
+
+桌面入口不再打开 MVX 编解码器 `/dev/video0`，而是查询真实 VVCAM capture 节点。
+原有 MPV 参数覆盖了 low-latency 的 `fflags=+nobuffer`，并在关闭相机后继续归还
+预读缓存，出现 descriptor/ownership 警告。最终入口保留低延迟选项、禁用线程预读，
+将全分辨率采集转换为 640×360 BGRA 预览。以 `tdvp` 用户执行真实启动器，
+完成 90 帧 Wayland SHM 播放，退出码 0，未出现上述缓冲区警告或 MPV error 级日志。
+
+**限制仍明确保留：** 这不是完整镜像/开机验收，也不是 VGLite 共存或像素级验收。
+预览播放阶段约 6.3 秒，不宣称 30 FPS；ISP 在慢消费者期间仍有 dequeue ret=16
+日志，`VIDIOC_G_PARM` 未实现告警也仍存在。长期稳定性、缺失摄像头、进程重启
+和正式镜像启动还需验证。测试结束已移除临时 units/udev 规则并卸载所有相机模块；
+CPU1 仍 ready、序列 `1401/1401`，当前设备的持久化系统文件保持原状。
+原始日志保存在 `.tmp/device-validation/camera-package/`。
+
 ## 主机验证与回退
 
 局域网主机的独立 Ubuntu **24.04.4** 容器（Python **3.12.3**）通过 CPU1、LoRa、

@@ -102,7 +102,8 @@ for expected_patch in \
 	0062-tdvp-vglite-yield-after-early-completion.patch \
 	0063-tdvp-cpu1-rtsmart-mailbox.patch \
 	0064-tdvp-riscv-dts-use-scalar-cpu0.patch \
-	0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch; do
+	0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch \
+	0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch; do
 	[ -f "$OVERLAY_DIR/$expected_patch" ] || fail "overlay is missing $expected_patch"
 	# The vendor sync is intentionally additive so it retains SDK package
 	# recipes that TDVP does not own.  That also means a vendor file with the

@@ -104,12 +104,14 @@ while IFS= read -r -d '' file; do
     fi
 done < <(find "${TARGET_DIR}/etc" -type f -print0)
 
-# Keep the vendor camera/ISP service in the image. Remove only the optional
-# ADB/MTP and plaintext Telnet services from the target service inventory.
+# Vendor rootfs overlay is copied after packages, also on incremental builds.
+# Retire its unsupervised ISP; TDVP owns the scalar runtime and GC2093 modules.
 rm -f \
+	"${TARGET_DIR}/etc/init.d/S31canaan_isp" \
 	"${TARGET_DIR}/etc/init.d/S40network" \
     "${TARGET_DIR}/etc/init.d/S41adb_mtp" \
     "${TARGET_DIR}/etc/init.d/S50telnet"
+bash "$(dirname "$0")/verify-camera-rootfs.sh" "${TARGET_DIR}"
 
 # The product image uses OpenSSH for recovery. The root password comes from
 # BR2_TARGET_GENERIC_ROOT_PASSWD, and the final target writes the matching

@@ -13,6 +13,8 @@ BR2_TOOLCHAIN_EXTERNAL_FORTRAN=y
 BR2_TOOLCHAIN_EXTERNAL_OPENMP=y
 # CPU1 owns RVV; Linux userspace executes on the scalar CPU0.
 BR2_TARGET_OPTIMIZATION="-mcpu=c908 -mtune=c908"
+# Preserve the exact audited scalar ISP executable and its startup hash check.
+BR2_STRIP_EXCLUDE_FILES="isp_media_server"
 BR2_DL_DIR="$(TOPDIR)/../../dl"
 # Release candidates must be generated from one stable ext4 worktree/output
 # location. This removes build timestamps and host identity from Buildroot,
@@ -58,8 +60,8 @@ BR2_PACKAGE_RTL8189FS=y
 BR2_PACKAGE_LIBMMZ=y
 BR2_PACKAGE_LIBNNCASE=y
 BR2_PACKAGE_AI2D_KPU=y
-BR2_PACKAGE_VVCAM=y
-BR2_PACKAGE_VVCAM_DEF_SENSOR="ov5647"
+# BR2_PACKAGE_VVCAM is not set
+BR2_PACKAGE_TDVP_CAMERA_ISP=y
 BR2_PACKAGE_ALSA_UTILS=y
 BR2_PACKAGE_ALSA_UTILS_AMIXER=y
 BR2_PACKAGE_ALSA_UTILS_APLAY=y

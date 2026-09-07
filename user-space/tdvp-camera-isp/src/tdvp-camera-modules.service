@@ -1,0 +1,12 @@
+[Unit]
+Description=TDVP GC2093 managed clocks and VVCAM modules
+After=systemd-udevd.service
+Before=tdvp-camera-isp.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/tdvp-camera-modules start
+ExecStop=/usr/libexec/tdvp-camera-modules stop
+TimeoutStartSec=20
+TimeoutStopSec=15

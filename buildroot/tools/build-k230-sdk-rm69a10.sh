@@ -49,6 +49,7 @@ RENDERER_STACK_LOCK_CHECK="$SCRIPT_DIR/verify-tdvp-renderer-stack-lock.sh"
 PAGE_FLIP_CONTRACT_CHECK="$SCRIPT_DIR/verify-k230-sdk-pageflip-contract.sh"
 DISPLAY_SMOKE_CLEANUP_CHECK="$SCRIPT_DIR/test-tdvp-display-smoke-cleanup.sh"
 USERSPACE_COMPONENTS=(
+	"tdvp-camera-isp"
 	tdvp-greeter
 	tdvp-kpu-acceptance
 	tdvp-labwc-desktop
@@ -427,6 +428,9 @@ BUILD_INPUT_STAMP="$OUTPUT_DIR/.tdvp-product-input.sha256"
 PACKAGE_CLEAN_STAMP="$OUTPUT_DIR/.tdvp-product-package-clean.sha256"
 
 required_product_config=(
+	BR2_PACKAGE_HOST_DTC
+	BR2_PACKAGE_TDVP_CAMERA_ISP
+	BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME
 	BR2_INIT_SYSTEMD
 	BR2_PACKAGE_SYSTEMD
 	BR2_PACKAGE_SEATD
@@ -505,6 +509,8 @@ product_config_matches_contract() {
 	for symbol in "${required_product_config[@]}"; do
 		grep -Fqx "${symbol}=y" "$config" || return 1
 	done
+	! grep -Fqx 'BR2_PACKAGE_VVCAM=y' "$config" || return 1
+	grep -Fqx 'BR2_STRIP_EXCLUDE_FILES="isp_media_server"' "$config" || return 1
 }
 
 verify_product_config() {
@@ -518,6 +524,10 @@ verify_product_config() {
 			missing=1
 		fi
 	done
+	if ! product_config_matches_contract "$config"; then
+		printf '%s\n' 'TDVP SDK build: camera profile must replace vendor VVCAM and preserve the pinned scalar ISP bytes' >&2
+		missing=1
+	fi
 	[ "$missing" -eq 0 ] || {
 		printf '%s\n' 'TDVP SDK build: refusing to build an incomplete product profile' >&2
 		exit 1
@@ -657,6 +667,8 @@ if [ "$product_inputs_changed" = "1" ] && [ "$image_rebuild_mode" != "1" ]; then
 	# changes. This keeps incremental builds reproducible without rebuilding the
 	# vendor toolchain or unrelated SDK packages.
 	product_packages=(
+		tdvp-camera-isp
+		tdvp-camera-isp-runtime
 		gtk-layer-shell
 		wlroots
 		labwc

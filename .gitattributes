@@ -20,3 +20,4 @@ Makefile text eol=lf
 /user-space/**/src/autostart text eol=lf
 /user-space/**/src/environment text eol=lf
 /user-space/**/src/tdvp-* text eol=lf
+/user-space/tdvp-camera-isp/src/** text eol=lf
