@@ -2,6 +2,7 @@
 
 #include "battery.hpp"
 #include "bluetooth.hpp"
+#include "cpu1_vision_status.hpp"
 #include "dock.hpp"
 #include "lora_status.hpp"
 #include "network.hpp"
@@ -100,16 +101,6 @@ std::optional<bool> pcm_muted(const std::string &playback)
     if (playback.find("[on]") != std::string::npos)
         return false;
     return std::nullopt;
-}
-
-bool any_camera()
-{
-    for (const std::string &entry : paths::children("/sys/class/video4linux")) {
-        const std::string name = paths::read("/sys/class/video4linux/" + entry + "/name");
-        if (!name.empty() && name.find("mvx") == std::string::npos)
-            return true;
-    }
-    return false;
 }
 
 std::string backlight_percent(std::initializer_list<const char *> needles)
@@ -283,8 +274,7 @@ State collect_state()
     put(&state, "muted", muted.value_or(false));
     put(&state, "audio_volume_control_available", volume_percent.has_value() && muted.has_value());
 
-    const bool camera = any_camera();
-    transport(&state, "camera", camera, camera, camera);
+    append_cpu1_vision_state(&state);
 
     const bool rtc = directory_has("/sys/class/rtc", "rtc");
     transport(&state, "rtc", rtc, rtc, rtc);
@@ -306,50 +296,6 @@ State collect_state()
         state["battery_temperature_deci_celsius"] = std::to_string(battery.temperature_deci_celsius);
     }
 
-    const bool gnne_driver = paths::exists("/sys/class/k230_gnne_class/k230-gnne");
-    const bool ai2d_driver = paths::exists("/sys/class/k230_ai2d_class/k230-ai2d");
-    const bool gnne_device = paths::exists("/dev/k230-gnne");
-    const bool ai2d_device = paths::exists("/dev/k230-ai2d");
-    const bool kpu_reference_runtime =
-        paths::executable("/root/app/ai2d_kpu/ai2d_kpu.elf") &&
-        paths::exists("/root/app/ai2d_kpu/test.kmodel") &&
-        paths::exists("/root/app/ai2d_kpu/ai2d_input.bin") &&
-        paths::exists("/root/app/ai2d_kpu/input.bin") &&
-        paths::exists("/root/app/ai2d_kpu/result.bin");
-    transport(&state, "kpu", gnne_device && ai2d_device, gnne_driver && ai2d_driver,
-              kpu_reference_runtime);
-    put(&state, "kpu_gnne_device", gnne_device);
-    put(&state, "kpu_ai2d_device", ai2d_device);
-    put(&state, "kpu_kernel_ready", gnne_driver && ai2d_driver && gnne_device && ai2d_device);
-    put(&state, "kpu_reference_runtime_available", kpu_reference_runtime);
-    state["kpu_runtime"] = kpu_reference_runtime ? "nncase-k230" : "";
-    const bool kpu_acceptance_service_active =
-        paths::service_active("tdvp-kpu-acceptance.service");
-    const bool kpu_acceptance_passed =
-        paths::exists("/run/vicliu-pocket-linux-hardware/kpu-acceptance.pass");
-    const bool kpu_acceptance_skipped =
-        paths::exists("/run/vicliu-pocket-linux-hardware/kpu-acceptance.skipped");
-    put(&state, "kpu_acceptance_service_active", kpu_acceptance_service_active);
-    put(&state, "kpu_acceptance_passed", kpu_acceptance_passed);
-    put(&state, "kpu_acceptance_skipped", kpu_acceptance_skipped);
-    if (!gnne_driver || !ai2d_driver || !gnne_device || !ai2d_device) {
-        state["kpu_acceptance_state"] = "kernel-unavailable";
-    } else if (!kpu_reference_runtime) {
-        state["kpu_acceptance_state"] = "runtime-unavailable";
-    } else if (kpu_acceptance_passed) {
-        state["kpu_acceptance_state"] = "passed";
-    } else if (kpu_acceptance_skipped) {
-        state["kpu_acceptance_state"] = "skipped";
-    } else if (kpu_acceptance_service_active) {
-        state["kpu_acceptance_state"] = "running";
-    } else {
-        state["kpu_acceptance_state"] = "pending-or-failed";
-    }
-    if (kpu_acceptance_passed) {
-        state["kpu_acceptance"] = "passed";
-        put(&state, "kpu_functional", true);
-        put(&state, "kpu_active", true);
-    }
 
     const std::string online = paths::read("/sys/devices/system/cpu/online");
     state["cpu_physical_core_count"] = "2";

@@ -11,6 +11,7 @@ set(VPL_WARNING_FLAGS -Wall -Wextra -Werror)
 add_library(vpl-hardware-core STATIC
     hardware/battery.cpp
     hardware/bluetooth.cpp
+    hardware/cpu1_vision_status.cpp
     hardware/controls.cpp
     hardware/daemon.cpp
     hardware/dock.cpp

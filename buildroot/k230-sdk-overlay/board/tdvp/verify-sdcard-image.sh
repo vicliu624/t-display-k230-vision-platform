@@ -436,6 +436,10 @@ bash "$(dirname "$0")/verify-uart1-dtb.sh" "${SELECTED_DTB}" "${BUILDROOT_HOST_D
 # The pair gate above checks the actual ownership DT. Inspect the real rootfs
 # for the bridge and absence of all retired Linux AI/ISP owners as well.
 bash "$(dirname "$0")/cpu1/vision/verify-rootfs-image.sh" "${ROOTFS}"
+require_rootfs_content '/usr/local/bin/vpl-hwctl' '/sys/class/misc/tdvp-vision/status'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1-model-unconfigured'
+reject_rootfs_content '/usr/local/bin/vpl-hwctl' '/root/app/ai2d_kpu'
+reject_rootfs_content '/usr/local/bin/vpl-hwctl' 'tdvp-kpu-acceptance.service'
 for required_dtb_string in \
 	'canaan,external-i2s-output-default' \
 	'amp-shutdown-gpios' \

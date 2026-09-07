@@ -428,6 +428,41 @@ The recorded cross-built artifact hashes are:
 These are component validation artifacts, not a complete SD image, deployment
 or proof of sensor/KPU function. VGLite runtime implementation is unchanged.
 
+## Read-only Linux hardware status
+
+The bridge exposes `/sys/class/misc/tdvp-vision/status` as a read-only,
+version-1 key/value record. It reports ownership state/error, the observed
+vision worker state/error, whether a stream reader is open, successful frame
+deliveries, and sampled captured/published/dropped counters. The observer
+requires this boot's granted CPU1 cookie and an advancing worker heartbeat;
+an old epoch, malformed layout, heartbeat rollback or ten-second stall cannot
+look like a live stream. Ownership freshness is checked separately. Counters
+are telemetry, not a coherent frame descriptor or an image-quality proof.
+
+Reading status never opens the capture stream, writes a mailbox/command,
+acknowledges a slot or clears a fault. The callback uses a nonblocking mutex
+attempt and returns EAGAIN if busy, so the hardware publisher cannot wait
+indefinitely behind an application's stalled user copy. Initial ownership
+publication uses the same lock as status reads and stream opens.
+
+The Linux hardware publisher now consumes this record, not V4L2/old Linux
+KPU devices or old camera/KPU pass markers. It distinguishes CPU1 initialized,
+vision worker available/running and frame counters from physical acceptance.
+KPU model availability remains false with `cpu1-model-unconfigured` until a
+CPU1 model service is actually integrated. It does not claim ASR or successful
+inference from driver initialization. Unit tests exercise the real observer
+and parser, and the bridge plus complete hardware service cross-build on
+Ubuntu 24.04. Board runtime behavior remains an acceptance requirement.
+
+The final telemetry-source validation rebuilt the actual RISC-V module and
+the complete hardware service with networking disabled, then passed the
+real-module ext4, reused-target cleanup, renderer and idle/PAM regressions.
+Its bridge module SHA-256 is
+`c02aeb6b2c8a4e38b16f034d57c1496949c4ad5be2fd9442ced0eb80e4932cbd`;
+`vpl-hwctl` is
+`949217beb1fec484e8a81d9fd8b5b95f2a521797c104096f4741e6fd229e29c3`.
+These hashes identify component evidence, not a released or deployed image.
+
 ## Remaining release requirements
 
 1. Validate the installed GPIO semaphore, power retention and shared CMU/DDR/
@@ -440,8 +475,8 @@ or proof of sensor/KPU function. VGLite runtime implementation is unchanged.
    check AI memory/SRAM use, interrupt/error behavior and FFT numerical
    references. Registered drivers and a frame test are not AI subsystem
    acceptance. No ASR model has been selected or verified.
-4. Update Linux hardware status reporting to describe CPU1 ownership and live
-   service state, not the retired Linux ISP/KPU devices or old pass markers.
-   Do not report an initialized engine as a successful inference.
+4. Validate the new read-only status interface on the paired board, including
+   missing/stalled worker and active/idle streams. Do not report an initialized
+   engine as successful inference or delivered bytes as image-quality acceptance.
 5. Build and verify the complete Buildroot/PR SD image, then perform hardware
    acceptance. Until then this is not a validated replacement image.

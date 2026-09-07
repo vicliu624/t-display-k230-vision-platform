@@ -7,6 +7,7 @@
 #include <linux/io.h>
 #include <linux/jiffies.h>
 #include <linux/kref.h>
+#include <linux/ktime.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -19,6 +20,7 @@
 #include "tdvp_vision_abi.h"
 #include "tdvp_cpu1_vision_layout.h"
 #include "tdvp_cpu1_owner.h"
+#include "tdvp_vision_observer.h"
 
 #define VISION_FRAME_BYTES (1920U * 1080U * 3U / 2U)
 #define VISION_WATCHDOG (10 * HZ)
@@ -26,6 +28,7 @@
 
 struct vision_device {
     struct tdvp_linux_owner owner;
+    struct tdvp_vision_observer observer;
     struct miscdevice misc;
     struct kref ref;
     struct mutex lock;
@@ -35,6 +38,7 @@ struct vision_device {
     void __iomem *slots;
     void *record;
     u64 epoch, released, heartbeat, peer_heartbeat;
+    u64 frames_delivered;
     unsigned long peer_seen;
     bool opened, dead, ready;
     int fault;
@@ -91,6 +95,19 @@ static void vision_tick(struct work_struct *work)
         ownership = tdvp_linux_owner_poll(&vision->owner);
         if (ownership && ownership != -EAGAIN)
             vision->fault = ownership;
+        if (!ownership) {
+            struct tdvp_vision_producer sample;
+
+            /* Telemetry never acknowledges a slot or starts a camera. Check
+             * the epoch around the copy; counters are sampled statistics,
+             * not a transactionally consistent frame descriptor. */
+            memcpy_fromio(&sample, &vision->control->producer, sizeof(sample));
+            rmb();
+            if (sample.epoch != readq(&vision->control->producer.epoch))
+                sample.epoch = 0;
+            tdvp_vision_observe(&vision->observer, &sample,
+                               vision->owner.session.observed_cookie, ktime_to_ms(ktime_get()));
+        }
         if (vision->opened) {
             vision_refresh(vision);
             if (vision->fault)
@@ -226,6 +243,8 @@ static ssize_t vision_read(struct file *file, char __user *buffer, size_t count,
     mb();
     writeq(sequence, &vision->control->consumer.released);
     vision->released = sequence;
+    if (vision->frames_delivered != ~0ULL)
+        ++vision->frames_delivered;
     vision_refresh(vision);
     result = bytes;
 unlock:
@@ -275,6 +294,45 @@ static const struct file_operations vision_fops = {
     .llseek = no_llseek,
 };
 
+/* One coherent Linux-side status record. Reading this file must not open the
+ * stream, poll the ownership protocol (which writes OFFER/heartbeat), clear a
+ * fault, or operate any hardware. Busy readers get EAGAIN, never an unbounded
+ * status wait behind a stalled application's copy_to_user fault. */
+static ssize_t status_show(struct device *dev, struct device_attribute *attr, char *buffer)
+{
+    struct miscdevice *misc = dev_get_drvdata(dev);
+    struct vision_device *vision = container_of(misc, struct vision_device, misc);
+    const struct tdvp_vision_producer *sample = &vision->observer.sample;
+    const char *ownership_state;
+    u64 now = ktime_to_ms(ktime_get());
+    unsigned int stream_state;
+    int ownership;
+    ssize_t bytes;
+
+    if (!mutex_trylock(&vision->lock))
+        return -EAGAIN;
+    ownership = tdvp_linux_owner_status(&vision->owner);
+    ownership_state = vision->dead ? "unavailable" :
+        (ownership == -EAGAIN ? "pending" : (ownership ? "fault" : "ready"));
+    if (!ownership && (now < vision->owner.session.peer_seen ||
+        now - vision->owner.session.peer_seen >= TDVP_OWNER_PEER_MS))
+        ownership_state = "stale";
+    stream_state = tdvp_vision_observer_state(&vision->observer, now);
+    bytes = sysfs_emit(buffer,
+        "status_version=1\nresource_owner=cpu1\nownership_contract=2\n"
+        "ownership_state=%s\nownership_error=%d\nvision_state=%s\nvision_error=%d\n"
+        "reader_open=%u\nframes_delivered=%llu\ncaptured=%llu\npublished=%llu\ndropped=%llu\n",
+        ownership_state, ownership, tdvp_vision_observer_name(stream_state),
+        vision->fault ? vision->fault : sample->fault, vision->opened,
+        vision->frames_delivered, (unsigned long long)sample->captured,
+        (unsigned long long)sample->published, (unsigned long long)sample->dropped);
+    mutex_unlock(&vision->lock);
+    return bytes;
+}
+static DEVICE_ATTR_RO(status);
+static struct attribute *vision_attrs[] = { &dev_attr_status.attr, NULL };
+ATTRIBUTE_GROUPS(vision);
+
 static int vision_probe(struct platform_device *pdev)
 {
     struct vision_device *vision;
@@ -303,6 +361,7 @@ static int vision_probe(struct platform_device *pdev)
     vision->misc.fops = &vision_fops;
     vision->misc.mode = 0600; /* image udev rule grants the video group */
     vision->misc.parent = &pdev->dev;
+    vision->misc.groups = vision_groups;
     result = misc_register(&vision->misc);
     if (result)
         goto failed;
@@ -311,7 +370,11 @@ static int vision_probe(struct platform_device *pdev)
      * From OFFER onward even a failed handshake must retain all suppliers.
      */
     __module_get(THIS_MODULE);
+    /* misc_register already exposes the read-only status file. Serialize
+     * initial ownership publication with those readers and stream opens. */
+    mutex_lock(&vision->lock);
     tdvp_linux_owner_start(&vision->owner);
+    mutex_unlock(&vision->lock);
     schedule_delayed_work(&vision->work, VISION_TICK);
     dev_info(&pdev->dev, "CPU1 ownership OFFER; boot-lifetime resource holds, asynchronous frame bridge\n");
     return 0;
