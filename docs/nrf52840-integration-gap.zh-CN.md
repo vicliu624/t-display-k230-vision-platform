@@ -1,7 +1,8 @@
 # nRF52840：当前镜像的集成缺口与验证边界
 
-核对日期：2026-09-08。设备是新卡 `a57e99c`；背光程序的独立修复不改变
-该卡的 DTB、Linux、CPU1 或 nRF 固件。本记录不是蓝牙验收通过报告。
+核对日期：2026-09-08。初次检查基于新卡 `a57e99c`；随后 CPU1 与 Linux bridge
+已做配对远端升级，下面分别记录初次检查和升级后的复查。nRF 固件未改写。
+本记录不是蓝牙验收通过报告。
 
 ## 两个独立问题
 
@@ -49,6 +50,48 @@
 该查询程序只做受控现场诊断，不作为后台服务或自动探测固件的交付实现。
 需要通过实物确认或 nRF USB CDC 日志进一步确定模块、供电、bootloader 和
 应用版本。nRF9151 的 GPIO2 使能不是 nRF52840 的使能，不能混用。
+
+## AI 配对升级后、已登录桌面的复查
+
+2026-09-08，boot ID `940f0880-845c-4650-9a94-745faa0cf070`。
+CPU1/KPU 修复的构建、部署和数值结果见
+[远端验证记录](cpu1-kpu-remote-validation-20260908.zh-CN.md)。
+本次只复查状态和 UART 查询，不把此前 AI 数值结果计为新跑的测试。
+
+- Labwc PID 961，`WLR_RENDERER=vglite`，FD 18 打开 `/dev/vg_lite`。
+- AI `submitted=accepted=completed=596`，`error=owner_error=0`；
+  KPU `starts=completions=6804`。Vision ownership ready、startup complete、
+  error=0，累计送达 600 帧。
+- pinctrl 中 IO3/IO4 仍归 `91401000.serial`、alt3；UART1 时钟 50 MHz，
+  pclk 100 MHz，均已使能；查询前没有进程打开 `/dev/ttyS1`。
+- 使用官方 K230 提交 `d03068ed3b71dde2789b283a0df2c00500bfc0b4` 的
+  [未改写查询工具](https://github.com/Xinyuan-LilyGO/T-Display-K230/blob/d03068ed3b71dde2789b283a0df2c00500bfc0b4/k230_launcher/k230_phone_ui/src/k230_nrf52840_dfu.cpp)，
+  只走 `--at 'AT+VER?' --at-read-ms 1200 -p /dev/ttyS1` 分支。
+  独立 guard 获取 advisory flock、保留 termios，并给子进程设置 5 秒 alarm；
+  不调用默认固件更新路径。程序 SHA-256 为
+  `c58fad9c295dbdf70f17754309dbed0701e0463249e98a5ca321f77055c2ac80`，
+  guard 为 `41049d556f617e259f117e0ca572a6dceafbb5eb5588278b41e5fbf8f90d6c79`。
+
+```text
+before: UART1 tx:0 rx:0
+at error: no AT response
+OFFICIAL_AT_QUERY_EXIT=1
+after:  UART1 tx:9 rx:0
+PASS UART termios restored
+PASS UART1 released
+```
+
+查询后 VGLite PID/FD 不变，AI idle/error=0，完成计数仍为 596。
+没有发送 DFU/reset、改变引脚/供电、扫描、配对或写 GATT。
+K230 的 USB 枚举仅看到 Realtek 8152 网卡和根集线器，未看到 nRF USB CDC；
+这不证明 nRF 副板不存在，其独立 USB-C 可能没有接到该 USB host。
+
+该结果排除了“仅自写探针的版本解析有误”这一解释，但不证明 TX/RX 的实际
+电气波形正确，也不能确定出厂固件身份。下一项需要外部证据：把 nRF 副板的
+独立 USB-C 接到电脑，确认 USB 设备名/VID/PID/串口，必要时读取 115200 CDC
+日志。不要为读取日志短接复位、进入 DFU、使用 1200-baud touch 或刷写文件。
+身份确认后仍需实现和实测 AT BLE 后端；不能把 UART 静默和 HCI-only 后端
+混为一个已经解决的问题。
 
 ## 后续实现与验收要求
 
