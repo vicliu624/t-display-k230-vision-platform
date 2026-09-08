@@ -72,6 +72,7 @@ build)
     trap 'rm -rf -- "$romfs"' EXIT
     mkdir -p "$romfs/bin" "$romfs/tmp" "$romfs/data"
     install -m 0755 "$output/tdvp-vision-worker.elf" "$romfs/bin/tdvp-vision-worker.elf"
+    bash "$source_dir/stage-calibration.sh" "$mpp" "$romfs"
     "${TDVP_CPU1_PYTHON:-/usr/bin/python3}" "$sdk/src/rtsmart/rtsmart/tools/mkromfs.py" \
         "$romfs" "$bsp/applications/tdvp_vision_romfs.inc"
     test -s "$bsp/applications/tdvp_vision_romfs.inc"

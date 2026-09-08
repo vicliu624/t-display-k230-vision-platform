@@ -21,6 +21,8 @@ NM="${TOOLCHAIN}/riscv64-linux-musleabi_for_x86_64-pc-linux-gnu/bin/riscv64-unkn
 bash "${SCRIPT_DIR}/validate-k230-sdk-linux-patches.sh" "${CPU1_DIR}/patches"
 bash "${CPU1_DIR}/build-rtsmart.sh" "${OUTPUT_DIR}/fw_payload.bin" \
 	"${OUTPUT_DIR}/manifest" "${CPU1_DIR}/tdvp_cpu1_abi.h"
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-calibration.sh" "${RTSMART}/mpp"
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-capture.sh" "${RTSMART}/mpp"
 TEMP_DIR="$(mktemp -d)"
 trap 'status=$?; if [ "$status" -ne 0 ]; then cat "${TEMP_DIR}"/*.log >&2; fi; rm -rf "${TEMP_DIR}"; exit "$status"' EXIT
 # Regress the vision hooks against pristine blobs from the exact pinned BSP.

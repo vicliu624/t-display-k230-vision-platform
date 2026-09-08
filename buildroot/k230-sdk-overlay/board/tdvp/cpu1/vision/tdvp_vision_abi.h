@@ -63,7 +63,7 @@ struct tdvp_vision_consumer {
  */
 struct tdvp_vision_frame_header {
     tdvp_v_u64 sequence;
-    tdvp_v_u64 pts;
+    tdvp_v_u64 pts; /* CPU1 monotonic dequeue time, us; NOT sensor exposure time. */
     tdvp_v_u32 width;
     tdvp_v_u32 height;
     tdvp_v_u32 stride;

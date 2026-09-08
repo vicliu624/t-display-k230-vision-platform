@@ -18,7 +18,8 @@ struct tdvp_cpu1_capture {
     int stream_attempted;
     int running;
     int fault;
-    volatile uint32_t *trace; /* Optional two-word CPU1-owned progress record. */
+    uint64_t last_pts;
+    volatile uint32_t *trace; /* Optional TDVP_CAPTURE_TRACE_WORDS-word record. */
 };
 
 struct tdvp_cpu1_frame {
@@ -26,7 +27,7 @@ struct tdvp_cpu1_frame {
     uint32_t stride[2];
     uint32_t width;
     uint32_t height;
-    uint64_t pts;
+    uint64_t pts; /* CPU1 CLOCK_MONOTONIC dequeue time in microseconds. */
 };
 
 /* The visitor may copy/preprocess the frame, but must not retain pointers.

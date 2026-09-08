@@ -67,6 +67,7 @@ jobs:
           bash buildroot/tools/test-tdvp-cpu1-vision-pins.sh
           bash buildroot/tools/test-tdvp-cpu1-transport.sh
           bash buildroot/tools/test-tdvp-cpu1-shared-map.sh
+          bash buildroot/tools/test-tdvp-cpu1-calibration.sh
           bash buildroot/tools/test-tdvp-cpu1-frame-probe.sh
           bash buildroot/tools/test-tdvp-cpu1-vision-status.sh
           bash buildroot/tools/test-tdvp-cpu1-gpio-amp.sh

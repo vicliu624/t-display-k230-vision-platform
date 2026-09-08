@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: MIT */
+#define _POSIX_C_SOURCE 200809L
 #include "tdvp_cpu1_capture.h"
 #include "tdvp_cpu1_vision_layout.h"
 #include "tdvp_cpu1_capture_trace.h"
@@ -7,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
 #include "mpi_sys_api.h"
 #include "mpi_vb_api.h"
 #include "mpi_vicap_api.h"
@@ -32,8 +34,23 @@ static void capture_progress(struct tdvp_cpu1_capture *capture, uint32_t stage)
 static int record_fault(struct tdvp_cpu1_capture *capture, const char *stage, int code)
 {
     fprintf(stderr, "TDVP CPU1 capture: %s failed: %d\n", stage, code);
-    if (!capture->fault)
+    if (!capture->fault) {
         capture->fault = code;
+        if (capture->trace) {
+            capture->trace[2] = capture->trace[1];
+#ifdef __riscv
+            __asm__ volatile ("fence iorw, iorw" ::: "memory");
+#else
+            __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+            capture->trace[3] = (uint32_t)code;
+#ifdef __riscv
+            __asm__ volatile ("fence iorw, iorw" ::: "memory");
+#else
+            __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+        }
+    }
     return code;
 }
 
@@ -127,10 +144,12 @@ int tdvp_cpu1_capture_start(struct tdvp_cpu1_capture *capture)
     result = kd_mpi_vicap_set_dev_attr(CAPTURE_DEVICE, device);
     if (result)
         goto failed;
-    /* ROMFS firmware must not depend on an SD card holding ISP XML files. */
-    stage = "isp-database-header";
+    /* The pinned SDK's HEADER mode reads a bootloader-populated physical
+     * blob at 0x00300000; it is NOT linked-in calibration. That address is
+     * outside CPU1's reservation. Use the pinned /bin assets in our ROMFS. */
+    stage = "isp-database-romfs";
     capture_progress(capture, TDVP_CAPTURE_ISP_DATABASE);
-    result = kd_mpi_vicap_set_database_parse_mode(CAPTURE_DEVICE, VICAP_DATABASE_PARSE_HEADER);
+    result = kd_mpi_vicap_set_database_parse_mode(CAPTURE_DEVICE, VICAP_DATABASE_PARSE_XML_JSON);
     if (result)
         goto failed;
     channel.out_win.width = TDVP_CAPTURE_WIDTH;
@@ -187,6 +206,7 @@ int tdvp_cpu1_capture_next(struct tdvp_cpu1_capture *capture,
     k_video_frame_info owned;
     struct tdvp_cpu1_frame frame;
     uint32_t lengths[2] = {0, 0};
+    struct timespec acquired;
     unsigned int plane;
     int result, cleanup;
 
@@ -208,11 +228,33 @@ int tdvp_cpu1_capture_next(struct tdvp_cpu1_capture *capture,
     }
     frame.width = owned.v_frame.width;
     frame.height = owned.v_frame.height;
-    frame.pts = owned.v_frame.pts;
+    /* The pinned SDK returns zero sensor PTS on this board. The transport
+     * reports CPU1 dequeue time, never a fabricated exposure timestamp or
+     * a mix of unrelated clock domains. Fail closed on a broken clock. */
+    if (clock_gettime(CLOCK_MONOTONIC, &acquired) || acquired.tv_sec < 0 ||
+        acquired.tv_nsec < 0 || acquired.tv_nsec >= 1000000000L ||
+        (uint64_t)acquired.tv_sec > (UINT64_MAX - 999999U) / 1000000U) {
+        result = record_fault(capture, "frame-clock", -EIO);
+        goto release;
+    }
+    frame.pts = (uint64_t)acquired.tv_sec * 1000000U +
+                (uint64_t)acquired.tv_nsec / 1000U;
+    if (!frame.pts || frame.pts <= capture->last_pts) {
+        result = record_fault(capture, "frame-clock-not-increasing", -EIO);
+        goto release;
+    }
+    capture->last_pts = frame.pts;
     for (plane = 0; plane < 2; ++plane) {
         uint32_t rows = frame.height >> plane;
         uint64_t physical = owned.v_frame.phys_addr[plane];
         frame.stride[plane] = owned.v_frame.stride[plane];
+        /* Pinned libisp cp_vb_info() populates only stride[0]. For our
+         * fixed, tightly packed NV12 channel UV has the same byte pitch.
+         * Normalize only its omitted pitch, never an address or a nonzero
+         * invalid pitch; both complete planes must still fit CPU1 MMZ. */
+        if (plane == 1 && !frame.stride[1] &&
+            frame.stride[0] == TDVP_CAPTURE_WIDTH)
+            frame.stride[1] = frame.stride[0];
         if (!plane_in_mmz(physical, frame.stride[plane], rows)) {
             result = record_fault(capture, "frame-plane-outside-mmz", -ERANGE);
             goto release;

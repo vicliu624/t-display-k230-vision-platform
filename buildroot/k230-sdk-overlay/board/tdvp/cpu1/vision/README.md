@@ -41,7 +41,11 @@ complete the camera ownership migration described below.
 - A curated kernel archive list, including the GC2093 sensor and media clock
   helpers. Other stale SDK archives cannot be whole-linked accidentally.
 - A separate RT-Smart userspace MPI capture backend, fixed initially to
-  GC2093 CSI2 1920x1080@30, NV12, six private VB buffers, header ISP database.
+  GC2093 CSI2 1920x1080@30, NV12, six private VB buffers, and the pinned SDK's
+  XML/JSON calibration files embedded byte-for-byte in CPU1 ROMFS `/bin`.
+  Do not use `VICAP_DATABASE_PARSE_HEADER`: the pinned MPI implementation
+  maps a bootloader-populated blob at physical `0x00300000`, outside CPU1's
+  owned memory, and falls back to files when it cannot find that blob.
 - A bounded 30-frame diagnostic and an asynchronous worker. Neither claims
   model inference. The worker waits for a Linux request; peer-heartbeat loss
   stops capture, faults are latched, and failed teardown retains the process
@@ -567,13 +571,24 @@ See [2026-09-08 remote deployment evidence](../../../../../../docs/cpu1-remote-v
 for the subsequent board tests. A compatible CPU1 slot can be updated remotely
 after verifying the exact CPU0 boot partition, bridge, ABI and backups, followed
 by a whole-board reboot. This does not permit a running CPU1 hot reset or a
-mixed-layout update. Those tests fixed kernel startup and the non-MMZ shared
-mapping path, but actual capture still stalled; they are not AI acceptance.
+mixed-layout update. Follow-up fixes to calibration packaging, NV12 metadata
+and dequeue timestamps delivered 30 frames and then 300 frames after close/reopen
+through the actual Linux bridge, with a decoded real scene and successful teardown.
+These are frame-path checks, not AI model, 30 FPS delivery or full-image acceptance.
 
 The worker maps only the three fixed shared reservations through the RT-Smart
 `/dev/mem` driver with `O_SYNC`. MPI's MMZ mapper remains for allocated camera
-buffers, not the independent transport. Optional capture progress is exposed
-in producer reserved words 0/1 (version/stage); old readers ignore it. These
+buffers, not the independent transport. The pinned ISP library fills only the
+Y pitch in its NV12 dump metadata. The fixed tightly packed channel adapter
+normalizes an omitted UV pitch to the validated Y pitch; it never synthesizes
+physical addresses or skips complete-plane MMZ bounds checks.
+The board's pinned SDK returns zero sensor PTS. Frame `pts` therefore explicitly
+means CPU1 `CLOCK_MONOTONIC` dequeue time in microseconds, not sensor exposure
+time or Linux wall time. Invalid, overflowing, zero, stalled or regressing
+clock values fail capture and release the acquired frame; no synthetic counter
+is substituted to satisfy the consumer's monotonicity check.
+Optional capture progress is exposed in producer reserved words 0..3
+(version/current stage/first failing stage/raw first error); old readers ignore it. These
 diagnostics neither advance heartbeat during blocked MPI calls nor permit DMA
 cleanup after an unproven stop.
 

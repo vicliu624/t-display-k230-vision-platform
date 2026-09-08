@@ -2,13 +2,17 @@
 #ifndef TDVP_CPU1_CAPTURE_TRACE_H
 #define TDVP_CPU1_CAPTURE_TRACE_H
 
-/* Optional diagnostic extension in producer.reserved[0..1]: version, stage.
+/* Optional diagnostic extension in producer.reserved[0..3]: version, current
+ * stage, first failing stage, raw first error (signed 32-bit MPI/errno code).
  * One CPU1 capture thread writes it, Linux never writes it. Each stage names
  * the call about to execute; RUNNING/STOPPED mean the whole operation returned
  * successfully. No pointers, timestamps or hardware addresses on the wire.
- * Readers which do not know version 1 continue to ignore these reserved words.
+ * The raw error is published last and zero means no fault recorded. Cleanup
+ * progress never overwrites the first failure. Readers not knowing version 2
+ * continue to ignore the reserved words. No frame/control ABI size change.
  */
-#define TDVP_CAPTURE_TRACE_VERSION 1U
+#define TDVP_CAPTURE_TRACE_VERSION 2U
+#define TDVP_CAPTURE_TRACE_WORDS 4U
 enum tdvp_capture_stage {
     TDVP_CAPTURE_SENSOR_INFO = 1,
     TDVP_CAPTURE_VB_CONFIG,

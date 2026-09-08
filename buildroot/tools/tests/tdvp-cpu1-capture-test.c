@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: MIT */
+#define _POSIX_C_SOURCE 200809L
 #include "tdvp_cpu1_capture.h"
 #include "tdvp_cpu1_vision_layout.h"
 #include "tdvp_cpu1_capture_trace.h"
@@ -10,14 +11,32 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
 
 static int fail_stage, stage, wrong_sensor, dump_error, malformed, map_failure;
 static int stop_error, deinit_error, unmap_error, release_error, visitor_error;
 static int stops, deinits, exits, maps, unmaps, releases, visits;
 static unsigned char y_plane[TDVP_CAPTURE_WIDTH * TDVP_CAPTURE_HEIGHT];
 static unsigned char uv_plane[TDVP_CAPTURE_WIDTH * TDVP_CAPTURE_HEIGHT / 2];
-static uint32_t progress[2];
+static uint32_t progress[TDVP_CAPTURE_TRACE_WORDS];
 static int check_progress;
+static int clock_failure;
+static uint64_t clock_us;
+
+int clock_gettime(clockid_t id, struct timespec *now)
+{
+    assert(id == CLOCK_MONOTONIC);
+    if (clock_failure == 1) return -1;
+    if (clock_failure != 5 && clock_failure != 6) clock_us += 1000;
+    now->tv_sec = (time_t)(clock_us / 1000000U);
+    now->tv_nsec = (long)(clock_us % 1000000U) * 1000L;
+    if (clock_failure == 2) now->tv_sec = -1;
+    if (clock_failure == 3) now->tv_nsec = 1000000000L;
+    if (clock_failure == 4) now->tv_sec = (time_t)(UINT64_MAX / 1000000U + 1);
+    if (clock_failure == 6) now->tv_nsec -= 1000;
+    if (clock_failure == 7) now->tv_sec = now->tv_nsec = 0;
+    return 0;
+}
 
 static int step(void)
 {
@@ -35,6 +54,8 @@ static void reset(void)
     fail_stage = stage = wrong_sensor = dump_error = malformed = map_failure = 0;
     stop_error = deinit_error = unmap_error = release_error = visitor_error = 0;
     stops = deinits = exits = maps = unmaps = releases = visits = 0;
+    clock_failure = 0;
+    clock_us = 122456;
 }
 
 k_s32 kd_mpi_vicap_get_sensor_info(k_vicap_sensor_type type, k_vicap_sensor_info *info)
@@ -62,7 +83,7 @@ k_s32 kd_mpi_vicap_set_dev_attr(k_vicap_dev dev, k_vicap_dev_attr attr)
 }
 k_s32 kd_mpi_vicap_set_database_parse_mode(k_vicap_dev dev, k_vicap_database_parse_mode mode)
 {
-    assert(dev == 0 && mode == VICAP_DATABASE_PARSE_HEADER);
+    assert(dev == 0 && mode == VICAP_DATABASE_PARSE_XML_JSON);
     return step();
 }
 void kd_mpi_vicap_set_dump_reserved(k_vicap_dev dev, k_vicap_chn chn, k_bool reserved)
@@ -93,7 +114,7 @@ k_s32 kd_mpi_vicap_dump_frame(k_vicap_dev dev, k_vicap_chn chn, k_vicap_dump_for
     owned->v_frame.stride[0] = owned->v_frame.stride[1] = TDVP_CAPTURE_WIDTH;
     owned->v_frame.phys_addr[0] = TDVP_VISION_MMZ_BASE;
     owned->v_frame.phys_addr[1] = TDVP_VISION_MMZ_BASE + sizeof(y_plane);
-    owned->v_frame.pts = 123456;
+    owned->v_frame.pts = 0; /* Actual pinned board metadata, not our clock. */
     switch (malformed) {
     case 1: owned->v_frame.width--; break;
     case 2: owned->v_frame.pixel_format = PIXEL_FORMAT_RGB_888; break;
@@ -102,6 +123,16 @@ k_s32 kd_mpi_vicap_dump_frame(k_vicap_dev dev, k_vicap_chn chn, k_vicap_dump_for
     case 5: owned->v_frame.phys_addr[1] = TDVP_VISION_SHARED_BASE - 4096; break;
     case 6: owned->v_frame.phys_addr[1] = UINT64_MAX - 1; break;
     case 7: owned->v_frame.stride[1] = UINT32_MAX; break;
+    case 8: owned->v_frame.stride[1] = 0; break; /* pinned cp_vb_info */
+    case 9:
+        owned->v_frame.stride[1] = 0;
+        owned->v_frame.phys_addr[1] = TDVP_VISION_SHARED_BASE - 4096;
+        break;
+    case 10: owned->v_frame.stride[1] = TDVP_CAPTURE_WIDTH - 1; break;
+    case 11:
+        owned->v_frame.stride[1] = 0;
+        owned->v_frame.phys_addr[1] = 0;
+        break;
     }
     return 0;
 }
@@ -154,6 +185,28 @@ int main(void)
     assert(!tdvp_cpu1_capture_stop(&capture));
     assert(progress[1] == TDVP_CAPTURE_STOPPED);
     check_progress = 0;
+
+    reset();
+    memset(&capture, 0, sizeof(capture));
+    memset(progress, 0, sizeof(progress));
+    capture.trace = progress;
+    fail_stage = 7;
+    deinit_error = -EFAULT;
+    assert(tdvp_cpu1_capture_start(&capture) == -EIO);
+    assert(progress[0] == TDVP_CAPTURE_TRACE_VERSION);
+    assert(progress[1] == TDVP_CAPTURE_VICAP_DEINIT);
+    assert(progress[2] == TDVP_CAPTURE_VICAP_INIT && (int32_t)progress[3] == -EIO);
+    assert(capture.vb_ready && !exits); /* cleanup failure retains DMA storage */
+
+    reset();
+    memset(&capture, 0, sizeof(capture));
+    memset(progress, 0, sizeof(progress));
+    capture.trace = progress;
+    assert(!tdvp_cpu1_capture_start(&capture));
+    stop_error = (int32_t)UINT32_C(0xa0158003);
+    assert(tdvp_cpu1_capture_stop(&capture) == stop_error);
+    assert(progress[2] == TDVP_CAPTURE_STOP_STREAM && progress[3] == UINT32_C(0xa0158003));
+    assert(capture.vb_ready && !exits);
 
     for (test = 0; test <= 8; ++test) {
         reset();
@@ -210,6 +263,31 @@ int main(void)
         assert(capture.vb_ready && !capture.running && !exits);
         assert(stops == 1 && deinits == (test == 2));
     }
-    puts("CPU1 capture: PASS 25 lifecycle/fault cases; no hardware or transport claim");
+    for (test = 8; test <= 11; ++test) {
+        reset();
+        memset(&capture, 0, sizeof(capture));
+        assert(!tdvp_cpu1_capture_start(&capture));
+        malformed = test;
+        assert(tdvp_cpu1_capture_next(&capture, visit, &visits) ==
+               (test == 8 ? 0 : -ERANGE));
+        assert(visits == (test == 8) && releases == 1 && unmaps == maps);
+        assert(tdvp_cpu1_capture_stop(&capture) == (test == 8 ? 0 : -ERANGE));
+        assert(stops == 1 && deinits == 1 && exits == 1);
+    }
+    for (test = 1; test <= 7; ++test) {
+        reset();
+        memset(&capture, 0, sizeof(capture));
+        assert(!tdvp_cpu1_capture_start(&capture));
+        if (test == 5 || test == 6) {
+            assert(!tdvp_cpu1_capture_next(&capture, visit, &visits));
+            maps = unmaps = releases = visits = 0;
+        }
+        clock_failure = test;
+        assert(tdvp_cpu1_capture_next(&capture, visit, &visits) == -EIO);
+        assert(!visits && !maps && !unmaps && releases == 1);
+        assert(tdvp_cpu1_capture_stop(&capture) == -EIO);
+        assert(stops == 1 && deinits == 1 && exits == 1);
+    }
+    puts("CPU1 capture: PASS 36 lifecycle/fault cases and first-fault/raw-MPI metadata; no hardware or transport claim");
     return 0;
 }
