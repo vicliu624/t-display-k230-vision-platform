@@ -93,3 +93,61 @@ SPL/U-Boot 与带 startup trace 的 CPU1 payload 通过同一校验器。SDK 布
 备用卡若已经开始验证 `a57e99c`，其串口、Linux 登录、所有权状态和初始摄像头
 观测仍有诊断价值，但不能据此宣布最终 AI/shared SRAM 交付完成。最终候选还需
 覆盖本保护、真实摄像头帧、VGLite 共存和 AI/FFT 数值及错误路径验证。
+
+## 运行中设备的只读快照（2026-09-08）
+
+为了区分“旧启动代码缺少检查”与“当前硬件确实仍在工作”，新增手动诊断：
+
+```sh
+sh buildroot/tools/tdvp-cpu1-boot-sram-snapshot.sh --read-mmio
+```
+
+它只接受 root、riscv64 和 `canaan,kendryte-k230` 设备树；没有显式参数时
+不访问 MMIO。脚本不安装为开机服务，不修改 SPL/U-Boot、CPU1 payload、
+设备树、时钟、电源、DMA 或解压器配置。所有 `devmem` 调用只有地址与
+32-bit 宽度两个参数，没有第三个写入值。
+
+寄存器依据是嘉楠发布的
+[K230 Technical Reference Manual V0.3.1](https://download.kendryte.com/developer/k230/HDK/K230%E7%A1%AC%E4%BB%B6%E6%96%87%E6%A1%A3/K230_Technical_Reference_Manual_V0.3.1_20241118.pdf)，
+文件 SHA-256 `4a18fdbd1cd25c5a33ca4d54b78c95e0e338305bceb17397133370fa10c1e5f0`。
+已核对 2.5.2.7 与 15.5 的完整相关寄存器表，包括 PDF 第 134、136、1186 页：
+SDMA busy/pause 与解压状态是 RO；CH0 配置和 GZIP 输入长度是 RW，但此脚本
+只读。不会读取 WO 的启动/停止字段，也不会写入 W1C 的中断状态。
+
+在 boot ID `4b25f9ee-9e55-4ae5-bb6a-f9f016ba8f88` 上，实际脚本在 uptime
+5467.70～5467.89 秒进行了三次采样，值均相同：
+
+| 地址 | 含义 | 读值 |
+| --- | --- | --- |
+| `0x80800054`、`0x80800084`、`0x808000b4`、`0x808000e4` | SDMA 0～3 状态，bit 0 busy、bit 1 pause | 全部 `0x00000000` |
+| `0x80800058` | CH0 配置，bit 10 解压模式 | `0x00000000` |
+| `0x80808004` | GZIP 输入长度，bit 31 解压使能 | `0x00000000` |
+| `0x8080800c` | 解压器原始状态 | `0x00001C00` |
+
+最后一个值保留原始输出；不为手册未解释的位赋予成功、错误或总线空闲含义。
+`snapshot_no_activity=1` 仅表示采样期间，已定义的 busy/pause 和解压使能位
+没有置位。脚本同时明确输出：
+
+```text
+startup_order=not_proven
+exclusive_ownership=not_proven
+kpu_model_completion=not_tested
+```
+
+因此，当前没有观测到启动解压器仍占用这些资源；“旧 U-Boot”不能直接推导成
+“现在一定有 DMA 冲突”。反过来，快照也不能证明启动时先停 DMA 后释放描述符、
+保证未来没有其他使用者，或替代完整镜像冷启动验收。它不是启用 KPU 的通行条件。
+
+另一个必须保留的边界：实际 Linux 的 `k230-gdma` 驱动占用
+`0x80800000–0x80800fff`，桌面旋转使用的 GDMA 与 SDMA 共享控制器全局寄存器。
+不能通过解绑该驱动、重置整个控制器或清除全部中断来“确保 CPU1 独占”。
+本次仅审查了驱动及读取上述白名单，没有执行这些动作。
+
+脚本运行前后，Labwc PID 656 的 fd 18 均打开 `/dev/vg_lite`；CPU1 AI 的
+256 个已完成任务和摄像头向 Linux 交付的 300 帧计数未变化，所有权/AI/摄像头
+错误均为 0。KPU 仍是 `unavailable`。本次没有新增模型推理或摄像头采集测试。
+
+`test-tdvp-cpu1-boot-sram-snapshot.sh` 的 18 个模拟场景分别在 LAN 主机与
+Ubuntu 24.04 构建容器中通过，覆盖参数/平台拒绝、7 个地址各读 3 次且无写值、
+四个通道 busy、pause、两个解压使能条件、读取失败及非法返回值。
+真实板上使用的是同一个生产脚本，而非测试替代实现。

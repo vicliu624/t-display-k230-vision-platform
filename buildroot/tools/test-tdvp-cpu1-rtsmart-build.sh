@@ -31,6 +31,7 @@ bash "${SCRIPT_DIR}/test-tdvp-cpu1-kpu-link.sh" "${RTSMART}/mpp" "${NM%nm}" \
 	"${SDK}/output/k230_canmv_v3p0/rtsmart/tdvp-vision"
 bash "${SCRIPT_DIR}/test-tdvp-ai-job.sh"
 bash "${SCRIPT_DIR}/test-tdvp-ai-abi.sh"
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-boot-sram-snapshot.sh"
 TEMP_DIR="$(mktemp -d)"
 trap 'status=$?; if [ "$status" -ne 0 ]; then cat "${TEMP_DIR}"/*.log >&2; fi; rm -rf "${TEMP_DIR}"; exit "$status"' EXIT
 # Regress the vision hooks against pristine blobs from the exact pinned BSP.
