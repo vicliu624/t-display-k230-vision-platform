@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "tdvp_cpu1_capture.h"
 #include "tdvp_cpu1_vision_layout.h"
+#include "tdvp_cpu1_capture_trace.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -14,6 +15,19 @@
 #define CAPTURE_CHANNEL VICAP_CHN_ID_0
 #define CAPTURE_BUFFERS 6U
 #define CAPTURE_DUMP_TIMEOUT_MS 200
+
+static void capture_progress(struct tdvp_cpu1_capture *capture, uint32_t stage)
+{
+    if (!capture->trace)
+        return;
+    capture->trace[0] = TDVP_CAPTURE_TRACE_VERSION;
+    capture->trace[1] = stage;
+#ifdef __riscv
+    __asm__ volatile ("fence iorw, iorw" ::: "memory");
+#else
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+}
 
 static int record_fault(struct tdvp_cpu1_capture *capture, const char *stage, int code)
 {
@@ -32,23 +46,28 @@ int tdvp_cpu1_capture_stop(struct tdvp_cpu1_capture *capture)
     capture->running = 0;
     /* Do NOT deinit/release a pool after a failed stop: DMA may still own it. */
     if (capture->stream_attempted) {
+        capture_progress(capture, TDVP_CAPTURE_STOP_STREAM);
         result = kd_mpi_vicap_stop_stream(CAPTURE_DEVICE);
         if (result)
             return record_fault(capture, "stop-stream (pool retained)", result);
         capture->stream_attempted = 0;
     }
     if (capture->vicap_attempted) {
+        capture_progress(capture, TDVP_CAPTURE_VICAP_DEINIT);
         result = kd_mpi_vicap_deinit(CAPTURE_DEVICE);
         if (result)
             return record_fault(capture, "deinit (pool retained)", result);
         capture->vicap_attempted = 0;
     }
     if (capture->vb_ready) {
+        capture_progress(capture, TDVP_CAPTURE_VB_EXIT);
         result = kd_mpi_vb_exit();
         if (result)
             return record_fault(capture, "vb-exit", result);
         capture->vb_ready = 0;
     }
+    if (!capture->fault)
+        capture_progress(capture, TDVP_CAPTURE_STOPPED);
     return capture->fault;
 }
 
@@ -66,6 +85,7 @@ int tdvp_cpu1_capture_start(struct tdvp_cpu1_capture *capture)
     memset(&device, 0, sizeof(device));
     memset(&channel, 0, sizeof(channel));
     memset(&buffers, 0, sizeof(buffers));
+    capture_progress(capture, TDVP_CAPTURE_SENSOR_INFO);
     result = kd_mpi_vicap_get_sensor_info(
         GC2093_MIPI_CSI2_1920X1080_30FPS_10BIT_LINEAR, &device.sensor_info);
     if (result)
@@ -82,10 +102,12 @@ int tdvp_cpu1_capture_start(struct tdvp_cpu1_capture *capture)
     buffers.comm_pool[0].blk_cnt = CAPTURE_BUFFERS;
     buffers.comm_pool[0].mode = VB_REMAP_MODE_NOCACHE;
     stage = "vb-config";
+    capture_progress(capture, TDVP_CAPTURE_VB_CONFIG);
     result = kd_mpi_vb_set_config(&buffers);
     if (result)
         goto failed;
     stage = "vb-init";
+    capture_progress(capture, TDVP_CAPTURE_VB_INIT);
     result = kd_mpi_vb_init();
     if (result)
         goto failed;
@@ -101,11 +123,13 @@ int tdvp_cpu1_capture_start(struct tdvp_cpu1_capture *capture)
     device.pipe_ctrl.bits.dnr3_enable = 0;
     device.dw_enable = K_FALSE;
     stage = "device-attributes";
+    capture_progress(capture, TDVP_CAPTURE_DEVICE_ATTRIBUTES);
     result = kd_mpi_vicap_set_dev_attr(CAPTURE_DEVICE, device);
     if (result)
         goto failed;
     /* ROMFS firmware must not depend on an SD card holding ISP XML files. */
     stage = "isp-database-header";
+    capture_progress(capture, TDVP_CAPTURE_ISP_DATABASE);
     result = kd_mpi_vicap_set_database_parse_mode(CAPTURE_DEVICE, VICAP_DATABASE_PARSE_HEADER);
     if (result)
         goto failed;
@@ -118,22 +142,27 @@ int tdvp_cpu1_capture_start(struct tdvp_cpu1_capture *capture)
     channel.buffer_num = CAPTURE_BUFFERS;
     channel.buffer_size = buffers.comm_pool[0].blk_size;
     channel.fps = 30;
+    capture_progress(capture, TDVP_CAPTURE_DUMP_RESERVED);
     kd_mpi_vicap_set_dump_reserved(CAPTURE_DEVICE, CAPTURE_CHANNEL, K_TRUE);
     stage = "channel-attributes";
+    capture_progress(capture, TDVP_CAPTURE_CHANNEL_ATTRIBUTES);
     result = kd_mpi_vicap_set_chn_attr(CAPTURE_DEVICE, CAPTURE_CHANNEL, channel);
     if (result)
         goto failed;
     stage = "vicap-init";
+    capture_progress(capture, TDVP_CAPTURE_VICAP_INIT);
     capture->vicap_attempted = 1;
     result = kd_mpi_vicap_init(CAPTURE_DEVICE);
     if (result)
         goto failed;
     stage = "start-stream";
+    capture_progress(capture, TDVP_CAPTURE_START_STREAM);
     capture->stream_attempted = 1;
     result = kd_mpi_vicap_start_stream(CAPTURE_DEVICE);
     if (result)
         goto failed;
     capture->running = 1;
+    capture_progress(capture, TDVP_CAPTURE_RUNNING);
     return 0;
 
 failed:

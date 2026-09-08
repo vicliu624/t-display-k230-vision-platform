@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "tdvp_cpu1_capture.h"
 #include "tdvp_cpu1_vision_layout.h"
+#include "tdvp_cpu1_capture_trace.h"
 #include "mpi_sys_api.h"
 #include "mpi_vb_api.h"
 #include "mpi_vicap_api.h"
@@ -15,8 +16,20 @@ static int stop_error, deinit_error, unmap_error, release_error, visitor_error;
 static int stops, deinits, exits, maps, unmaps, releases, visits;
 static unsigned char y_plane[TDVP_CAPTURE_WIDTH * TDVP_CAPTURE_HEIGHT];
 static unsigned char uv_plane[TDVP_CAPTURE_WIDTH * TDVP_CAPTURE_HEIGHT / 2];
+static uint32_t progress[2];
+static int check_progress;
 
-static int step(void) { return ++stage == fail_stage ? -EIO : 0; }
+static int step(void)
+{
+    const unsigned int expected[] = {TDVP_CAPTURE_SENSOR_INFO, TDVP_CAPTURE_VB_CONFIG,
+        TDVP_CAPTURE_VB_INIT, TDVP_CAPTURE_DEVICE_ATTRIBUTES, TDVP_CAPTURE_ISP_DATABASE,
+        TDVP_CAPTURE_CHANNEL_ATTRIBUTES, TDVP_CAPTURE_VICAP_INIT, TDVP_CAPTURE_START_STREAM};
+    if (check_progress) {
+        assert(stage < 8 && progress[0] == TDVP_CAPTURE_TRACE_VERSION);
+        assert(progress[1] == expected[stage]);
+    }
+    return ++stage == fail_stage ? -EIO : 0;
+}
 static void reset(void)
 {
     fail_stage = stage = wrong_sensor = dump_error = malformed = map_failure = 0;
@@ -131,6 +144,16 @@ int main(void)
 {
     struct tdvp_cpu1_capture capture;
     int test;
+
+    reset();
+    memset(&capture, 0, sizeof(capture));
+    capture.trace = progress;
+    check_progress = 1;
+    assert(!tdvp_cpu1_capture_start(&capture));
+    assert(progress[1] == TDVP_CAPTURE_RUNNING);
+    assert(!tdvp_cpu1_capture_stop(&capture));
+    assert(progress[1] == TDVP_CAPTURE_STOPPED);
+    check_progress = 0;
 
     for (test = 0; test <= 8; ++test) {
         reset();

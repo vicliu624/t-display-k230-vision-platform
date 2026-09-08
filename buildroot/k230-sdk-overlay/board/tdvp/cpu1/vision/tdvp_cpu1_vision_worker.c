@@ -8,7 +8,7 @@
 #include "tdvp_cpu1_transport.h"
 #include "tdvp_cpu1_vision_layout.h"
 #include "tdvp_vision_owner_io.h"
-#include "mpi_sys_api.h"
+#include "tdvp_cpu1_shared_map.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -54,7 +54,7 @@ int main(void)
         fputs("TDVP CPU1 vision: monotonic clock unavailable\n", stderr);
         return 1;
     }
-    ownership = kd_mpi_sys_mmap(TDVP_OWNER_BASE, TDVP_OWNER_WINDOW);
+    ownership = tdvp_cpu1_shared_map(TDVP_OWNER_BASE, TDVP_OWNER_WINDOW);
     if (ownership && ownership != MAP_FAILED) {
         for (unsigned int attempt = 0; attempt < 50; ++attempt) {
             stable_owner = tdvp_owner_snapshot(&ownership->cpu1_side, &owner_record);
@@ -76,8 +76,8 @@ int main(void)
     owner_heartbeat = owner_record.heartbeat;
     owner_seen = epoch;
     epoch = owner_cookie; /* Bind frames to this granted boot, never stale RAM. */
-    control = kd_mpi_sys_mmap(TDVP_VISION_CONTROL_BASE, TDVP_VISION_CONTROL_SIZE);
-    slots = kd_mpi_sys_mmap(TDVP_VISION_SHARED_BASE, TDVP_VISION_SLOT_COUNT * TDVP_VISION_SLOT_BYTES);
+    control = tdvp_cpu1_shared_map(TDVP_VISION_CONTROL_BASE, TDVP_VISION_CONTROL_SIZE);
+    slots = tdvp_cpu1_shared_map(TDVP_VISION_SHARED_BASE, TDVP_VISION_SLOT_COUNT * TDVP_VISION_SLOT_BYTES);
     if (!control || control == MAP_FAILED || !slots || slots == MAP_FAILED) {
         fputs("TDVP CPU1 vision: noncached transport mappings unavailable\n", stderr);
         return 1;
@@ -143,6 +143,7 @@ int main(void)
         if (!capture.running) {
             /* Only successful complete teardown reaches this restart path. */
             memset(&capture, 0, sizeof(capture));
+            capture.trace = control->producer.reserved;
             tdvp_cpu1_transport_state(&transport, TDVP_VISION_STATE_STARTING, 0);
             result = tdvp_cpu1_capture_start(&capture);
             if (result) {

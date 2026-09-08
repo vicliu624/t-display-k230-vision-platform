@@ -18,6 +18,7 @@ struct tdvp_cpu1_capture {
     int stream_attempted;
     int running;
     int fault;
+    volatile uint32_t *trace; /* Optional two-word CPU1-owned progress record. */
 };
 
 struct tdvp_cpu1_frame {
