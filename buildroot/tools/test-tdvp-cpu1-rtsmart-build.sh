@@ -23,6 +23,7 @@ bash "${CPU1_DIR}/build-rtsmart.sh" "${OUTPUT_DIR}/fw_payload.bin" \
 	"${OUTPUT_DIR}/manifest" "${CPU1_DIR}/tdvp_cpu1_abi.h"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-calibration.sh" "${RTSMART}/mpp"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-capture.sh" "${RTSMART}/mpp"
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-fft-selftest.sh" "${RTSMART}/mpp"
 TEMP_DIR="$(mktemp -d)"
 trap 'status=$?; if [ "$status" -ne 0 ]; then cat "${TEMP_DIR}"/*.log >&2; fi; rm -rf "${TEMP_DIR}"; exit "$status"' EXIT
 # Regress the vision hooks against pristine blobs from the exact pinned BSP.
@@ -46,6 +47,9 @@ done
 PINNED_IOREMAP=canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/components/lwp/ioremap.c
 mkdir -p "${TEMP_DIR}/$(dirname "${PINNED_IOREMAP}")"
 git -C "${CHECKOUT}" show "HEAD:${PINNED_IOREMAP}" > "${TEMP_DIR}/${PINNED_IOREMAP}"
+PINNED_DEVICE=canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/src/device.c
+mkdir -p "${TEMP_DIR}/$(dirname "${PINNED_DEVICE}")"
+git -C "${CHECKOUT}" show "HEAD:${PINNED_DEVICE}" > "${TEMP_DIR}/${PINNED_DEVICE}"
 BSP="${TEMP_DIR}/canmv_k230/src/rtsmart/rtsmart/kernel/bsp/maix3"
 bash "${SCRIPT_DIR}/validate-k230-sdk-linux-patches.sh" "${CPU1_DIR}/vision"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-i2c4-early.sh" "${BSP}"

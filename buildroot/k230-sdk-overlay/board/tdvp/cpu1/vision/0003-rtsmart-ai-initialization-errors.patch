@@ -1,8 +1,9 @@
 From: TDVP <tdvp@localhost>
 Subject: [PATCH] rtsmart: initialize granted AI drivers in fail-closed order
 
-For paired firmware, establish mappings/events/fops before publishing devices
-and unmasking IRQs. Propagate hardlock failures and latch partial initialization.
+For paired firmware, establish mappings/events, register devices, then install
+fops before unmasking IRQs or publishing AI readiness to the worker.
+Propagate hardlock failures and latch partial initialization.
 Fix the hardlock mapping null check before applying its register offset.
 
 diff --git a/drivers/interdrv/gnne/ai2d_dev.c b/drivers/interdrv/gnne/ai2d_dev.c
@@ -26,11 +27,11 @@ index cea9eaa..acde5a1 100644
 +    if (!gnne_base_addr) return status;
 +    ret = rt_event_init(&g_ai_2d_event, "ai_2d_event", RT_IPC_FLAG_PRIO);
 +    if (ret) return status = ret;
-+    rt_wqueue_init(&ai_2d_device->wait_queue);
-+    ai_2d_device->fops = &ai_2d_input_fops;
-+    rt_hw_interrupt_install(IRQN_AI2D_INTERRUPT, irq_callback, &ai_2d_device->wait_queue, "ai_2d_irq");
 +    ret = rt_device_register(ai_2d_device, "ai_2d_device", RT_DEVICE_FLAG_RDWR);
 +    if (ret) return status = ret;
++    /* Registration initializes wait_queue and clears fops on this SDK. */
++    ai_2d_device->fops = &ai_2d_input_fops;
++    rt_hw_interrupt_install(IRQN_AI2D_INTERRUPT, irq_callback, &ai_2d_device->wait_queue, "ai_2d_irq");
 +    rt_hw_interrupt_umask(IRQN_AI2D_INTERRUPT);
 +    return status = 0;
 +#else
@@ -70,11 +71,11 @@ index 07f2674..76fa619 100644
 +    if (!gnne_base_addr) return status = -RT_ENOMEM;
 +    ret = rt_event_init(&g_gnne_event, "gnne_event", RT_IPC_FLAG_PRIO);
 +    if (ret) return status = ret;
-+    rt_wqueue_init(&gnne_device->wait_queue);
-+    gnne_device->fops = &gnne_input_fops;
-+    rt_hw_interrupt_install(IRQN_GNNE_INTERRUPT, irq_callback, &gnne_device->wait_queue, "gnne_irq");
 +    ret = rt_device_register(gnne_device, "gnne_device", RT_DEVICE_FLAG_RDWR);
 +    if (ret) return status = ret;
++    /* Registration initializes wait_queue and clears fops on this SDK. */
++    gnne_device->fops = &gnne_input_fops;
++    rt_hw_interrupt_install(IRQN_GNNE_INTERRUPT, irq_callback, &gnne_device->wait_queue, "gnne_irq");
 +    rt_hw_interrupt_umask(IRQN_GNNE_INTERRUPT);
 +    return status = 0;
 +#else

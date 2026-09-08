@@ -52,6 +52,11 @@ static void fft_irq(int irq, void *data)
     fft_interrupt_code = fft_read(0x50);
     fft_write(0x20, 1);
     rt_event_send(&fft_event, FFT_EVENT);
+    /* The C908 dispatcher completes the PLIC claim after this ISR returns.
+     * Completion of a disabled source is ignored, wedging the gateway after
+     * the first job. Match the pinned vendor ISR: acknowledge, then unmask
+     * before returning. fft_stop() masks again at the end of the ioctl. */
+    rt_hw_interrupt_umask(FFT_IRQ);
 }
 static int fft_runtime_ready(void)
 {
@@ -130,7 +135,7 @@ static int fft_ioctl(struct dfs_fd *file, int command, void *argument)
     if (waited == 10) { result = -RT_ETIMEOUT; goto fault; }
     if (fft_interrupt_code) { result = -RT_EIO; goto fault; }
     for (i = 0; i < output_words; ++i) args->data[i] = fft_read(0x40);
-    /* Catch an output FIFO fault even though the completion ISR masked IRQ. */
+    /* Also check the device directly for an output FIFO fault. */
     if (fft_read(0x50)) { result = -RT_EIO; goto fault; }
     fft_stop();
     result = lwp_put_to_user(argument, args, sizeof(*args)) == sizeof(*args) ? 0 : -RT_EINVAL;
@@ -163,9 +168,11 @@ int tdvp_cpu1_fft_init(void)
     result = rt_event_init(&fft_event, "tdvp_fft", RT_IPC_FLAG_PRIO);
     if (result) return fft_status = result;
     fft_stop();
-    fft_device.fops = &fft_ops;
     rt_hw_interrupt_install(FFT_IRQ, fft_irq, RT_NULL, "tdvp_fft");
     result = rt_device_register(&fft_device, "fft_device", RT_DEVICE_FLAG_RDWR);
+    /* Pinned RT-Smart rt_device_register() clears fops. Install only after
+     * successful registration, before AI readiness / user process launch. */
+    if (!result) fft_device.fops = &fft_ops;
     /* IRQ remains masked until a validated job starts. No library SDMA init. */
     return fft_status = result;
 }

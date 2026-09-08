@@ -44,6 +44,8 @@ void rt_hw_interrupt_umask(int irq)
 {
     int i=which_irq(irq); ++calls;
     assert(masked[i] && installed[i] && registrations==i+1);
+    struct rt_device *dev=i ? &g_ai_2d_device : &g_gnne_device;
+    assert(dev->fops==(i ? &ai_2d_input_fops : &gnne_input_fops) && dev->wait_queue==1);
     unmasked[i]++;
 }
 int rt_event_init(struct rt_event *e, const char *name, int flags)
@@ -57,6 +59,7 @@ void rt_wqueue_init(rt_wqueue_t *queue)
 {
     ++calls; ++queue_count;
     assert(queue==(queue_count==1 ? &g_gnne_device.wait_queue : &g_ai_2d_device.wait_queue));
+    assert(!*queue); *queue=1;
 }
 void rt_hw_interrupt_install(int irq, void (*fn)(int,void *),void *data,const char *name)
 {
@@ -69,9 +72,10 @@ void rt_hw_interrupt_install(int irq, void (*fn)(int,void *),void *data,const ch
 int rt_device_register(rt_device_t dev,const char *name,int flags)
 {
     int i=dev==&g_ai_2d_device; ++calls;
-    assert(dev==(i ? &g_ai_2d_device : &g_gnne_device) && installed[i] && !unmasked[i]);
+    assert(dev==(i ? &g_ai_2d_device : &g_gnne_device) && !unmasked[i]);
     assert(flags==RT_DEVICE_FLAG_RDWR && !strcmp(name,i ? "ai_2d_device" : "gnne_device"));
     if ((scenario==5 && !i) || (scenario==7 && i)) return -22;
+#include "fft-register-posix.inc"
     ++registrations; return 0;
 }
 int main(int argc,char **argv)

@@ -6,6 +6,7 @@ static uint64_t regs[128];
 static int scenario, owned, stage, fail_stage, writes, allocated, input_count, output_count, total_jobs;
 static int armed, irq_enabled, faulted, wait_calls, installed, registered;
 static int publication_waits;
+static int plic_claimed, plic_completions;
 static void (*handler)(int,void *);
 static int failure(void) { return ++stage==fail_stage; }
 int tdvp_cpu1_vision_ownership_status(void) { return owned ? 0 : -RT_EBUSY; }
@@ -26,8 +27,15 @@ int rt_mutex_init(struct rt_mutex *m,const char *n,int f)
 { (void)m; assert(n && f==1); return failure() ? -RT_EIO : 0; }
 int rt_event_init(struct rt_event *e,const char *n,int f)
 { (void)e; assert(n && f==1); return failure() ? -RT_EIO : 0; }
-int rt_device_register(rt_device_t d,const char *n,int f)
-{ assert(d->fops==&fft_ops && !strcmp(n,"fft_device") && f==3 && installed && !irq_enabled); if(failure())return -RT_EIO; ++registered; return 0; }
+void rt_wqueue_init(rt_wqueue_t *q) { assert(!*q); *q = 1; }
+int rt_device_register(rt_device_t dev,const char *n,int f)
+{
+    assert(!strcmp(n,"fft_device") && f==3 && installed && !irq_enabled);
+    if(failure())return -RT_EIO;
+    /* Execute the POSIX initialization block from the actual pinned SDK. */
+#include "fft-register-posix.inc"
+    ++registered; return 0;
+}
 int rt_mutex_take(struct rt_mutex *m,int timeout)
 { assert(timeout==100 && !m->locked); if(scenario==6)return -RT_EBUSY; m->locked=1; return 0; }
 int rt_mutex_release(struct rt_mutex *m) { assert(m->locked); m->locked=0; return 0; }
@@ -58,7 +66,14 @@ int rt_event_recv(struct rt_event *e,unsigned int bits,int flags,int timeout,voi
     if(!timeout) { e->bits=0; return -RT_ETIMEOUT; }
     assert(timeout==50 && armed); ++wait_calls;
     if(scenario==11)return -RT_ETIMEOUT;
-    assert(irq_enabled); handler(190,NULL);
+    assert(irq_enabled);
+    /* A gateway cannot forward another IRQ until the previous claim has
+     * been completed. PLIC ignores completion while this source is disabled.
+     * Pinned generic_handle_irq() completes only after the ISR returns. */
+    if(plic_claimed)return -RT_ETIMEOUT;
+    plic_claimed=1;
+    handler(190,NULL);
+    if(irq_enabled) { plic_claimed=0; ++plic_completions; }
     assert(e->bits==1); e->bits=0; return 0;
 }
 int main(int argc,char **argv)
@@ -69,7 +84,8 @@ int main(int argc,char **argv)
     assert(tdvp_cpu1_fft_init()==-RT_EBUSY && !stage && !writes);
     owned=1; int result=tdvp_cpu1_fft_init();
     if(fail_stage) { assert(result<0 && !registered && !irq_enabled); assert(tdvp_cpu1_fft_init()==result); return 0; }
-    assert(!result && registered==1 && !irq_enabled && !fft_open(NULL));
+    assert(!result && registered==1 && !irq_enabled && fft_device.fops==&fft_ops);
+    assert(fft_device.wait_queue==1 && !fft_device.fops->open(NULL));
     int before=writes;
     memset(&args,0,sizeof(args));
     if(scenario==5)args.reg.cfg_value=7;
@@ -100,7 +116,7 @@ int main(int argc,char **argv)
             assert(args.data[output_count-1]==0x1234000000000000ULL+output_count);
             assert((regs[0]>>32)==FFT_HW_TIMEOUT);
         }
-        assert(total_jobs==84 && !allocated && !faulted);
+        assert(total_jobs==84 && plic_completions==84 && !plic_claimed && !allocated && !faulted);
     }
     assert(!fft_close(NULL));
     printf("CPU1 FFT PIO: PASS scenario %d (hardware FIFO model, not FFT accuracy)\n",scenario);
