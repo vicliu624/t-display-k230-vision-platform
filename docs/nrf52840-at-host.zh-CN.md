@@ -96,3 +96,46 @@ GATT 数据格式/句柄/状态、通知和断线。测试不访问真实 UART�
   整卡构建或硬件无线验收。GitNexus 对新增符号返回 UNKNOWN，linked worktree
   的 detect_changes 被工具拒绝；另外逐文件核对增量仅为 AT 组件、构建/验证和
   文档，没有改写现有 BlueZ/Quick Settings、VGLite 或 CPU1 实现。
+
+## 原生目标机 PTY 复查
+
+同一 boot ID 和上述 AT 客户端 SHA 下，交叉编译并部署
+`buildroot/tools/tdvp-nrf52840-target-selftest.c`。它只使用 `openpty()` 创建虚拟
+串口，启动设备上已安装的正式客户端，并逐条核对发出的命令。测试程序不打开
+物理 UART、不访问 nRF、不安装到镜像或注册后台服务。
+
+```sh
+# 在有交叉编译产物的目标机上，两个参数都使用真实的绝对路径：
+/path/to/tdvp-nrf52840-target-selftest /usr/local/bin/tdvp-nrf52840
+```
+
+2026-09-08 实测 5 个场景通过：完整 BLE 协议回放（包含发现、读写、通知和
+断开）、静默对端超时、错误身份后不发送 BLE 命令、扫描只 ACK 不完成、
+SIGTERM 取消。每个场景检查原 termios 恢复、TIOCEXCL 清除、退出码、精确
+命令序列和关键输出。宿主机同样通过这 5 个场景，原 33 个 Python PTY 场景
+也再次通过；CI 的同一测试入口现在会执行两组测试。
+
+原生测试程序 SHA-256 为
+`cd7e34fa1aa7476a17423708d235e435c6f48492043ab38f3dd1df210351b1c4`，
+部署在 `/root/tdvp-nrf-at-host.X5HXzS/tdvp-nrf52840-target-selftest`。
+物理 UART1 计数前后完全相同；AI idle/error=0、completed=596，VGLite PID/FD
+不变。该结果比 `--help` 多验证了目标机的真实 libc/termios/poll/进程路径，
+**仍然不是物理 UART 或 BLE 无线验收**。
+
+## 桌面接口核对
+
+镜像 Buildroot 包固定使用独立仓库 `tdvp-quick-settings` 的 `v0.2.3`，提交
+`527d5d8a4c4f38ec19a55bd416af3adb4b4f0a93`。只读核对该 tag 后确认：
+
+- [状态派生](https://github.com/vicliu624/tdvp-quick-settings/blob/v0.2.3/src/core/status.cpp)
+  仅在 `bluetooth_available && bluetooth_control_available` 时显示 Bluetooth tile。
+- [点击处理](https://github.com/vicliu624/tdvp-quick-settings/blob/v0.2.3/src/wayland/wayland_app.cpp)
+  只发送 `SET bluetooth-power on|off`，并核对返回的 enabled 状态。
+- [后端协议](https://github.com/vicliu624/tdvp-quick-settings/blob/v0.2.3/docs/backend-protocol.md)
+  没有 BLE 扫描、设备选择、连接、GATT 或独立 AT 后端能力字段。
+
+因此不能在镜像服务里把 AT ready 映射成 power-control-available 来强行显示
+此按钮；那会暴露一个并不存在的电源控制。还需要按用户用途扩展独立 UI 的
+契约和 Linux 后端，或选择经明确授权的另一固件路线。BLE 数据、系统级 HID
+和音频用途不是同一能力，不能在未明确需求时把其中一个替代为全部蓝牙集成。
+检查时独立 UI 工作树已有未提交修改，本轮没有编辑、提交或推送该仓库。
