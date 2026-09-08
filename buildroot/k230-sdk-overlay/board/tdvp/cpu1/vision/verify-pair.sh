@@ -18,7 +18,7 @@ for field in 'resource_owner=cpu1-ai-vision' 'ownership_contract=2' \
     'mmz_base=0x14000000' 'mmz_size=0x08000000' \
     'transport_base=0x1c000000' 'transport_size=0x02000000' \
     'camera=gc2093-csi2' 'ai_engines=gnne,ai2d,fft' \
-    'ai_job_abi=1' 'ai_job_backend=ai2d' 'ai_job_control=0x1dff2000'; do
+    'ai_job_abi=1' 'ai_job_backend=ai2d,fft' 'ai_job_control=0x1dff2000'; do
     [ "$(grep -c "^${field%%=*}=" "$manifest")" -eq 1 ] || fail "missing/duplicate firmware key: ${field%%=*}"
     [ "$(grep -Fxc "$field" "$manifest")" -eq 1 ] || fail "missing/duplicate firmware field: $field"
 done

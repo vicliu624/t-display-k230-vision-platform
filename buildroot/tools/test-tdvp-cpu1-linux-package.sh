@@ -37,7 +37,7 @@ for claim in tdvp-cpu1-kpu-sram tdvp-cpu1-shared-sram tdvp-cpu1-gnne-fft-ai2d; d
 done
 cp "$module" "$installed"
 # A pre-service bridge must not pass the new paired userspace/CPU1 contract.
-for claim in ai_abi=1 backend=cpu1-ai2d; do
+for claim in ai_abi=1 backend=cpu1-ai2d,fft; do
     LC_ALL=C sed "s/$claim/xxxxxxxx/g" "$module" > "$installed"
     if bash "$vision/verify-rootfs.sh" "$target" > "$temporary/rejected.log" 2>&1; then
         echo "missing async AI service claim accepted: $claim" >&2; exit 1

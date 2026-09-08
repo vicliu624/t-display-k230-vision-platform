@@ -15,7 +15,7 @@ else
         'mmz_base=0x14000000' 'mmz_size=0x08000000' \
         'transport_base=0x1c000000' 'transport_size=0x02000000' \
         'camera=gc2093-csi2' 'ai_engines=gnne,ai2d,fft' \
-        'ai_job_abi=1' 'ai_job_backend=ai2d' 'ai_job_control=0x1dff2000' > "$test_dir/manifest"
+        'ai_job_abi=1' 'ai_job_backend=ai2d,fft' 'ai_job_control=0x1dff2000' > "$test_dir/manifest"
 fi
 bash "$guard" "$candidate" "$fdtget" "$test_dir/manifest"
 if bash "$guard" "$baseline" "$fdtget" "$test_dir/manifest" > "$test_dir/rejected.log" 2>&1; then

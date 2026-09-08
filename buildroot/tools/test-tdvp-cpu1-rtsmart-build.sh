@@ -24,6 +24,7 @@ bash "${CPU1_DIR}/build-rtsmart.sh" "${OUTPUT_DIR}/fw_payload.bin" \
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-calibration.sh" "${RTSMART}/mpp"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-capture.sh" "${RTSMART}/mpp"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-fft-selftest.sh" "${RTSMART}/mpp"
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-fft-job.sh" "${RTSMART}/mpp"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-ai-guard.sh" "${RTSMART}/rtsmart/kernel/rt-thread"
 bash "${SCRIPT_DIR}/test-tdvp-ai-job.sh"
 bash "${SCRIPT_DIR}/test-tdvp-ai-abi.sh"

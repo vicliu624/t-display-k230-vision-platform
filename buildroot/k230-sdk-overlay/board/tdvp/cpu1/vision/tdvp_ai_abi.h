@@ -23,8 +23,14 @@ typedef uint64_t tdvp_ai_u64;
 #define TDVP_AI_OUTPUT_BASE 0x1db00000UL
 #define TDVP_AI_BUFFER_BYTES 0x00300000UL
 #define TDVP_AI_AI2D 1U
+#define TDVP_AI_FFT 3U
 #define TDVP_AI_CAP_AI2D (1U << TDVP_AI_AI2D)
+#define TDVP_AI_CAP_FFT (1U << TDVP_AI_FFT)
+#define TDVP_AI_CAPABILITIES (TDVP_AI_CAP_AI2D | TDVP_AI_CAP_FFT)
 #define TDVP_AI_CHW_U8 0x33574843U
+#define TDVP_AI_COMPLEX_I16 0x36314943U /* CI16: LE real/imaginary pairs */
+#define TDVP_AI_FFT_INVERSE 1U
+#define TDVP_AI_FFT_SHIFT_MASK 0x000fff00U /* one right-shift bit per FFT stage */
 #define TDVP_AI_STATE_IDLE 1U
 #define TDVP_AI_RUNNING 2U
 #define TDVP_AI_RESULT 3U
@@ -48,10 +54,14 @@ struct tdvp_ai_cpu1_line {
     tdvp_ai_u32 capabilities;
     tdvp_ai_u32 reserved[16];
 };
-/* Linux write(): this 128-byte header followed by packed NCHW U8 input.
+/* Linux write(): this 128-byte header followed by the selected input format.
  * User supplies zero for all four cookie/id fields; kernel fills them.
  * Dimensions are bounded independently on both sides before data access.
- * Crop happens before constant per-channel padding; no resize/normalization.
+ * AI2D: crop before constant per-channel padding; no resize/normalization.
+ * FFT: width is N (64..4096 power of two), height=1 on both sides, CI16.
+ * Crop/pad fields MUST be zero. flags permits only INVERSE and stage shifts
+ * in bits 8..19; stages >= log2(N) MUST be zero. No hardware control bits,
+ * physical pointers, interrupt mask, clock gating or timeout registers.
  */
 struct tdvp_ai_request {
     tdvp_ai_u32 magic, version, bytes, operation;
@@ -79,14 +89,35 @@ struct tdvp_ai_control {
     struct tdvp_ai_response response;
 };
 
+/* Caller must first validate the complete request. Zero rejects unknown ops. */
+static inline tdvp_ai_u32 tdvp_ai_output_bytes(const struct tdvp_ai_request *r)
+{
+    if (r->operation == TDVP_AI_AI2D) return r->output_width * r->output_height * 3U;
+    if (r->operation == TDVP_AI_FFT) return r->output_width * 4U;
+    return 0;
+}
+
 static inline int tdvp_ai_validate_request(const struct tdvp_ai_request *r)
 {
     tdvp_ai_u64 input, output;
     if (!r || r->magic != TDVP_AI_MAGIC || r->version != TDVP_AI_VERSION ||
-        r->bytes != sizeof(*r) || r->flags || r->format != TDVP_AI_CHW_U8)
+        r->bytes != sizeof(*r) || !r->budget_ms || r->budget_ms > 60000U)
         return -EINVAL;
+    if (r->operation == TDVP_AI_FFT) {
+        tdvp_ai_u32 n = r->input_width;
+        if (r->format != TDVP_AI_COMPLEX_I16 || n < 64U || n > 4096U || (n & (n - 1U)) ||
+            r->input_height != 1U || r->output_width != n || r->output_height != 1U ||
+            (r->flags & ~(TDVP_AI_FFT_INVERSE | TDVP_AI_FFT_SHIFT_MASK)) ||
+            ((r->flags >> 8) & ~(n - 1U)) ||
+            r->crop_x || r->crop_y || r->crop_width || r->crop_height ||
+            r->pad_left || r->pad_right || r->pad_top || r->pad_bottom ||
+            r->pad_value[0] || r->pad_value[1] || r->pad_value[2]) return -EINVAL;
+        if (r->input_bytes != n * 4U || r->output_capacity < n * 4U ||
+            r->output_capacity > TDVP_AI_BUFFER_BYTES) return -EMSGSIZE;
+        return 0;
+    }
     if (r->operation != TDVP_AI_AI2D) return -EOPNOTSUPP;
-    if (!r->budget_ms || r->budget_ms > 60000U || !r->input_width || !r->input_height ||
+    if (r->flags || r->format != TDVP_AI_CHW_U8 || !r->input_width || !r->input_height ||
         r->input_width > 1024U || r->input_height > 1024U ||
         !r->output_width || !r->output_height || r->output_width > 1024U || r->output_height > 1024U ||
         !r->crop_width || !r->crop_height || r->crop_width > r->input_width ||

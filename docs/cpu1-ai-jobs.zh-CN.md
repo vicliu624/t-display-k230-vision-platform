@@ -1,11 +1,12 @@
-# CPU1 异步 AI 任务：AI2D 服务与 KPU 参考结果
+# CPU1 异步 AI 任务：AI2D / FFT 服务与 KPU 参考结果
 
 ## 当前交付边界
 
 生产 CPU1 vision worker 已集成启动期常驻的 AI supervisor/executor。Linux
 通过 `/dev/tdvp-ai` 的 `write/poll/read` 异步提交请求，CPU1 使用固定 nncase 2.9.0
-运行库调用真实 AI2D，然后返回结果。**目前只开放 CHW uint8 的恒等、裁剪和
-逐通道常量填充，不是异步 KPU/FFT API，更不等于完整视觉模型流水线。**
+运行库调用真实 AI2D，然后返回结果。还可通过同一入口调用 CPU1 的 PIO 硬件
+FFT 驱动。**目前开放 CHW uint8 的恒等、裁剪、逐通道常量填充，以及复数
+int16 FFT/IFFT；尚未开放 KPU API，也不等于完整视觉模型流水线。**
 
 `tdvp_ai_job.{c,h}` 继续作为 supervisor 私有的生命周期核心；Linux 接口编入
 现有启动期锁定的 `tdvp_cpu1_vision.ko`，没有第二个 accelerator owner，也没有
@@ -23,7 +24,8 @@ video 组，实测可提交和读取 AI2D 请求，不要求 root 或 `/dev/mem`
 1. 以 `O_RDWR | O_NONBLOCK | O_CLOEXEC` 打开 `/dev/tdvp-ai`。当前只允许一个
    客户端；已有客户端或未完成的断开任务会返回 `EBUSY`。
 2. 等待 `POLLOUT`，一次 `write` 提交 128 字节请求头与紧随其后的 CHW uint8
-   输入。应用必须将四个 cookie/ID 字段置零，由内核绑定当前所有权代次和客户端。
+   输入（FFT 使用下述 CI16 格式）。应用必须将四个 cookie/ID 字段置零，由内核
+   绑定当前所有权代次和客户端。
 3. 成功写入只表示已发布，不表示执行完成。等待 `POLLIN` 后，一次 `read`
    接收 128 字节结果头与实际输出数据。`POLLERR` 表示服务已锁存故障。
 4. 上一个结果没有读完前，新的写入返回 `EAGAIN`；短缓冲区返回 `EMSGSIZE`，
@@ -31,11 +33,27 @@ video 组，实测可提交和读取 AI2D 请求，不要求 root 或 `/dev/mem`
 5. 关闭执行中的客户端不会取消硬件或释放在途缓冲区。旧任务真实完成、结果验证
    并丢弃之后，才允许新客户端打开，旧结果不会交给新客户端。
 
-输入/输出各限 3 MiB；宽高各为 1–1024，输入长度必须恰好为 `3*width*height`，
+AI2D 输入/输出各限 3 MiB；宽高各为 1–1024，输入长度必须恰好为 `3*width*height`，
 裁剪范围和填充后的尺寸必须一致。期限为 1–60000 ms。两端独立验证头部、长度、
 维度和运算类型，拒绝溢出、越界和未开放的操作。接口上限并不代表所有合法形状
 都已在硬件上验收；本轮实际数值覆盖的形状见下文。没有 resize、归一化、DMA-BUF、
 用户物理地址、共享 MMZ 映射或零拷贝 API。
+
+FFT 使用同一 128 字节头和任务租约，不改变既有 AI2D 字节布局：
+
+- `operation=TDVP_AI_FFT`（3），`format=TDVP_AI_COMPLEX_I16`，输入/输出均为
+  小端有符号 int16 实部、虚部交错排列；不把 vendor ioctl 结构暴露给 Linux。
+- 两侧 width 为 N：64、128、256、512、1024、2048 或 4096；height 均为 1。
+  输入长度恰好为 `4*N`，输出也是 `4*N`。所有 crop/pad 字段必须为零。
+- flags bit 0 为逆变换，bits 8–19 为逐级右移掩码；超出 `log2(N)` 的阶段位及
+  其他位全部拒绝。全阶段右移掩码为 `(N-1)<<8`，对应总计除以 N；flags=0 的
+  正变换、flags=1 的逆变换均不额外归一化。中间 shift 组合虽有参数校验，本轮
+  硬件数值覆盖的是不缩放与全阶段缩放，不代表所有组合已验收。
+- CPU1 executor 自己打包固定 `k_fft_ioctl.h`，调用已经验证的 `/dev/fft_device`
+  PIO 驱动。没有系统 SDMA、用户物理地址、共享 reset、IRQ mask 或 clock-gating
+  参数。真实 ioctl 完成并通过所有权/期限检查后才发布输出。
+- 能力掩码、manifest 的 `ai_job_backend=ai2d,fft` 和 rootfs 模块标记要求两侧
+  配对更新。旧 AI2D 用户程序可继续使用原请求，但不能混装旧 CPU1 或旧内核桥接。
 
 新增区域完全位于现有 32 MiB transport reservation 的未使用部分：
 
@@ -115,7 +133,7 @@ bash buildroot/tools/test-tdvp-ai-abi.sh
 不同处理、迟到完成、owner/peer 变化、时钟回退、缺少静止证明、越界输出、非法
 错误码、未开放的 KPU/FFT 能力、任意大 opcode、大小/期限边界与 ID 回绕拒绝。
 
-## 2026-09-08 远端部署与实测
+## 2026-09-08 首轮 AI2D 部署与实测（dba055f）
 
 在确认卡分区、现有 slot 哈希并备份后，配对更新 CPU1 10–30 MiB 原始 slot、
 Linux bridge 和 udev 规则，再执行整板软件重启。slot 写入后读回一致；首 10 MiB
@@ -157,6 +175,58 @@ Linux 模块；回退同样需要配对文件、读回校验和整板重启。
 并行日志保留在备份目录的 `coexistence.wZ5h0w/`。CLI 是手动诊断程序，不安装
 菜单、不自动运行。硬件故障/超时后的永久锁存规则有主机回归，本轮没有在运行中
 故意卡住 DMA 或破坏所有权，因此不能声称这些硬件错误注入已通过。
+
+## 2026-09-08 FFT/IFFT 接入、配对部署与共存复验
+
+本次沿用上述 ABI v1 布局和预留内存，只扩展明确的 FFT 操作与能力位。没有修改
+FFT 内核 PIO 驱动、所有权记录、摄像头槽、VGLite 或 SPL/U-Boot。Linux 的结果
+长度按已验证的 operation 计算，不再把 FFT 输出当作三通道图像长度。
+
+Ubuntu 24.04 容器中的真实生产 preflight 两次构建通过。主机 ABI 回归扩展到
+93 项；提取并执行实际 `execute_fft()`，固定 SDK ioctl 结构、参数打包、输出边界、
+open/ioctl/close/期限故障后的租约保留共 37 项通过。真实 Linux 模块安装、ext4
+检查和 37 项 DTB/manifest 错误配对拒绝测试通过。诊断 CLI 也由对应 Linux 交叉
+工具链构建；没有将主机执行结果冒充硬件计算。
+
+| 已部署产物 | 字节数 / SHA-256 |
+| --- | --- |
+| CPU1 raw payload | 5481688 / `271cdb10f6394dc8bf2f61172973ae3e8e0cab7f9861d74832cf24b8e7cb83fc` |
+| 填充后的 20 MiB slot | `984d9a8717cf05b6c4075fd327c862b94ea487b9f34f979708a2de0264bc7d66` |
+| CPU1 worker ELF | `f1537c59e6d51638de3ad5a3b913b769cc716a212d0d779ea9ef64882d6396db` |
+| Linux bridge | `312ad11230dde06828ff4cd3a4c16d3fe4db3f44d61337c7b8bae54715b9a259` |
+| FFT job CLI | `ae20c528e7e0b34ecf290988d750db8bfa2f4f9ae8b3aba236a564a9f399f620` |
+
+在备份现有 AI2D slot/模块后成对替换，slot 完整读回一致，首 10 MiB 和 boot p1
+哈希仍分别为 `76015f6e72d0bfcb89c3faa31fbe460e5288354a1791fc35cc52108cb84e4db7`
+及 `082ad56db2decfc1f5dbe4874c674fe8b7dfddef09177b7dab8575437cb3feb8`。整板软件
+重启后的 boot ID 为 `4b25f9ee-9e55-4ae5-bb6a-f9f016ba8f88`。备份和日志保留在
+`/root/tdvp-cpu1-ai-fft.dfJ7Rc`，包括 `module.before.ko`、`slot.before.bin` 和
+前缀读回文件；没有热复位 CPU1 或热卸载内核模块。
+
+真实 Linux CLI 为 `buildroot/tools/tdvp-cpu1-fft-job-probe.c`。每轮包含 112 个
+FFT/IFFT 数值场景：7 个点数 × 2 个方向 × 2 种缩放 × 4 个闭式参考向量。
+向量是首点实脉冲、实直流、N/4 位置实脉冲、N/4 位置虚脉冲；脉冲幅度 N，
+直流幅度 1。每个输出 bin 的实/虚部都比较，阈值预先固定为 1 LSB。每完成一个
+点数的 16 个 FFT 请求便穿插一个 16×16 AI2D 恒等任务，另有一个关闭后丢弃的
+FFT 任务。因此每轮是 112 + 7 + 1 = 120 个完成任务。
+
+- 第一轮 112/112 FFT/IFFT、7/7 AI2D 通过；FFT 最大误差 0，计数为 120/120/120。
+- 正常密码登录后，labwc PID 656 的 renderer 为 vglite，FD 18 为 `/dev/vg_lite`；
+  不修改 greetd、不使用自动登录。
+- 第二轮以普通 `tdvp` 用户在摄像头采集期间运行，同样 112/112 FFT/IFFT、7/7
+  AI2D 通过，FFT 最大误差仍为 0。两端状态检查、结果租约及非法控制位拒绝通过。
+- 紧接着以同一普通用户运行上一版已部署的 AI2D CLI（SHA `50c24306...`），
+  15/15 组逐字节回归及一个 detached 任务通过，证明原 AI2D 客户端仍可使用。
+- 摄像头同时完整送达 300 帧、933120000 字节，sequence=1..300，
+  PTS=226462195..250539680。FFT 前/后及 AI2D 后，摄像头均为 running，分别
+  已送达 1、87、104 帧；桌面 PID/FD 未变。结束后 capture=687、published=303、
+  dropped=384，仍不是无丢帧或 30 fps 性能验收。
+- 最终 submitted=accepted=completed=256，AI idle/error=0、owner_error=0，
+  摄像头 idle/error=0、ownership ready。总计 224 个 FFT 数值任务、29 个 AI2D
+  数值任务和 3 个 detached 完成任务。并行日志在 `coexistence.CRndlP/`。
+
+这验证了 FFT/IFFT 的上述闭式输入、缩放和跨核集成，不证明任意输入的量化误差、
+全部幅度/溢出组合、语音前端或识别模型质量。KPU 与完整摄像头模型流水线仍未开放。
 
 ## 官方 KWS 模型的主机参考
 
@@ -207,5 +277,5 @@ python3.10 buildroot/tools/tdvp-cpu1-kws-reference.py \
 当前远端卡仍未包含新的启动解压交接保护，详见
 [启动 SRAM 交接文档](cpu1-boot-sram-handoff.zh-CN.md)。本轮没有为绕过这一门槛
 单独替换 SPL/U-Boot，也没有在板上执行此 KWS 模型。Linux 异步 AI2D 已接通，
-但完整 KPU 模型数值测试、KPU/FFT 异步后端、摄像头到模型的完整流水线和
+但完整 KPU 模型数值测试、KPU 异步后端、摄像头到模型的完整流水线和
 nRF52840 蓝牙仍不是本次已完成项。

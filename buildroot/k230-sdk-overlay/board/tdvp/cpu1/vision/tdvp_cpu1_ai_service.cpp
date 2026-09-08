@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Boot-lifetime supervisor + executor. Only AI2D is registered in this version.
+// Boot-lifetime supervisor + executor. AI2D and PIO FFT are registered here.
 // KPU model execution is deliberately NOT implied by resource ownership READY.
 #define _POSIX_C_SOURCE 200809L
 #include "tdvp_ai_abi.h"
@@ -17,7 +17,9 @@
 #include <cstring>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <k_fft_ioctl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -49,6 +51,10 @@ thread_local bool executing_ai;
 int ai2d_fd = -1; // Only the single executing_ai thread accesses this descriptor.
 struct retained_job { runtime_tensor input, output; ai2d_builder *builder{}; };
 retained_job *retained; // Root remains alive if execution blocks or fails.
+k_fft_args_st *fft_retained; // No DMA; still retained on any uncertain completion.
+static_assert(sizeof(k_fft_cfg_reg_st) == 8 && offsetof(k_fft_args_st, data) == 16 &&
+    sizeof(k_fft_args_st) == 16400 && FFT_N64 == 0 && FFT_N4096 == 6 &&
+    RIRI == 0 && RIRI_OUT == 0 && FFT_MODE == 0 && IFFT_MODE == 1, "Pinned FFT ioctl ABI drift");
 
 void fence() { __atomic_thread_fence(__ATOMIC_SEQ_CST); }
 void park(void *) { const timespec delay{0, 10000000}; (void)nanosleep(&delay, nullptr); }
@@ -94,8 +100,34 @@ uintptr_t physical(runtime_tensor &tensor, size_t bytes)
         bytes > TDVP_VISION_MMZ_BASE + TDVP_VISION_MMZ_SIZE - address) failed(-ERANGE);
     return address;
 }
+void execute_fft()
+{
+    check();
+    const size_t bytes = tdvp_ai_output_bytes(&request);
+    unsigned int point = 0;
+    for (unsigned int n = 64; n < request.input_width; n <<= 1) ++point;
+    fft_retained = new k_fft_args_st{};
+    fft_retained->reg.cfg_value = point | ((request.flags & TDVP_AI_FFT_INVERSE) ? 8U : 0U) |
+        (request.flags & TDVP_AI_FFT_SHIFT_MASK);
+    std::memcpy(fft_retained->data, input, request.input_bytes);
+    check();
+    int fd = open("/dev/fft_device", O_RDWR | O_CLOEXEC);
+    if (fd < 0) failed(-EIO);
+    check();
+    // The pinned PIO driver returns only after FIFO output, IRQ completion and
+    // FFT-local disable. It never transfers using Linux's system SDMA.
+    if (ioctl(fd, KD_IOC_CMD_FFT_IFFT, fft_retained)) failed(-EIO);
+    check();
+    std::memcpy(output, fft_retained->data, bytes); fence();
+    if (close(fd)) failed(-EIO);
+    check();
+    delete fft_retained; fft_retained = nullptr;
+    response.output_bytes = uint32_t(bytes);
+    if (tdvp_cpu1_ai_guard_finish(&guard, &executor_ops)) failed(-EIO);
+}
 void execute_one()
 {
+    if (request.operation == TDVP_AI_FFT) { execute_fft(); return; }
     check();
     const size_t bytes = size_t(request.output_width) * request.output_height * 3;
     dims_t in_shape{1, 3, request.input_height, request.input_width};
@@ -276,7 +308,7 @@ extern "C" int tdvp_cpu1_ai_service_start(void *vision_control, void *ownership,
     control->cpu1_side.version = TDVP_AI_VERSION; control->cpu1_side.bytes = sizeof(*control);
     control->cpu1_side.owner_cookie = owner_cookie; control->cpu1_side.peer_cookie = peer_cookie;
     control->cpu1_side.heartbeat = 1; control->cpu1_side.state = TDVP_AI_STATE_IDLE;
-    control->cpu1_side.capabilities = TDVP_AI_CAP_AI2D;
+    control->cpu1_side.capabilities = TDVP_AI_CAPABILITIES;
     uint64_t now = 0;
     int error = clock_ms(nullptr, &now);
     supervisor_owner = {ownership, owner_cookie, peer_cookie, 0, now};
@@ -284,12 +316,12 @@ extern "C" int tdvp_cpu1_ai_service_start(void *vision_control, void *ownership,
     input = static_cast<unsigned char *>(tdvp_cpu1_ai_map_buffer(0));
     output = static_cast<unsigned char *>(tdvp_cpu1_ai_map_buffer(1));
     if (!input || input == MAP_FAILED || !output || output == MAP_FAILED) error = -ENOMEM;
-    if (!error) error = tdvp_ai_job_init(&job, owner_cookie, peer_cookie, TDVP_AI_CAP_AI2D, now);
+    if (!error) error = tdvp_ai_job_init(&job, owner_cookie, peer_cookie, TDVP_AI_CAPABILITIES, now);
     pthread_t executor, supervisor;
     if (!error) error = launch(&executor, execute);
     if (!error) error = launch(&supervisor, supervise);
     if (error) publish_fault(error);
     fence(); control->cpu1_side.magic = TDVP_AI_MAGIC; fence();
-    std::printf("TDVP CPU1 AI: asynchronous AI2D service %s (%d); KPU/FFT jobs unavailable\n", error ? "fault" : "started", error);
+    std::printf("TDVP CPU1 AI: asynchronous AI2D/FFT service %s (%d); KPU jobs unavailable\n", error ? "fault" : "started", error);
     return error;
 }

@@ -69,7 +69,7 @@ for unit in tdvp_cpu1_capture tdvp_cpu1_transport tdvp_cpu1_vision_worker tdvp_a
     worker_objects+=("$output/$unit.o")
 done
 "${cross}g++" -std=c++17 -DBUILDING_RUNTIME -Wall -Wextra "${ai_flags[@]}" \
-    -I"$runtime" -I"$runtime/nncase/include" -c "$source_dir/tdvp_cpu1_ai_service.cpp" -o "$output/tdvp_cpu1_ai_service.o"
+    "${includes[@]}" -I"$runtime" -I"$runtime/nncase/include" -c "$source_dir/tdvp_cpu1_ai_service.cpp" -o "$output/tdvp_cpu1_ai_service.o"
 "${cross}g++" "${ai_flags[@]}" "${worker_objects[@]}" "$output/tdvp_cpu1_ai_service.o" \
     "$output/mpi_sensor.o" "$output/mpi_sensor_type_to_mirror.o" \
     -T "$source_dir/tdvp_nncase_tls.lds" \

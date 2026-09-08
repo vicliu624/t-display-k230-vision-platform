@@ -88,7 +88,7 @@ static int ai_refresh(struct tdvp_ai_linux *ai)
         return ai_fault(ai, -EPIPE);
     }
     if (readl(&peer->version) != TDVP_AI_VERSION || readl(&peer->bytes) != sizeof(struct tdvp_ai_control) ||
-        readl(&peer->capabilities) != TDVP_AI_CAP_AI2D) return ai_fault(ai, -EPROTO);
+        readl(&peer->capabilities) != TDVP_AI_CAPABILITIES) return ai_fault(ai, -EPROTO);
     ai->peer_ready = true;
     state = readl(&peer->state);
     if (state == TDVP_AI_FAULT) {
@@ -108,7 +108,7 @@ static int ai_refresh(struct tdvp_ai_linux *ai)
     ai->accepted = accepted; ai->completed = completed;
     if (ai->pending && !ai->ready && completed == ai->submitted) {
         unsigned int i;
-        u32 expected = ai->request.output_width * ai->request.output_height * 3U;
+        u32 expected = tdvp_ai_output_bytes(&ai->request);
         rmb(); memcpy_fromio(response, &ai->control->response, sizeof(*response)); rmb();
         state = readl(&peer->state); /* RESULT is stable until our later ack. */
         if (response->owner_cookie != ai->owner_cookie || response->peer_cookie != ai->peer_cookie ||
@@ -268,7 +268,7 @@ static ssize_t status_show(struct device *dev, struct device_attribute *attr, ch
     struct tdvp_ai_linux *ai = container_of(misc, struct tdvp_ai_linux, misc);
     ssize_t result;
     if (!mutex_trylock(&ai->lock)) return -EAGAIN;
-    result = sysfs_emit(buffer, "ai_abi=1\nbackend=cpu1-ai2d\nkpu_jobs=unavailable\nfft_jobs=unavailable\n"
+    result = sysfs_emit(buffer, "ai_abi=1\nbackend=cpu1-ai2d,fft\nkpu_jobs=unavailable\nfft_jobs=available\n"
         "state=%s\nerror=%d\nowner_error=%d\nclient_open=%u\npending=%u\ndetached=%u\n"
         "submitted=%llu\naccepted=%llu\ncompleted=%llu\n",
         ai->fault ? "fault" : !ai->peer_ready ? "pending" : ai->ready ? "result" : ai->pending ? "running" : "idle",

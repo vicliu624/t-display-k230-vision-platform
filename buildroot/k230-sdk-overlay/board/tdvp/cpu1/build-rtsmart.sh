@@ -349,7 +349,7 @@ install -m 0644 "${CPU1_FIRMWARE}" "${FIRMWARE_OUTPUT}"
 	printf 'mmz_base=0x14000000\nmmz_size=0x08000000\n'
 	printf 'transport_base=0x1c000000\ntransport_size=0x02000000\n'
 	printf 'camera=gc2093-csi2\nai_engines=gnne,ai2d,fft\n'
-	printf 'ai_job_abi=1\nai_job_backend=ai2d\nai_job_control=0x1dff2000\n'
+	printf 'ai_job_abi=1\nai_job_backend=ai2d,fft\nai_job_control=0x1dff2000\n'
 	printf 'worker_sha256='
 	sha256sum "${SDK_RTSMART_BUILD_DIR}/tdvp-vision/tdvp-vision-worker.elf" | awk '{print $1}'
 	printf 'firmware_size='
