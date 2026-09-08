@@ -269,6 +269,57 @@ python3.10 buildroot/tools/tdvp-cpu1-kws-reference.py \
 
 ## 仍然存在的 KPU 部署门槛
 
+### 2026-09-08：初始化等待保护（未部署）
+
+在固定 `libnncase.rt_modules.k230.a` 的真实 RISC-V 链接结果中，
+`k230_runtime_function::invoke_core()` 先调用 `gnne_init()`，后者跳转到
+`gnne_disable()`：写入 `ENABLE_CLEAR` 后，无截止时间地轮询 status 的
+reset_status 位。模型执行的另一处 `poll(..., -1)` 返回后直接继续处理，
+没有检查返回值；不能只改变 poll 超时参数就认为执行安全。
+
+本次仅处理前一个初始化入口，**没有开放或执行 KPU 模型**：
+
+- 实际生产 worker 通过 `--wrap=gnne_init` 使用
+  `tdvp_cpu1_kpu_prepare()`；不再调用原来带忙等的初始化函数。
+- 先检查任务期限、所有权、KPU IDLE、正常 reset 状态及异常/AXI 错误。
+  任一不满足便拒绝初始化，绝不在忙碌或出错后尝试复位恢复。
+- 唯一硬件写操作仍为固定运行库的 `gnne_ctrl_set(ENABLE_CLEAR)`；该符号
+  的实际反汇编是一条 64 位控制寄存器写，不包含等待或共享 PLL/reset 操作。
+- 后续等待受任务期限、单调时钟报告的 100 ms 和最多 100 次状态读取约束。
+  读取间让出线程；读取次数上限用于时钟停止推进的情形，不宣称异常调度或
+  损坏时钟下仍有精确的 100 ms 墙钟保证。
+- 故障锁存后初始化不重试；生产 wrapper 停驻并保留 executor 栈及其对象。
+  这些状态检查**不等于整个 DMA/总线静止证明**，也不授予释放在途模型缓冲区
+  的权限。后续 KPU 完成检查、共享 SRAM 启动保护及实际数值验收仍必需。
+
+40 个主机场景及相同场景的 ASan/UBSan 回归通过，包括忙碌/异常拒绝、延迟
+复位状态、局部/任务超时、时钟倒退或冻结、owner 丢失、I/O 错误、重复调用和
+DONE 状态误调用。另使用真实 SDK `gnne.h` 验证状态位及寄存器结构布局。
+
+当前生产 worker 尚不包含 `invoke_core()`，所以仅检查 wrapper 符号存在不足以
+证明模型调用已受保护。新增的 build-only 链接审计复用真实生产对象，并强制
+链接固定库的模型执行函数，核对其跳转到 `__wrap_gnne_init`，没有具名解析到
+原始 `gnne_init` 的调用。审计 ELF 不执行、不安装进 ROMFS，不充当模型验收。
+另外在独立测试副本移除 `--wrap=gnne_init` 后，真实模型 ELF 被同一检查器
+拒绝；恢复正式链接参数后通过，避免只有“符号存在”而调用仍绕过保护的假通过。
+
+```sh
+bash buildroot/tools/test-tdvp-cpu1-kpu-guard.sh /path/to/pinned/nncase/riscv64
+# 以下检查也已接入真实 CPU1 production preflight：
+bash buildroot/tools/test-tdvp-cpu1-kpu-link.sh /path/to/pinned/mpp \
+    /path/to/riscv64-unknown-linux-musl- /path/to/production/tdvp-vision
+```
+
+Ubuntu 24.04 容器中的候选仍声明 `ai_job_backend=ai2d,fft`，GNNE open 拒绝和
+KPU opcode 拒绝保持不变。此次没有更新设备的固件、内核模块或 SPL/U-Boot，
+不能把下面的启动部署门槛视为已解除。
+
+真实 production preflight 在复用 SDK/output 下构建两次通过，保留既有
+AI2D/FFT、旧 archive member 清理、五项构建错误传递及 VGLite lock/patch
+回归。此未部署候选的 raw payload 为 5486984 字节，SHA-256 为
+`cc4a727e61c1b789f4b028dd2e981d1772935ee76c9aa9df043b33ad687ae863`；
+worker SHA-256 为 `c3ff22c47133484ac30e723614c4f685d3007b5c186eda104735e06e634adaf5`。
+
 已反汇编固定 RT-Smart 运行库：K230 module 构造器打开 `/dev/gnne_device` 和
 `/dev/mem`，映射 `0x80000000` 与 `0x80400000`。**这些映射不能证明模型指令
 不使用 `0x80200000` 的共享 SRAM**。不能用主机模拟通过或 Linux reservation

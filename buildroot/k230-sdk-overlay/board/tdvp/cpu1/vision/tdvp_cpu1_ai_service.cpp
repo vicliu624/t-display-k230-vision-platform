@@ -6,9 +6,11 @@
 #include "tdvp_ai_job.h"
 #include "tdvp_cpu1_ai_guard.h"
 #include "tdvp_cpu1_ai_service.h"
+#include "tdvp_cpu1_kpu_guard.h"
 #include "tdvp_cpu1_vision_layout.h"
 #include <nncase/runtime/runtime_tensor.h>
 #include <nncase/runtime/runtime_op_utility.h>
+#include <nncase/runtime/k230/gnne.h>
 #include <nncase/functional/ai2d/ai2d_builder.h>
 #include <cerrno>
 #include <cstdarg>
@@ -269,6 +271,34 @@ int launch(pthread_t *thread, void *(*entry)(void *))
 
 extern "C" int __real_open(const char *, int, ...);
 extern "C" int __real_close(int);
+/* This C symbol is exported by the hash-pinned gnne.c object. The SDK header
+ * exposes the enum but not the helper declaration. Its actual RISC-V body is
+ * a single 64-bit control write, unlike gnne_disable's unbounded busy wait. */
+extern "C" void gnne_ctrl_set(gnne_ctrl_function_t);
+namespace {
+int kpu_status(void *, uint64_t *status)
+{
+    static_assert(sizeof(gnne_status) == 16 && GNNE_STATUS_IDLE == 0 &&
+        GNNE_RESET_STATUS_NORMAL == 0 && GNNE_EXCEPTION_OK == 0 &&
+        uint64_t(GNNE_CTRL_ENABLE_CLEAR) == (UINT64_C(1) << 32), "Pinned GNNE control ABI drift");
+    fence(); *status = gnne_get_status().data[0]; fence();
+    return 0;
+}
+int kpu_disable(void *)
+{
+    fence(); gnne_ctrl_set(GNNE_CTRL_ENABLE_CLEAR); fence();
+    return 0;
+}
+}
+extern "C" void __wrap_gnne_init()
+{
+    // This does not enable KPU jobs: /dev/gnne_device remains forbidden below.
+    // No raw gnne_init/gnne_disable call: either one would enter the old loop.
+    if (!executing_ai) failed(-EPERM);
+    const tdvp_cpu1_kpu_init_ops hardware{kpu_status, kpu_disable, nullptr};
+    int error = tdvp_cpu1_kpu_prepare(&guard, &executor_ops, &hardware);
+    if (error) failed(error); // Retain the entire executor stack and model.
+}
 extern "C" int __wrap_open(const char *path, int flags, ...)
 {
     mode_t mode = 0; bool has_mode = flags & O_CREAT;

@@ -63,7 +63,7 @@ for entry in \
 done
 ai_flags=(-O2 -mcmodel=medany -march=rv64imafdcv -mabi=lp64d -I"$source_dir")
 worker_objects=()
-for unit in tdvp_cpu1_capture tdvp_cpu1_transport tdvp_cpu1_vision_worker tdvp_ai_job tdvp_cpu1_ai_owner tdvp_cpu1_ai_guard; do
+for unit in tdvp_cpu1_capture tdvp_cpu1_transport tdvp_cpu1_vision_worker tdvp_ai_job tdvp_cpu1_ai_owner tdvp_cpu1_ai_guard tdvp_cpu1_kpu_guard; do
     "${cross}gcc" -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror "${ai_flags[@]}" "${includes[@]}" \
         -c "$source_dir/$unit.c" -o "$output/$unit.o"
     worker_objects+=("$output/$unit.o")
@@ -74,7 +74,7 @@ done
     "$output/mpi_sensor.o" "$output/mpi_sensor_type_to_mirror.o" \
     -T "$source_dir/tdvp_nncase_tls.lds" \
     -T "$linker" -n --static -Wl,-Map,"$output/tdvp-vision-worker.map" \
-    -Wl,--wrap=open,--wrap=close,--wrap=poll \
+    -Wl,--wrap=open,--wrap=close,--wrap=poll,--wrap=gnne_init \
     -Wl,--start-group "${archives[@]}" -L"$runtime/nncase/lib" \
     -lNncase.Runtime.Native -lnncase.rt_modules.k230 -lfunctional_k230 -lpthread -lm -Wl,--end-group \
     -o "$output/tdvp-vision-worker.elf"
@@ -85,6 +85,17 @@ if grep -Eq '\] \.tbss\.' "$output/tdvp-vision-worker.sections"; then
     echo 'FAIL orphan nncase TLS sections in CPU1 worker' >&2; exit 1
 fi
 grep -Eq ' T tdvp_cpu1_ai_service_start$' "$output/tdvp-vision-worker.symbols"
+grep -Eq ' T __wrap_gnne_init$' "$output/tdvp-vision-worker.symbols"
+grep -Eq ' T tdvp_cpu1_kpu_prepare$' "$output/tdvp-vision-worker.symbols"
+# Verify real linked calls, not just the presence of the wrapper object. The
+# old gnne_init definition may remain because it shares a vendor object with
+# other used helpers, but no direct call may bypass the bounded adapter.
+"${cross}objdump" -d "$output/tdvp-vision-worker.elf" | awk '
+    /[[:space:]](jal|jalr|j|jr)[[:space:]]/ && /<gnne_init>/ { bypass = 1 }
+    END { if (bypass) {
+        print "FAIL linked GNNE initialization bypass" > "/dev/stderr"; exit 1
+    } }
+'
 if grep -Eq ' [tT] (kd_mpi_vo_.*|kd_mpi_connector_.*|vg_lite_.*|sample_vicap_vo.*)$' "$output/tdvp-vision-worker.symbols"; then
     echo 'FAIL CPU1 worker linked a display owner' >&2
     exit 1
