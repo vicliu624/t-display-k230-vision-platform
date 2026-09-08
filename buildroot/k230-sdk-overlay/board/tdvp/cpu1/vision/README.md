@@ -563,6 +563,20 @@ shortcut. VGLite and non-AI2D display resources remain Linux-owned.
 
 ## Remaining release requirements
 
+See [2026-09-08 remote deployment evidence](../../../../../../docs/cpu1-remote-validation-20260908.zh-CN.md)
+for the subsequent board tests. A compatible CPU1 slot can be updated remotely
+after verifying the exact CPU0 boot partition, bridge, ABI and backups, followed
+by a whole-board reboot. This does not permit a running CPU1 hot reset or a
+mixed-layout update. Those tests fixed kernel startup and the non-MMZ shared
+mapping path, but actual capture still stalled; they are not AI acceptance.
+
+The worker maps only the three fixed shared reservations through the RT-Smart
+`/dev/mem` driver with `O_SYNC`. MPI's MMZ mapper remains for allocated camera
+buffers, not the independent transport. Optional capture progress is exposed
+in producer reserved words 0/1 (version/stage); old readers ignore it. These
+diagnostics neither advance heartbeat during blocked MPI calls nor permit DMA
+cleanup after an unproven stop.
+
 The Linux bridge additionally claims three physical resource windows on behalf
 of CPU1 before OFFER: KPU SRAM `0x80000000–0x80200000`, shared SRAM
 `0x80200000–0x80400000`, and GNNE/FFT/AI2D `0x80400000–0x80401000` (end

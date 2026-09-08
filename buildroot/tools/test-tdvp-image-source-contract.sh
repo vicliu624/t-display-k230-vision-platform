@@ -158,7 +158,7 @@ for mutation in login-command login-user session renderer-profile renderer-polic
 			printf 'stale or missing product enable policy\n' > "${TEMP_DIR}/mutant" ;;
 		greeter-renderer)
 			path=/usr/local/bin/tdvp-greeter-session
-			sed 's/export WLR_RENDERER=pixman/export WLR_RENDERER=vglite/' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;
+			sed 's/export WLR_RENDERER=vglite/export WLR_RENDERER=pixman/' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;
 		desktop-fallback)
 			path=/usr/local/bin/tdvp-labwc-session
 			sed '/^export WLR_RENDERER=vglite$/a TDVP_LABWC_FORCE_PIXMAN=1' "${TEMP_DIR}/root${path}" > "${TEMP_DIR}/mutant" ;;

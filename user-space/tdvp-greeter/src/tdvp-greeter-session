@@ -7,9 +7,11 @@ set -a
 . /etc/tdvp/labwc/environment
 set +a
 
-# The login compositor is a separate recovery entry point, not the accelerated
-# authenticated desktop. Keep it usable even if the desktop's GPU path fails.
-export WLR_RENDERER=pixman
+# Both login and authenticated compositors must use the image-owned VGLite
+# renderer. GPU failure is an error, never permission for a software fallback.
+unset LD_LIBRARY_PATH LD_PRELOAD WLR_RENDERER_ALLOW_SOFTWARE TDVP_LABWC_FORCE_PIXMAN
+export WLR_RENDERER=vglite
+export WLR_SCENE_DISABLE_DIRECT_SCANOUT=1
 unset TDVP_LABWC_VGLITE_FAILURE_RECOVERY TDVP_VGLITE_DIAGNOSTICS
 
 export HOME="${HOME:-/var/lib/greetd}"
