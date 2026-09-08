@@ -18,7 +18,7 @@ grep -aFq 'tdvp-vision' "${modules[0]}" || fail 'bridge lacks the application en
 grep -aFq 'status_version=1' "${modules[0]}" || fail 'bridge lacks read-only CPU1 telemetry'
 grep -aFq 'frames_delivered=' "${modules[0]}" || fail 'bridge lacks frame delivery telemetry'
 grep -aFq 'ai_abi=1' "${modules[0]}" || fail 'bridge lacks AI job ABI'
-grep -aFq 'backend=cpu1-ai2d,fft' "${modules[0]}" || fail 'bridge lacks CPU1 AI job endpoint'
+grep -aFq 'backend=cpu1-ai2d,fft,kpu-kws' "${modules[0]}" || fail 'bridge lacks CPU1 AI job endpoint'
 for claim in tdvp-cpu1-kpu-sram tdvp-cpu1-shared-sram tdvp-cpu1-gnne-fft-ai2d; do
     grep -aFq "$claim" "${modules[0]}" || fail "bridge lacks AI resource claim: $claim"
 done

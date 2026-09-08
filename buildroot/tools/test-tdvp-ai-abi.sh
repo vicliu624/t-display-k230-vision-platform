@@ -20,3 +20,12 @@ for invalid in 0 101 -1 x 1x ''; do
     [ "$result" -eq 2 ] || { echo "AI probe accepted invalid count: $invalid" >&2; exit 1; }
 done
 echo 'AI probe: PASS host compile and six invalid CLI counts (not hardware acceptance)'
+"${CC:-cc}" -std=c11 -O2 -Wall -Wextra -Werror -I"$vision" \
+    "$project/buildroot/tools/tdvp-cpu1-kpu-probe.c" -lm -o "$scratch/kpu-probe"
+for invalid in 0 65 -1 x 1x ''; do
+    result=0
+    "$scratch/kpu-probe" "$scratch/missing-reference" "$scratch/missing-output" "$invalid" \
+        > "$scratch/rejected.log" 2>&1 || result=$?
+    [ "$result" -eq 2 ] || { echo "KPU probe accepted invalid count: $invalid" >&2; exit 1; }
+done
+echo 'KPU probe: PASS host compile and six invalid CLI counts (not hardware acceptance)'

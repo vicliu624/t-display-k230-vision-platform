@@ -18,7 +18,13 @@ if [ "$#" -eq 1 ]; then
         "$root/buildroot/tools/tests/tdvp-cpu1-kpu-register-layout.cpp" -o "$work/layout"
     "$work/layout"
 fi
-# Keep this guard preparatory: do not expose unverified model execution.
-grep -Fq 'std::strcmp(path, "/dev/gnne_device")) { errno = EPERM;' "$source/tdvp_cpu1_ai_service.cpp"
+# Model loading and execution must use the same guarded service, not a demo
+# that bypasses its deadline/owner checks. Actual call-site audit follows in CI.
+grep -Fq 'request.operation != TDVP_AI_KPU' "$source/tdvp_cpu1_ai_service.cpp"
+# Embedded ELF bytes must not use nncase's default virtual-address pinning.
+# This policy assertion complements the hardware PC-range check and real model
+# regression; it does not claim that a string match proves DMA correctness.
+grep -Fq 'tdvp_cpu1_kws_model_start), model_bytes}, true)' "$source/tdvp_cpu1_ai_service.cpp"
 grep -Fq -- '--wrap=gnne_init' "$source/build-capture-probe.sh"
-echo 'PASS guard regression; KPU request gate remains closed'
+grep -Fq -- '--wrap=gnne_enable' "$source/build-capture-probe.sh"
+echo 'PASS KPU guard regression; hardware inference is a separate required test'

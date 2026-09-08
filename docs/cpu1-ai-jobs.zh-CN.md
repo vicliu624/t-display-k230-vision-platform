@@ -1,16 +1,20 @@
-# CPU1 异步 AI 任务：AI2D / FFT 服务与 KPU 参考结果
+# CPU1 异步 AI 任务：AI2D / FFT / 固定 KPU 模型
 
 ## 当前交付边界
 
 生产 CPU1 vision worker 已集成启动期常驻的 AI supervisor/executor。Linux
 通过 `/dev/tdvp-ai` 的 `write/poll/read` 异步提交请求，CPU1 使用固定 nncase 2.9.0
 运行库调用真实 AI2D，然后返回结果。还可通过同一入口调用 CPU1 的 PIO 硬件
-FFT 驱动。**目前开放 CHW uint8 的恒等、裁剪、逐通道常量填充，以及复数
-int16 FFT/IFFT；尚未开放 KPU API，也不等于完整视觉模型流水线。**
+FFT 驱动。**目前接入 CHW uint8 的恒等、裁剪、逐通道常量填充、复数
+int16 FFT/IFFT，以及固定官方 KWS 模型的 KPU 请求；这不等于任意模型接口、
+完整视觉模型流水线或语音转文字。** KPU 的实机状态和首轮失败记录单独见
+[KPU 部署验证](cpu1-kpu-remote-validation-20260908.zh-CN.md)。下文带日期/提交号
+的旧部署章节保留当时状态，不能用于判断新候选的当前能力。
 
 `tdvp_ai_job.{c,h}` 继续作为 supervisor 私有的生命周期核心；Linux 接口编入
 现有启动期锁定的 `tdvp_cpu1_vision.ko`，没有第二个 accelerator owner，也没有
-独立可热重启的 CPU1 服务。没有新增 Camera 菜单、模型文件或 Linux AI 后端。
+独立可热重启的 CPU1 服务。没有新增 Camera 菜单或 Linux AI 后端；唯一固定
+KWS 模型由 SDK 提供、校验 SHA 后嵌入 CPU1 worker，不接受 Linux 上传模型。
 
 本次不修改现有摄像头传输 ABI、所有权记录、VGLite/Wayland 或启动区。现有
 `/dev/tdvp-vision` 仍只传输 CPU1 采集的帧；它不等于模型推理结果接口。
@@ -24,7 +28,7 @@ video 组，实测可提交和读取 AI2D 请求，不要求 root 或 `/dev/mem`
 1. 以 `O_RDWR | O_NONBLOCK | O_CLOEXEC` 打开 `/dev/tdvp-ai`。当前只允许一个
    客户端；已有客户端或未完成的断开任务会返回 `EBUSY`。
 2. 等待 `POLLOUT`，一次 `write` 提交 128 字节请求头与紧随其后的 CHW uint8
-   输入（FFT 使用下述 CI16 格式）。应用必须将四个 cookie/ID 字段置零，由内核
+   输入（FFT 使用下述 CI16 格式，KPU 使用固定 KWS float32 布局）。应用必须将四个 cookie/ID 字段置零，由内核
    绑定当前所有权代次和客户端。
 3. 成功写入只表示已发布，不表示执行完成。等待 `POLLIN` 后，一次 `read`
    接收 128 字节结果头与实际输出数据。`POLLERR` 表示服务已锁存故障。
@@ -52,8 +56,26 @@ FFT 使用同一 128 字节头和任务租约，不改变既有 AI2D 字节布�
 - CPU1 executor 自己打包固定 `k_fft_ioctl.h`，调用已经验证的 `/dev/fft_device`
   PIO 驱动。没有系统 SDMA、用户物理地址、共享 reset、IRQ mask 或 clock-gating
   参数。真实 ioctl 完成并通过所有权/期限检查后才发布输出。
-- 能力掩码、manifest 的 `ai_job_backend=ai2d,fft` 和 rootfs 模块标记要求两侧
+- 能力掩码、manifest 的 `ai_job_backend=ai2d,fft,kpu-kws` 和 rootfs 模块标记要求两侧
   配对更新。旧 AI2D 用户程序可继续使用原请求，但不能混装旧 CPU1 或旧内核桥接。
+
+KPU 固定请求保留 ABI v1 的 128 字节头、512 字节 control 和原内存范围：
+
+- `operation=TDVP_AI_KPU`（2），`format=TDVP_AI_KWS_F32`；输入 width/height
+  为 40/30，输出为 2/30；crop、pad、flags 均必须为零。
+- 输入为小端 float32：4800 字节特征 + 107520 字节显式状态；输出为
+  240 字节分数 + 107520 字节下一状态。Linux 私有复制和 CPU1 双侧拒绝 NaN/Inf。
+- Linux 不提供代码地址、物理地址、寄存器、模型或可执行指令。下一次状态由
+  客户端显式输入，不依赖多个 Linux 客户端之间隐藏共享的语音流状态。
+- 两端精确能力掩码为 14（AI2D/KPU/FFT）；manifest 同时固定模型 SHA。
+  同版本号不表示可混装：旧掩码、缺模型身份或缺后端标记必须拒绝配对。
+- 成功结果的 `hardware_starts` 与 `hardware_completions` 必须非零且相等；
+  AI2D/FFT 这两项必须为零。它们占用原 reserved 字段；不是吞吐或性能保证。
+- 模型使用 `load_model(span, true)`，走与官方流式加载相同的共享段分配路径。
+  GNNE 提交仍检查代码位于 CPU1 MMZ。模型/权重/张量保持本次启动期存活，
+  不在不确定完成或故障后销毁；不存在热重启或故障自动恢复 API。
+- sysfs 的 `kpu_stage`、计数、原始 status 和代码地址仅为诊断，不单独作为
+  完成凭证；成功仍要求真实事件、正常硬件状态、期限/所有权与输出检查。
 
 新增区域完全位于现有 32 MiB transport reservation 的未使用部分：
 
@@ -254,7 +276,8 @@ Python 3.12 wheel，因此在 Ubuntu 24.04 容器内独立构建 Python 3.10.21 
 第二种周期序列。后两组接收上一组输出缓存。四组全部通过，第二次独立运行也得到
 相同的八个输出 SHA-256；脚本固定这些哈希并检查有限值/形状/类型，全部通过后
 才发布 `manifest.json`。已有输出目录不允许覆盖。模型文件与生成的二进制结果
-不写入 Git，也不自动放入设备镜像。
+不写入 Git；参考输出不自动放入设备镜像。当前 KPU 后端构建会从固定 SDK
+校验并嵌入模型本身，见本文开头的当前交付边界。
 
 ```sh
 # 先配置所安装的固定 wheel 对应 PATH/LD_LIBRARY_PATH。
@@ -262,14 +285,15 @@ python3.10 buildroot/tools/tdvp-cpu1-kws-reference.py \
     /path/to/official/kws.kmodel /path/to/new-reference-directory
 ```
 
-未来板上比较预设 `abs(actual-reference) <= 1e-5 + 1e-4*abs(reference)`，并必须
-拒绝 NaN/Inf、形状/类型/长度错误。该容差没有被用来放宽主机哈希检查，也尚未
-产生板上通过结论。这只是对编译后模型执行正确性的参考；不证明 KWS 识别质量，
+板上比较预设 `abs(actual-reference) <= 1e-5 + 1e-4*abs(reference)`，并必须
+拒绝 NaN/Inf、形状/类型/长度错误。该容差没有被用来放宽主机哈希检查；后续
+324 组实机执行及输出文件独立哈希核对已通过，见独立部署记录。这只验证固定
+编译后模型执行结果；不证明 KWS 识别质量，
 更不等于 ASR/语音转文字完成。
 
-## 仍然存在的 KPU 部署门槛
+## KPU 初始化保护的历史阶段与完整镜像门槛
 
-### 2026-09-08：初始化等待保护（未部署）
+### 2026-09-08：f4279e0 初始化等待保护（该阶段未部署）
 
 在固定 `libnncase.rt_modules.k230.a` 的真实 RISC-V 链接结果中，
 `k230_runtime_function::invoke_core()` 先调用 `gnne_init()`，后者跳转到

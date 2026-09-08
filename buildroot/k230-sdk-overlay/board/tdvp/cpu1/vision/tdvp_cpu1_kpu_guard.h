@@ -25,6 +25,12 @@ struct tdvp_cpu1_kpu_init_ops {
 int tdvp_cpu1_kpu_prepare(struct tdvp_cpu1_ai_guard *guard,
     const struct tdvp_cpu1_ai_guard_ops *lifetime,
     const struct tdvp_cpu1_kpu_init_ops *hardware);
+/* Additional status check AFTER the real GNNE completion event. Not a
+ * substitute for that event, model correctness, or external DMA exclusion.
+ * No writes, reset, resume or polling loop on an unexpected device state. */
+int tdvp_cpu1_kpu_complete(struct tdvp_cpu1_ai_guard *guard,
+    const struct tdvp_cpu1_ai_guard_ops *lifetime,
+    const struct tdvp_cpu1_kpu_init_ops *hardware, int event_seen);
 #ifdef __cplusplus
 }
 #endif

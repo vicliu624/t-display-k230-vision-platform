@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Boot-lifetime supervisor + executor. AI2D and PIO FFT are registered here.
-// KPU model execution is deliberately NOT implied by resource ownership READY.
+// Boot-lifetime supervisor + executor. AI2D, PIO FFT and pinned KWS inference.
+// Model execution is deliberately NOT implied by resource ownership READY.
 #define _POSIX_C_SOURCE 200809L
 #include "tdvp_ai_abi.h"
 #include "tdvp_ai_job.h"
@@ -9,10 +9,12 @@
 #include "tdvp_cpu1_kpu_guard.h"
 #include "tdvp_cpu1_vision_layout.h"
 #include <nncase/runtime/runtime_tensor.h>
+#include <nncase/runtime/interpreter.h>
 #include <nncase/runtime/runtime_op_utility.h>
 #include <nncase/runtime/k230/gnne.h>
 #include <nncase/functional/ai2d/ai2d_builder.h>
 #include <cerrno>
+#include <cmath>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdio>
@@ -32,6 +34,7 @@ using namespace nncase;
 using namespace nncase::runtime;
 using namespace nncase::runtime::k230;
 using nncase::F::k230::ai2d_builder;
+extern "C" const unsigned char tdvp_cpu1_kws_model_start[], tdvp_cpu1_kws_model_end[];
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 static_assert(sizeof(ai2d_builder) == 712 && offsetof(ai2d_builder, input_shape_) == 496 &&
@@ -51,6 +54,11 @@ unsigned int generation;
 bool attempted, connected;
 thread_local bool executing_ai;
 int ai2d_fd = -1; // Only the single executing_ai thread accesses this descriptor.
+int kpu_fd = -1;
+bool kpu_inflight;
+uint32_t kpu_starts, kpu_completions;
+struct retained_kpu_job { interpreter model; runtime_tensor inputs[2], outputs[2]; };
+retained_kpu_job *kws; // Model, weights and tensors persist for this boot, including faults.
 struct retained_job { runtime_tensor input, output; ai2d_builder *builder{}; };
 retained_job *retained; // Root remains alive if execution blocks or fails.
 k_fft_args_st *fft_retained; // No DMA; still retained on any uncertain completion.
@@ -102,6 +110,84 @@ uintptr_t physical(runtime_tensor &tensor, size_t bytes)
         bytes > TDVP_VISION_MMZ_BASE + TDVP_VISION_MMZ_SIZE - address) failed(-ERANGE);
     return address;
 }
+void execute_kpu()
+{
+    check();
+    control->cpu1_side.kpu_stage = 1; fence(); /* load/validate model */
+    // Linux cannot supply a model, code address, register value or DMA pointer.
+    // The two explicit input tensors also keep streaming state client-owned.
+    for (size_t offset = 0; offset < TDVP_AI_KWS_INPUT_BYTES; offset += sizeof(float)) {
+        float number; std::memcpy(&number, input + offset, sizeof(number));
+        if (!std::isfinite(number)) failed(-EILSEQ);
+    }
+    const dims_t in_shapes[2]{{1, 30, 40}, {1, 256, 105}};
+    const dims_t out_shapes[2]{{1, 30, 2}, {1, 256, 105}};
+    const size_t in_bytes[2]{4800, 107520}, out_bytes[2]{240, 107520};
+    if (!kws) {
+        kws = new retained_kpu_job;
+        const size_t model_bytes = uintptr_t(tdvp_cpu1_kws_model_end) - uintptr_t(tdvp_cpu1_kws_model_start);
+        if (model_bytes != 369560) failed(-EPROTO);
+        // The default span overload pins the ELF's virtual address. Its shared
+        // attach path may return that address as GNNE text. copy_buffer=true
+        // uses the official stream path: shared sections are allocated in MMZ,
+        // flushed and represented by physical addresses before any KPU start.
+        checked(kws->model.load_model({reinterpret_cast<const gsl::byte *>(tdvp_cpu1_kws_model_start), model_bytes}, true));
+        check();
+        if (kws->model.inputs_size() != 2 || kws->model.outputs_size() != 2) failed(-EPROTO);
+        uintptr_t addresses[4]; size_t sizes[4];
+        for (size_t i = 0; i < 2; ++i) {
+            if (kws->model.input_shape(i) != in_shapes[i] || kws->model.output_shape(i) != out_shapes[i] ||
+                kws->model.input_desc(i).datatype != dt_float32 ||
+                kws->model.output_desc(i).datatype != dt_float32) failed(-EPROTO);
+            kws->inputs[i] = value(hrt::create(dt_float32, in_shapes[i], hrt::pool_shared)); check();
+            kws->outputs[i] = value(hrt::create(dt_float32, out_shapes[i], hrt::pool_shared)); check();
+            addresses[i] = physical(kws->inputs[i], in_bytes[i]); sizes[i] = in_bytes[i];
+            addresses[i + 2] = physical(kws->outputs[i], out_bytes[i]); sizes[i + 2] = out_bytes[i];
+            checked(kws->model.input_tensor(i, kws->inputs[i]));
+            checked(kws->model.output_tensor(i, kws->outputs[i]));
+        }
+        for (size_t i = 0; i < 4; ++i)
+            for (size_t j = i + 1; j < 4; ++j)
+                if (!(addresses[i] + sizes[i] <= addresses[j] || addresses[j] + sizes[j] <= addresses[i]))
+                    failed(-ERANGE);
+    }
+    size_t offset = 0;
+    control->cpu1_side.kpu_stage = 2; fence(); /* tensors */
+    for (size_t i = 0; i < 2; ++i) {
+        auto mapped = value(hrt::map(kws->inputs[i], map_access_t::map_write));
+        if (mapped.buffer().size() != in_bytes[i]) failed(-EPROTO);
+        std::memcpy(mapped.buffer().data(), input + offset, in_bytes[i]); offset += in_bytes[i];
+        checked(mapped.unmap());
+        checked(hrt::sync(kws->inputs[i], sync_op_t::sync_write_back, true)); check();
+        auto cleared = value(hrt::map(kws->outputs[i], map_access_t::map_write));
+        if (cleared.buffer().size() != out_bytes[i]) failed(-EPROTO);
+        std::memset(cleared.buffer().data(), 0xa5, out_bytes[i]);
+        checked(cleared.unmap());
+        checked(hrt::sync(kws->outputs[i], sync_op_t::sync_write_back, true)); check();
+    }
+    const uint32_t starts = kpu_starts, completions = kpu_completions;
+    if (kpu_inflight || starts != completions) failed(-EPROTO);
+    checked(kws->model.run()); check();
+    if (kpu_inflight || kpu_starts <= starts || kpu_starts != kpu_completions) failed(-EPROTO);
+    offset = 0;
+    control->cpu1_side.kpu_stage = 6; fence(); /* output validation */
+    for (size_t i = 0; i < 2; ++i) {
+        checked(hrt::sync(kws->outputs[i], sync_op_t::sync_invalidate, true)); check();
+        auto mapped = value(hrt::map(kws->outputs[i], map_access_t::map_read));
+        if (mapped.buffer().size() != out_bytes[i]) failed(-EPROTO);
+        for (size_t n = 0; n < out_bytes[i]; n += sizeof(float)) {
+            float number; std::memcpy(&number, mapped.buffer().data() + n, sizeof(number));
+            if (!std::isfinite(number)) failed(-EILSEQ);
+        }
+        check(); std::memcpy(output + offset, mapped.buffer().data(), out_bytes[i]); offset += out_bytes[i];
+        checked(mapped.unmap()); check();
+    }
+    fence(); response.output_bytes = uint32_t(offset);
+    response.hardware_starts = kpu_starts - starts;
+    response.hardware_completions = kpu_completions - completions;
+    control->cpu1_side.kpu_stage = 7; fence();
+    if (tdvp_cpu1_ai_guard_finish(&guard, &executor_ops)) failed(-EIO);
+}
 void execute_fft()
 {
     check();
@@ -129,6 +215,7 @@ void execute_fft()
 }
 void execute_one()
 {
+    if (request.operation == TDVP_AI_KPU) { execute_kpu(); return; }
     if (request.operation == TDVP_AI_FFT) { execute_fft(); return; }
     check();
     const size_t bytes = size_t(request.output_width) * request.output_height * 3;
@@ -282,6 +369,8 @@ int kpu_status(void *, uint64_t *status)
         GNNE_RESET_STATUS_NORMAL == 0 && GNNE_EXCEPTION_OK == 0 &&
         uint64_t(GNNE_CTRL_ENABLE_CLEAR) == (UINT64_C(1) << 32), "Pinned GNNE control ABI drift");
     fence(); *status = gnne_get_status().data[0]; fence();
+    control->cpu1_side.kpu_status_lo = uint32_t(*status);
+    control->cpu1_side.kpu_status_hi = uint32_t(*status >> 32); fence();
     return 0;
 }
 int kpu_disable(void *)
@@ -292,12 +381,45 @@ int kpu_disable(void *)
 }
 extern "C" void __wrap_gnne_init()
 {
-    // This does not enable KPU jobs: /dev/gnne_device remains forbidden below.
     // No raw gnne_init/gnne_disable call: either one would enter the old loop.
-    if (!executing_ai) failed(-EPERM);
+    if (!executing_ai || request.operation != TDVP_AI_KPU || kpu_fd < 0 || kpu_inflight) failed(-EPERM);
+    control->cpu1_side.kpu_stage = 3; fence(); /* bounded initialization */
     const tdvp_cpu1_kpu_init_ops hardware{kpu_status, kpu_disable, nullptr};
     int error = tdvp_cpu1_kpu_prepare(&guard, &executor_ops, &hardware);
     if (error) failed(error); // Retain the entire executor stack and model.
+}
+extern "C" int __real_gnne_enable(uint64_t, uint64_t, uint64_t);
+extern "C" int __wrap_gnne_enable(uint64_t start, uint64_t end, uint64_t breakpoint)
+{
+    if (!executing_ai || request.operation != TDVP_AI_KPU || kpu_fd < 0 || kpu_inflight ||
+        kpu_starts != kpu_completions || kpu_starts == UINT32_MAX) failed(-EPROTO);
+    check();
+    control->cpu1_side.kpu_code_start = uint32_t(start);
+    control->cpu1_side.kpu_code_end = uint32_t(end);
+    control->cpu1_side.kpu_stage = 4; fence(); /* submission */
+    // nncase's pinned code uses MMZ for executable KPU text. Never truncate a
+    // userspace virtual pointer or permit Linux/display memory as KPU code.
+    if (start < TDVP_VISION_MMZ_BASE || end <= start ||
+        end > TDVP_VISION_MMZ_BASE + TDVP_VISION_MMZ_SIZE || breakpoint) failed(-ERANGE);
+    // Drain an old software event before any new hardware submission. A stream
+    // of interrupts is an error, not a reason to reset a shared subsystem.
+    bool drained = false;
+    for (unsigned int attempt = 0; attempt < 4; ++attempt) {
+        pollfd old{kpu_fd, POLLIN, 0};
+        int result = __real_poll(&old, 1, 0); check();
+        if (!result && !old.revents) { drained = true; break; }
+        if (result != 1 || (old.revents != POLLIN && old.revents != TDVP_AI_RTSMART_POLLIN)) failed(-EIO);
+    }
+    if (!drained) failed(-ESTALE);
+    uint64_t status;
+    if (kpu_status(nullptr, &status) ||
+        (status & (TDVP_KPU_WORK_MASK | TDVP_KPU_RESET_MASK | TDVP_KPU_EXCEPTION_MASK | TDVP_KPU_AXI_ERROR)))
+        failed(-EIO);
+    check(); kpu_inflight = true;
+    if (__real_gnne_enable(start, end, breakpoint)) failed(-EIO);
+    ++kpu_starts;
+    control->cpu1_side.kpu_starts = kpu_starts; fence();
+    return 0;
 }
 extern "C" int __wrap_open(const char *path, int flags, ...)
 {
@@ -306,22 +428,41 @@ extern "C" int __wrap_open(const char *path, int flags, ...)
     has_mode = has_mode || (flags & O_TMPFILE) == O_TMPFILE;
 #endif
     if (has_mode) { va_list args; va_start(args, flags); mode = va_arg(args, mode_t); va_end(args); }
-    if (executing_ai && !std::strcmp(path, "/dev/gnne_device")) { errno = EPERM; return -1; }
+    if (executing_ai && !std::strcmp(path, "/dev/gnne_device") && request.operation != TDVP_AI_KPU) {
+        errno = EPERM; return -1;
+    }
     int fd = has_mode ? __real_open(path, flags, mode) : __real_open(path, flags);
     if (executing_ai && fd >= 0 && !std::strcmp(path, "/dev/ai_2d_device")) {
         if (tdvp_cpu1_ai_guard_status(&guard) != TDVP_AI_ACTIVE || ai2d_fd >= 0) failed(-EBUSY);
         ai2d_fd = fd;
     }
+    if (executing_ai && fd >= 0 && !std::strcmp(path, "/dev/gnne_device")) {
+        if (tdvp_cpu1_ai_guard_status(&guard) != TDVP_AI_ACTIVE || kpu_fd >= 0) failed(-EBUSY);
+        kpu_fd = fd;
+    }
     return fd;
 }
 extern "C" int __wrap_close(int fd)
 {
+    if (executing_ai && fd == kpu_fd && kpu_inflight) failed(-EBUSY);
     int result = __real_close(fd);
     if (executing_ai && fd == ai2d_fd) { if (result) failed(-EIO); ai2d_fd = -1; }
+    if (executing_ai && fd == kpu_fd) { if (result) failed(-EIO); kpu_fd = -1; }
     return result;
 }
 extern "C" int __wrap_poll(struct pollfd *fds, nfds_t count, int timeout)
 {
+    if (executing_ai && fds && count == 1 && kpu_fd >= 0 && fds[0].fd == kpu_fd) {
+        if (!kpu_inflight || request.operation != TDVP_AI_KPU) failed(-EPROTO);
+        control->cpu1_side.kpu_stage = 5; fence(); /* real completion event */
+        int result = tdvp_cpu1_ai_guard_wait(&guard, &executor_ops, kpu_fd, fds, count);
+        const tdvp_cpu1_kpu_init_ops hardware{kpu_status, nullptr, nullptr};
+        int error = tdvp_cpu1_kpu_complete(&guard, &executor_ops, &hardware, result);
+        if (error) failed(error);
+        kpu_inflight = false; ++kpu_completions;
+        control->cpu1_side.kpu_completions = kpu_completions; fence();
+        return result;
+    }
     return executing_ai ? tdvp_cpu1_ai_guard_wait(&guard, &executor_ops, ai2d_fd, fds, count) :
         __real_poll(fds, count, timeout);
 }
@@ -352,6 +493,6 @@ extern "C" int tdvp_cpu1_ai_service_start(void *vision_control, void *ownership,
     if (!error) error = launch(&supervisor, supervise);
     if (error) publish_fault(error);
     fence(); control->cpu1_side.magic = TDVP_AI_MAGIC; fence();
-    std::printf("TDVP CPU1 AI: asynchronous AI2D/FFT service %s (%d); KPU jobs unavailable\n", error ? "fault" : "started", error);
+    std::printf("TDVP CPU1 AI: asynchronous AI2D/FFT/KPU-KWS service %s (%d)\n", error ? "fault" : "started", error);
     return error;
 }

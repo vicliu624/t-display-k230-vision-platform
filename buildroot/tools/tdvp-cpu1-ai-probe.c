@@ -84,8 +84,8 @@ int main(int argc, char **argv)
         wait_event(fd, POLLOUT);
         size_t sent_bytes = sizeof(*r) + r->input_bytes;
         if (!round) {
-            r->operation = 2;
-            if (write(fd, sent, sent_bytes) != -1 || errno != EOPNOTSUPP) { errno = EPROTO; die("KPU must remain unavailable"); }
+            r->operation = TDVP_AI_KPU;
+            if (write(fd, sent, sent_bytes) != -1 || errno != EINVAL) { errno = EPROTO; die("KPU image descriptor must be rejected"); }
             r->operation = TDVP_AI_AI2D;
             r->owner_cookie = 1;
             if (write(fd, sent, sent_bytes) != -1 || errno != EINVAL) { errno = EPROTO; die("forged owner rejection"); }

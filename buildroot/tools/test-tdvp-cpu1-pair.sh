@@ -15,7 +15,8 @@ else
         'mmz_base=0x14000000' 'mmz_size=0x08000000' \
         'transport_base=0x1c000000' 'transport_size=0x02000000' \
         'camera=gc2093-csi2' 'ai_engines=gnne,ai2d,fft' \
-        'ai_job_abi=1' 'ai_job_backend=ai2d,fft' 'ai_job_control=0x1dff2000' > "$test_dir/manifest"
+        'ai_job_abi=1' 'ai_job_backend=ai2d,fft,kpu-kws' 'ai_job_control=0x1dff2000' \
+        'ai_job_model_sha256=b51a31c3310a052488cbce9fbbc52a1d9957f574bc31f1969a1757c7917ae8b4' > "$test_dir/manifest"
 fi
 bash "$guard" "$candidate" "$fdtget" "$test_dir/manifest"
 if bash "$guard" "$baseline" "$fdtget" "$test_dir/manifest" > "$test_dir/rejected.log" 2>&1; then

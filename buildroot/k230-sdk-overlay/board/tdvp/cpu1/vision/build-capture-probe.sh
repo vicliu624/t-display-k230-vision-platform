@@ -62,6 +62,21 @@ for entry in \
     }
 done
 ai_flags=(-O2 -mcmodel=medany -march=rv64imafdcv -mabi=lp64d -I"$source_dir")
+model="$(dirname "$mpp")/libs/kmodel/ai_poc/kmodel/kws.kmodel"
+[ "$(sha256sum "$model" | awk '{print $1}')" = b51a31c3310a052488cbce9fbbc52a1d9957f574bc31f1969a1757c7917ae8b4 ] || {
+    echo 'FAIL CPU1 official KWS model pin' >&2; exit 1;
+}
+cp "$model" "$output/tdvp-kws.kmodel"
+# Build the immutable model into this worker, not a mutable Linux pathname.
+# Assemble with the same RV64 ABI; a raw binary objcopy object lacks its ABI flags.
+(
+    cd "$output"
+    printf '%s\n' '.section .rodata.tdvp_kws,"a",@progbits' '.balign 64' \
+        '.global tdvp_cpu1_kws_model_start' 'tdvp_cpu1_kws_model_start:' \
+        '.incbin "tdvp-kws.kmodel"' '.global tdvp_cpu1_kws_model_end' 'tdvp_cpu1_kws_model_end:' \
+        '.section .note.GNU-stack,"",@progbits' |
+        "${cross}gcc" -mcmodel=medany -march=rv64imafdcv -mabi=lp64d -x assembler -c -o tdvp-kws-model.o -
+)
 worker_objects=()
 for unit in tdvp_cpu1_capture tdvp_cpu1_transport tdvp_cpu1_vision_worker tdvp_ai_job tdvp_cpu1_ai_owner tdvp_cpu1_ai_guard tdvp_cpu1_kpu_guard; do
     "${cross}gcc" -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror "${ai_flags[@]}" "${includes[@]}" \
@@ -71,10 +86,11 @@ done
 "${cross}g++" -std=c++17 -DBUILDING_RUNTIME -Wall -Wextra "${ai_flags[@]}" \
     "${includes[@]}" -I"$runtime" -I"$runtime/nncase/include" -c "$source_dir/tdvp_cpu1_ai_service.cpp" -o "$output/tdvp_cpu1_ai_service.o"
 "${cross}g++" "${ai_flags[@]}" "${worker_objects[@]}" "$output/tdvp_cpu1_ai_service.o" \
+    "$output/tdvp-kws-model.o" \
     "$output/mpi_sensor.o" "$output/mpi_sensor_type_to_mirror.o" \
     -T "$source_dir/tdvp_nncase_tls.lds" \
     -T "$linker" -n --static -Wl,-Map,"$output/tdvp-vision-worker.map" \
-    -Wl,--wrap=open,--wrap=close,--wrap=poll,--wrap=gnne_init \
+    -Wl,--wrap=open,--wrap=close,--wrap=poll,--wrap=gnne_init,--wrap=gnne_enable \
     -Wl,--start-group "${archives[@]}" -L"$runtime/nncase/lib" \
     -lNncase.Runtime.Native -lnncase.rt_modules.k230 -lfunctional_k230 -lpthread -lm -Wl,--end-group \
     -o "$output/tdvp-vision-worker.elf"
@@ -87,19 +103,16 @@ fi
 grep -Eq ' T tdvp_cpu1_ai_service_start$' "$output/tdvp-vision-worker.symbols"
 grep -Eq ' T __wrap_gnne_init$' "$output/tdvp-vision-worker.symbols"
 grep -Eq ' T tdvp_cpu1_kpu_prepare$' "$output/tdvp-vision-worker.symbols"
+grep -Eq ' T tdvp_cpu1_kpu_complete$' "$output/tdvp-vision-worker.symbols"
+grep -Eq ' T __wrap_gnne_enable$' "$output/tdvp-vision-worker.symbols"
 # Verify real linked calls, not just the presence of the wrapper object. The
 # old gnne_init definition may remain because it shares a vendor object with
 # other used helpers, but no direct call may bypass the bounded adapter.
-"${cross}objdump" -d "$output/tdvp-vision-worker.elf" | awk '
-    /[[:space:]](jal|jalr|j|jr)[[:space:]]/ && /<gnne_init>/ { bypass = 1 }
-    END { if (bypass) {
-        print "FAIL linked GNNE initialization bypass" > "/dev/stderr"; exit 1
-    } }
-'
+"${cross}objdump" -d "$output/tdvp-vision-worker.elf" | awk -f "$source_dir/audit-kpu-calls.awk"
 if grep -Eq ' [tT] (kd_mpi_vo_.*|kd_mpi_connector_.*|vg_lite_.*|sample_vicap_vo.*)$' "$output/tdvp-vision-worker.symbols"; then
     echo 'FAIL CPU1 worker linked a display owner' >&2
     exit 1
 fi
 "${cross}size" "$output/tdvp-vision-worker.elf"
 sha256sum "$output/tdvp-vision-worker.elf"
-echo 'PASS RT-Smart asynchronous worker cross-linked (not booted, no model loaded)'
+echo 'PASS RT-Smart asynchronous worker cross-linked with pinned KWS model (not booted, no inference executed)'

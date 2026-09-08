@@ -118,7 +118,8 @@ static int ai_refresh(struct tdvp_ai_linux *ai)
             response->result > 0 || response->result < -4095 ||
             response->output_bytes > ai->request.output_capacity ||
             response->output_bytes != (response->result ? 0U : expected) ||
-            response->duration_ms > ai->request.budget_ms || state != TDVP_AI_RESULT)
+            response->duration_ms > ai->request.budget_ms || state != TDVP_AI_RESULT ||
+            !tdvp_ai_response_hardware_valid(response))
             return ai_fault(ai, -EPROTO);
         for (i = 0; i < ARRAY_SIZE(response->reserved); ++i)
             if (response->reserved[i]) return ai_fault(ai, -EPROTO);
@@ -184,6 +185,9 @@ static ssize_t ai_write(struct file *file, const char __user *buffer, size_t cou
     if (!ai->writable || ai->pending) { result = -EAGAIN; goto out; }
     if (ai->submitted == U64_MAX) { result = ai_fault(ai, -EOVERFLOW); goto out; }
     if (copy_from_user(ai->input, buffer + sizeof(request), request.input_bytes)) { result = -EFAULT; goto out; }
+    if (request.operation == TDVP_AI_KPU && !tdvp_ai_kws_input_valid(ai->input, request.input_bytes)) {
+        result = -EILSEQ; goto out;
+    }
     /* A userfault can outlast an ownership transition; check again before any
      * publication. The owner work item never needs this mutex. */
     if ((result = ai_refresh(ai))) goto out;
@@ -268,12 +272,18 @@ static ssize_t status_show(struct device *dev, struct device_attribute *attr, ch
     struct tdvp_ai_linux *ai = container_of(misc, struct tdvp_ai_linux, misc);
     ssize_t result;
     if (!mutex_trylock(&ai->lock)) return -EAGAIN;
-    result = sysfs_emit(buffer, "ai_abi=1\nbackend=cpu1-ai2d,fft\nkpu_jobs=unavailable\nfft_jobs=available\n"
+    result = sysfs_emit(buffer, "ai_abi=1\nbackend=cpu1-ai2d,fft,kpu-kws\nkpu_jobs=kws-reference\nfft_jobs=available\n"
         "state=%s\nerror=%d\nowner_error=%d\nclient_open=%u\npending=%u\ndetached=%u\n"
-        "submitted=%llu\naccepted=%llu\ncompleted=%llu\n",
+        "submitted=%llu\naccepted=%llu\ncompleted=%llu\n"
+        "kpu_stage=%u\nkpu_starts=%u\nkpu_completions=%u\nkpu_status=0x%08x%08x\n"
+        "kpu_code_start=0x%08x\nkpu_code_end=0x%08x\n",
         ai->fault ? "fault" : !ai->peer_ready ? "pending" : ai->ready ? "result" : ai->pending ? "running" : "idle",
         ai->fault, smp_load_acquire(&ai->owner_status), ai->opened, ai->pending, ai->detached,
-        ai->submitted, ai->accepted, ai->completed);
+        ai->submitted, ai->accepted, ai->completed,
+        readl(&ai->control->cpu1_side.kpu_stage), readl(&ai->control->cpu1_side.kpu_starts),
+        readl(&ai->control->cpu1_side.kpu_completions), readl(&ai->control->cpu1_side.kpu_status_hi),
+        readl(&ai->control->cpu1_side.kpu_status_lo), readl(&ai->control->cpu1_side.kpu_code_start),
+        readl(&ai->control->cpu1_side.kpu_code_end));
     mutex_unlock(&ai->lock);
     return result;
 }

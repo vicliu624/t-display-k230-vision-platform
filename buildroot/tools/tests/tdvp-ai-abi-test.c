@@ -40,7 +40,7 @@ int main(void)
         case 2: --request.bytes; break;
         case 3: request.flags = 1; break;
         case 4: request.format = 0; break;
-        case 5: request.operation = 2; break; /* KPU not implemented here. */
+        case 5: request.operation = TDVP_AI_KPU; break; /* Image fields are not KWS tensor descriptors. */
         case 6: request.operation = TDVP_AI_FFT; break; /* Image fields are not valid FFT fields. */
         case 7: request.operation = UINT32_MAX; break;
         case 8: request.budget_ms = 0; break;
@@ -113,6 +113,68 @@ int main(void)
         case 24: request.output_capacity = TDVP_AI_BUFFER_BYTES + 1; break;
         }
         assert(tdvp_ai_validate_request(&request) < 0); ++cases;
+    }
+    memset(&base, 0, sizeof(base));
+    base.magic = TDVP_AI_MAGIC; base.version = TDVP_AI_VERSION; base.bytes = sizeof(base);
+    base.operation = TDVP_AI_KPU; base.format = TDVP_AI_KWS_F32; base.budget_ms = 10000;
+    base.input_width = 40; base.input_height = base.output_height = 30; base.output_width = 2;
+    base.input_bytes = TDVP_AI_KWS_INPUT_BYTES; base.output_capacity = TDVP_AI_KWS_OUTPUT_BYTES;
+    assert(tdvp_ai_validate_request(&base) == 0); ++cases;
+    assert(tdvp_ai_output_bytes(&base) == 107760 && base.input_bytes == 112320);
+    for (unsigned int failure = 0; failure < 20; ++failure) {
+        request = base;
+        switch (failure) {
+        case 0: request.format = TDVP_AI_CHW_U8; break;
+        case 1: request.flags = 1; break;
+        case 2: request.input_width = UINT32_MAX; break;
+        case 3: request.input_height = 1; break;
+        case 4: request.output_width = 0; break;
+        case 5: request.output_height = 1; break;
+        case 6: request.crop_x = 1; break;
+        case 7: request.crop_y = 1; break;
+        case 8: request.crop_width = 1; break;
+        case 9: request.crop_height = 1; break;
+        case 10: request.pad_left = 1; break;
+        case 11: request.pad_right = 1; break;
+        case 12: request.pad_top = 1; break;
+        case 13: request.pad_bottom = 1; break;
+        case 14: request.pad_value[0] = 1; break;
+        case 15: request.pad_value[1] = 1; break;
+        case 16: request.pad_value[2] = 1; break;
+        case 17: --request.input_bytes; break;
+        case 18: --request.output_capacity; break;
+        case 19: request.output_capacity = TDVP_AI_BUFFER_BYTES + 1; break;
+        }
+        assert(tdvp_ai_validate_request(&request) < 0); ++cases;
+    }
+    struct tdvp_ai_response response = {0};
+    response.operation = TDVP_AI_KPU;
+    assert(!tdvp_ai_response_hardware_valid(&response)); ++cases;
+    response.hardware_starts = 21;
+    assert(!tdvp_ai_response_hardware_valid(&response)); ++cases;
+    response.hardware_completions = 20;
+    assert(!tdvp_ai_response_hardware_valid(&response)); ++cases;
+    response.hardware_completions = 21;
+    assert(tdvp_ai_response_hardware_valid(&response)); ++cases;
+    response.result = -EIO;
+    assert(!tdvp_ai_response_hardware_valid(&response)); ++cases;
+    response.result = 0; response.operation = TDVP_AI_AI2D;
+    assert(!tdvp_ai_response_hardware_valid(&response)); ++cases;
+    response.hardware_starts = response.hardware_completions = 0;
+    assert(tdvp_ai_response_hardware_valid(&response)); ++cases;
+    unsigned char floats[TDVP_AI_KWS_INPUT_BYTES] = {0};
+    assert(tdvp_ai_kws_input_valid(floats, sizeof(floats))); ++cases;
+    assert(!tdvp_ai_kws_input_valid(NULL, sizeof(floats))); ++cases;
+    assert(!tdvp_ai_kws_input_valid(floats, sizeof(floats) - 1)); ++cases;
+    for (unsigned int sign = 0; sign < 2; ++sign) {
+        unsigned int last = sizeof(floats) - 4;
+        floats[last + 3] = sign ? 0xff : 0x7f; floats[last + 2] = 0x7f;
+        assert(tdvp_ai_kws_input_valid(floats, sizeof(floats))); ++cases; /* finite */
+        floats[last + 2] = 0x80;
+        assert(!tdvp_ai_kws_input_valid(floats, sizeof(floats))); ++cases; /* infinity */
+        floats[last] = 1;
+        assert(!tdvp_ai_kws_input_valid(floats, sizeof(floats))); ++cases; /* NaN */
+        floats[last] = 0;
     }
     printf("CPU1 AI request ABI: PASS %u cases, frame/owner separation and overflow refusals\n", cases);
     return 0;

@@ -103,6 +103,36 @@ int main(void)
     REQUIRE(fake.reads == 0 && fake.writes == 0); ++cases;
     reset(); REQUIRE(tdvp_cpu1_kpu_prepare(&guard, &lifetime, NULL) == -EINVAL);
     REQUIRE(fake.reads == 0 && fake.writes == 0); ++cases;
-    printf("PASS %u KPU initialization guard cases; no hardware operations or inference acceptance\n", cases);
+    for (unsigned int scenario = 0; scenario < 18; ++scenario) {
+        int event = 1, expected = 0;
+        reset();
+        switch (scenario) {
+        case 0: break;
+        case 1: event = 0; expected = -EINVAL; break;
+        case 2: event = -1; expected = -EINVAL; break;
+        case 3: event = 2; expected = -EINVAL; break;
+        case 4: case 5: case 6:
+            fake.initial = (uint64_t)(scenario - 3) << 14; expected = -EBUSY; break;
+        case 7: case 8: case 9:
+            fake.initial = (uint64_t)(scenario - 6) << 24; expected = -EBUSY; break;
+        case 10: case 11: case 12:
+            fake.initial = (uint64_t)(scenario - 9) << 22; expected = -EIO; break;
+        case 13: fake.initial = TDVP_KPU_AXI_ERROR; expected = -EIO; break;
+        case 14: fake.read_error = -ENODEV; expected = -ENODEV; break;
+        case 15: fake.lose_owner_on_read = 1; expected = -EPIPE; break;
+        case 16: fake.status_delay = 5000; expected = -ETIMEDOUT; break;
+        case 17: fake.owner_error = -EPIPE; expected = -EPIPE; break;
+        }
+        REQUIRE(tdvp_cpu1_kpu_complete(&guard, &lifetime, &hardware, event) == expected);
+        REQUIRE(fake.writes == 0 && fake.reads <= 1 && fake.parks == 0);
+        REQUIRE(tdvp_cpu1_ai_guard_status(&guard) == (expected ? expected : TDVP_AI_ACTIVE));
+        if (expected) {
+            unsigned int reads = fake.reads;
+            REQUIRE(tdvp_cpu1_kpu_complete(&guard, &lifetime, &hardware, 1) == expected);
+            REQUIRE(fake.reads == reads && fake.writes == 0);
+        }
+        ++cases;
+    }
+    printf("PASS %u KPU initialization/completion guard cases; no hardware operations or inference acceptance\n", cases);
     return 0;
 }

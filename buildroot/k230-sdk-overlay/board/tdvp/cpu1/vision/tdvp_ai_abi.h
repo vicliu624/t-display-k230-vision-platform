@@ -23,10 +23,15 @@ typedef uint64_t tdvp_ai_u64;
 #define TDVP_AI_OUTPUT_BASE 0x1db00000UL
 #define TDVP_AI_BUFFER_BYTES 0x00300000UL
 #define TDVP_AI_AI2D 1U
+#define TDVP_AI_KPU 2U
 #define TDVP_AI_FFT 3U
 #define TDVP_AI_CAP_AI2D (1U << TDVP_AI_AI2D)
+#define TDVP_AI_CAP_KPU (1U << TDVP_AI_KPU)
 #define TDVP_AI_CAP_FFT (1U << TDVP_AI_FFT)
-#define TDVP_AI_CAPABILITIES (TDVP_AI_CAP_AI2D | TDVP_AI_CAP_FFT)
+#define TDVP_AI_CAPABILITIES (TDVP_AI_CAP_AI2D | TDVP_AI_CAP_KPU | TDVP_AI_CAP_FFT)
+#define TDVP_AI_KWS_F32 0x3153574bU /* KWS1: pinned KWS model, LE float32 */
+#define TDVP_AI_KWS_INPUT_BYTES ((30U * 40U + 256U * 105U) * 4U)
+#define TDVP_AI_KWS_OUTPUT_BYTES ((30U * 2U + 256U * 105U) * 4U)
 #define TDVP_AI_CHW_U8 0x33574843U
 #define TDVP_AI_COMPLEX_I16 0x36314943U /* CI16: LE real/imaginary pairs */
 #define TDVP_AI_FFT_INVERSE 1U
@@ -52,7 +57,10 @@ struct tdvp_ai_cpu1_line {
     tdvp_ai_u64 owner_cookie, peer_cookie, heartbeat, accepted, completed;
     tdvp_ai_s32 fault;
     tdvp_ai_u32 capabilities;
-    tdvp_ai_u32 reserved[16];
+    /* Diagnostic snapshots, never completion/ownership authority. */
+    tdvp_ai_u32 kpu_stage, kpu_starts, kpu_completions;
+    tdvp_ai_u32 kpu_status_lo, kpu_status_hi, kpu_code_start, kpu_code_end;
+    tdvp_ai_u32 reserved[9];
 };
 /* Linux write(): this 128-byte header followed by the selected input format.
  * User supplies zero for all four cookie/id fields; kernel fills them.
@@ -62,6 +70,11 @@ struct tdvp_ai_cpu1_line {
  * Crop/pad fields MUST be zero. flags permits only INVERSE and stage shifts
  * in bits 8..19; stages >= log2(N) MUST be zero. No hardware control bits,
  * physical pointers, interrupt mask, clock gating or timeout registers.
+ * KPU/KWS1: pinned nncase 2.9 KWS model only (not general ASR/STT).
+ * Input is [1,30,40] followed by [1,256,105] state, both LE float32;
+ * output is [1,30,2] followed by [1,256,105] next state. Every request
+ * supplies its state explicitly; no hidden state is shared between clients.
+ * Dimensions are 40x30 -> 2x30; all crop/pad/flags must be zero.
  */
 struct tdvp_ai_request {
     tdvp_ai_u32 magic, version, bytes, operation;
@@ -80,7 +93,8 @@ struct tdvp_ai_response {
     tdvp_ai_s32 result;
     tdvp_ai_u32 output_bytes, operation, output_width, output_height, format;
     tdvp_ai_u64 duration_ms;
-    tdvp_ai_u32 reserved[16];
+    tdvp_ai_u32 hardware_starts, hardware_completions; /* KPU only; actual guarded invocations */
+    tdvp_ai_u32 reserved[14];
 };
 struct tdvp_ai_control {
     struct tdvp_ai_linux_line linux_side;
@@ -94,7 +108,27 @@ static inline tdvp_ai_u32 tdvp_ai_output_bytes(const struct tdvp_ai_request *r)
 {
     if (r->operation == TDVP_AI_AI2D) return r->output_width * r->output_height * 3U;
     if (r->operation == TDVP_AI_FFT) return r->output_width * 4U;
+    if (r->operation == TDVP_AI_KPU) return TDVP_AI_KWS_OUTPUT_BYTES;
     return 0;
+}
+
+static inline int tdvp_ai_response_hardware_valid(const struct tdvp_ai_response *r)
+{
+    if (!r) return 0;
+    if (r->operation == TDVP_AI_KPU && !r->result)
+        return r->hardware_starts && r->hardware_starts == r->hardware_completions;
+    return !r->hardware_starts && !r->hardware_completions;
+}
+
+/* IEEE-754 LE exponent check, usable by the kernel without floating point.
+ * Reject NaN/Inf before publishing work, without poisoning the CPU1 service. */
+static inline int tdvp_ai_kws_input_valid(const unsigned char *data, tdvp_ai_u32 bytes)
+{
+    tdvp_ai_u32 i;
+    if (!data || bytes != TDVP_AI_KWS_INPUT_BYTES) return 0;
+    for (i = 0; i < bytes; i += 4)
+        if ((data[i + 3] & 0x7fU) == 0x7fU && (data[i + 2] & 0x80U)) return 0;
+    return 1;
 }
 
 static inline int tdvp_ai_validate_request(const struct tdvp_ai_request *r)
@@ -103,6 +137,18 @@ static inline int tdvp_ai_validate_request(const struct tdvp_ai_request *r)
     if (!r || r->magic != TDVP_AI_MAGIC || r->version != TDVP_AI_VERSION ||
         r->bytes != sizeof(*r) || !r->budget_ms || r->budget_ms > 60000U)
         return -EINVAL;
+    if (r->operation == TDVP_AI_KPU) {
+        if (r->format != TDVP_AI_KWS_F32 || r->flags ||
+            r->input_width != 40U || r->input_height != 30U ||
+            r->output_width != 2U || r->output_height != 30U ||
+            r->crop_x || r->crop_y || r->crop_width || r->crop_height ||
+            r->pad_left || r->pad_right || r->pad_top || r->pad_bottom ||
+            r->pad_value[0] || r->pad_value[1] || r->pad_value[2]) return -EINVAL;
+        if (r->input_bytes != TDVP_AI_KWS_INPUT_BYTES ||
+            r->output_capacity < TDVP_AI_KWS_OUTPUT_BYTES ||
+            r->output_capacity > TDVP_AI_BUFFER_BYTES) return -EMSGSIZE;
+        return 0;
+    }
     if (r->operation == TDVP_AI_FFT) {
         tdvp_ai_u32 n = r->input_width;
         if (r->format != TDVP_AI_COMPLEX_I16 || n < 64U || n > 4096U || (n & (n - 1U)) ||

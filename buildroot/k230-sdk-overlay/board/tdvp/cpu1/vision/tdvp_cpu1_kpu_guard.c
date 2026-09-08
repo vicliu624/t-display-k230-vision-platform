@@ -2,6 +2,30 @@
 #include "tdvp_cpu1_kpu_guard.h"
 #include <errno.h>
 
+int tdvp_cpu1_kpu_complete(struct tdvp_cpu1_ai_guard *guard,
+    const struct tdvp_cpu1_ai_guard_ops *lifetime,
+    const struct tdvp_cpu1_kpu_init_ops *hardware, int event_seen)
+{
+    uint64_t status;
+    int error;
+    if (!guard) return -EINVAL;
+    if (!hardware || !hardware->status || event_seen != 1) { error = -EINVAL; goto failed; }
+    error = tdvp_cpu1_ai_guard_check(guard, lifetime);
+    if (error) goto failed;
+    error = hardware->status(hardware->context, &status);
+    if (error) goto failed;
+    error = tdvp_cpu1_ai_guard_check(guard, lifetime);
+    if (error) goto failed;
+    if (status & (TDVP_KPU_EXCEPTION_MASK | TDVP_KPU_AXI_ERROR)) { error = -EIO; goto failed; }
+    if (status & (TDVP_KPU_WORK_MASK | TDVP_KPU_RESET_MASK)) { error = -EBUSY; goto failed; }
+    return 0;
+failed:
+    {
+        int latched = tdvp_cpu1_ai_guard_fail(guard, error);
+        return latched ? latched : error;
+    }
+}
+
 int tdvp_cpu1_kpu_prepare(struct tdvp_cpu1_ai_guard *guard,
     const struct tdvp_cpu1_ai_guard_ops *lifetime,
     const struct tdvp_cpu1_kpu_init_ops *hardware)
