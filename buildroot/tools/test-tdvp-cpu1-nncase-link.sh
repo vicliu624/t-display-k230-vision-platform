@@ -23,9 +23,10 @@ test "$("${cross}g++" -dumpmachine)" = riscv64-unknown-linux-musl
 mkdir -p "$3"
 output="$(mktemp -d "$(cd "$3" && pwd)/nncase-link.XXXXXX")"
 echo "CPU1_NNCASE_LINK_OUTPUT=$output"
-"${cross}g++" -std=c++17 -O2 -mcmodel=medany -march=rv64imafdcv -mabi=lp64d \
+"${cross}g++" -std=c++17 -DBUILDING_RUNTIME -O2 -mcmodel=medany -march=rv64imafdcv -mabi=lp64d \
     -I"$runtime" -I"$runtime/nncase/include" \
     "$script_dir/tests/tdvp-cpu1-nncase-link-probe.cpp" \
+    -T "$script_dir/tdvp-cpu1-nncase-tls.lds" \
     -T "$mpp/userapps/sample/linker_scripts/riscv64/link.lds" -n --static \
     -Wl,-Map,"$output/probe.map" -Wl,--start-group \
     -L"$runtime/nncase/lib" -lNncase.Runtime.Native -lnncase.rt_modules.k230 -lfunctional_k230 \
