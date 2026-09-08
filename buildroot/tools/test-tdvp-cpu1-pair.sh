@@ -14,7 +14,8 @@ else
     printf '%s\n' 'resource_owner=cpu1-ai-vision' 'ownership_contract=2' \
         'mmz_base=0x14000000' 'mmz_size=0x08000000' \
         'transport_base=0x1c000000' 'transport_size=0x02000000' \
-        'camera=gc2093-csi2' 'ai_engines=gnne,ai2d,fft' > "$test_dir/manifest"
+        'camera=gc2093-csi2' 'ai_engines=gnne,ai2d,fft' \
+        'ai_job_abi=1' 'ai_job_backend=ai2d' 'ai_job_control=0x1dff2000' > "$test_dir/manifest"
 fi
 bash "$guard" "$candidate" "$fdtget" "$test_dir/manifest"
 if bash "$guard" "$baseline" "$fdtget" "$test_dir/manifest" > "$test_dir/rejected.log" 2>&1; then
@@ -22,7 +23,7 @@ if bash "$guard" "$baseline" "$fdtget" "$test_dir/manifest" > "$test_dir/rejecte
 fi
 rejections=1
 while IFS= read -r field; do
-    case "$field" in resource_owner=*|ownership_contract=*|mmz_base=*|mmz_size=*|transport_base=*|transport_size=*|camera=*|ai_engines=*) ;; *) continue ;; esac
+    case "$field" in resource_owner=*|ownership_contract=*|mmz_base=*|mmz_size=*|transport_base=*|transport_size=*|camera=*|ai_engines=*|ai_job_*) ;; *) continue ;; esac
     grep -Fvx "$field" "$test_dir/manifest" > "$test_dir/mutated.manifest"
     if bash "$guard" "$candidate" "$fdtget" "$test_dir/mutated.manifest" > "$test_dir/rejected.log" 2>&1; then
         echo "FAIL missing manifest field accepted: $field" >&2; exit 1

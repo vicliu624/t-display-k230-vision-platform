@@ -5,6 +5,7 @@
 #include "tdvp_cpu1_vision_layout.h"
 #include "tdvp_vision_abi.h"
 #include "tdvp_vision_owner.h"
+#include "tdvp_ai_abi.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -15,7 +16,7 @@
  * the pinned SDK's mmz_userdev_mmap rejects them. Its rt_dev_mem.c instead
  * supports physical mappings and explicitly selects uncached page attributes
  * when the descriptor has O_SYNC. Never use a cached alias for this protocol.
- * Keep this helper restricted to the three fixed, paired-image ABI regions;
+ * Keep this helper restricted to the fixed, paired-image ABI regions;
  * do not expose an arbitrary physical-memory mapping interface to Linux.
  */
 static inline void *tdvp_cpu1_shared_map(uint64_t physical, size_t bytes)
@@ -25,7 +26,9 @@ static inline void *tdvp_cpu1_shared_map(uint64_t physical, size_t bytes)
         protection = PROT_READ; /* Kernel ownership record is not ours to write. */
     else if (!((physical == TDVP_VISION_CONTROL_BASE && bytes == TDVP_VISION_CONTROL_SIZE) ||
                (physical == TDVP_VISION_SHARED_BASE &&
-                bytes == TDVP_VISION_SLOT_COUNT * TDVP_VISION_SLOT_BYTES))) {
+                bytes == TDVP_VISION_SLOT_COUNT * TDVP_VISION_SLOT_BYTES) ||
+               ((physical == TDVP_AI_INPUT_BASE || physical == TDVP_AI_OUTPUT_BASE) &&
+                bytes == TDVP_AI_BUFFER_BYTES))) {
         errno = EINVAL;
         return MAP_FAILED;
     }

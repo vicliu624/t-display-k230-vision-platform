@@ -26,6 +26,7 @@ bash "${SCRIPT_DIR}/test-tdvp-cpu1-capture.sh" "${RTSMART}/mpp"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-fft-selftest.sh" "${RTSMART}/mpp"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-ai-guard.sh" "${RTSMART}/rtsmart/kernel/rt-thread"
 bash "${SCRIPT_DIR}/test-tdvp-ai-job.sh"
+bash "${SCRIPT_DIR}/test-tdvp-ai-abi.sh"
 TEMP_DIR="$(mktemp -d)"
 trap 'status=$?; if [ "$status" -ne 0 ]; then cat "${TEMP_DIR}"/*.log >&2; fi; rm -rf "${TEMP_DIR}"; exit "$status"' EXIT
 # Regress the vision hooks against pristine blobs from the exact pinned BSP.

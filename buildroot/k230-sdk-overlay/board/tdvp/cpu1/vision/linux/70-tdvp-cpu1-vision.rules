@@ -1,1 +1,2 @@
 SUBSYSTEM=="misc", KERNEL=="tdvp-vision", GROUP="video", MODE="0660"
+SUBSYSTEM=="misc", KERNEL=="tdvp-ai", GROUP="video", MODE="0660"

@@ -23,6 +23,7 @@ printf 'include %s\n.PHONY: %s/package/install\n%s/package/install:\n\t$(TDVP_CP
 make --no-print-directory -f "$temporary/Makefile" INSTALL=install TARGET_DIR="$target" \
     STAGING_DIR="$temporary/staging" "$temporary/package/install"
 cmp "$vision/tdvp_vision_abi.h" "$temporary/staging/usr/include/tdvp/tdvp_vision_abi.h"
+cmp "$vision/tdvp_ai_abi.h" "$temporary/staging/usr/include/tdvp/tdvp_ai_abi.h"
 bash "$vision/verify-rootfs.sh" "$target"
 # An older bridge must not pass merely because it has the same ABI/telemetry.
 # Mutate each resource label in a copy of the actual ELF; never alter the input.
@@ -33,6 +34,15 @@ for claim in tdvp-cpu1-kpu-sram tdvp-cpu1-shared-sram tdvp-cpu1-gnne-fft-ai2d; d
         echo "missing AI resource claim accepted: $claim" >&2; exit 1
     fi
     grep -Fq "bridge lacks AI resource claim: $claim" "$temporary/rejected.log"
+done
+cp "$module" "$installed"
+# A pre-service bridge must not pass the new paired userspace/CPU1 contract.
+for claim in ai_abi=1 backend=cpu1-ai2d; do
+    LC_ALL=C sed "s/$claim/xxxxxxxx/g" "$module" > "$installed"
+    if bash "$vision/verify-rootfs.sh" "$target" > "$temporary/rejected.log" 2>&1; then
+        echo "missing async AI service claim accepted: $claim" >&2; exit 1
+    fi
+    grep -Eq 'bridge lacks (AI job ABI|CPU1 AI job endpoint)' "$temporary/rejected.log"
 done
 cp "$module" "$installed"
 # Plant every retired artifact and compressed/nested module. Check refusal

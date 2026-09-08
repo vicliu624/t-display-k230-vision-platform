@@ -111,13 +111,20 @@ while IFS= read -r mpp_path; do
 		|| fail "invalid MPP source path: ${mpp_path}"
 	CPU1_MPP_PATHS+=("canmv_k230/src/rtsmart/mpp/${mpp_path}")
 done < "${SCRIPT_DIR}/vision/mpp-source-paths.txt"
+CPU1_NNCASE_PATHS=(
+	canmv_k230/src/rtsmart/libs/nncase/riscv64/gsl
+	canmv_k230/src/rtsmart/libs/nncase/riscv64/nncase/include
+	canmv_k230/src/rtsmart/libs/nncase/riscv64/nncase/lib/libNncase.Runtime.Native.a
+	canmv_k230/src/rtsmart/libs/nncase/riscv64/nncase/lib/libnncase.rt_modules.k230.a
+	canmv_k230/src/rtsmart/libs/nncase/riscv64/nncase/lib/libfunctional_k230.a
+)
 if git -C "${CPU1_CHECKOUT_DIR}" sparse-checkout -h >/dev/null 2>&1; then
 	git -C "${CPU1_CHECKOUT_DIR}" sparse-checkout init --no-cone
 	git -C "${CPU1_CHECKOUT_DIR}" sparse-checkout set --no-cone \
 		canmv_k230/Kconfig canmv_k230/Kconfig.canmv canmv_k230/Makefile canmv_k230/configs \
 		canmv_k230/boards/Kconfig canmv_k230/boards/k230_canmv_v3p0 canmv_k230/tools \
 		canmv_k230/src/applications canmv_k230/src/uboot canmv_k230/src/rtsmart/Makefile \
-		canmv_k230/src/rtsmart/Kconfig "${CPU1_MPP_PATHS[@]}" \
+		canmv_k230/src/rtsmart/Kconfig "${CPU1_MPP_PATHS[@]}" "${CPU1_NNCASE_PATHS[@]}" \
 		canmv_k230/src/rtsmart/parse_config canmv_k230/src/rtsmart/rtsmart \
 		canmv_k230/src/opensbi
 else
@@ -148,6 +155,7 @@ else
 			'/canmv_k230/src/rtsmart/rtsmart/' \
 			'/canmv_k230/src/opensbi/'
 		printf '/%s\n' "${CPU1_MPP_PATHS[@]}"
+		printf '/%s\n' "${CPU1_NNCASE_PATHS[@]}"
 	} > "${CPU1_SPARSE_FILE}"
 fi
 # A fixed commit already in this dedicated cache needs no origin refresh.
@@ -341,6 +349,7 @@ install -m 0644 "${CPU1_FIRMWARE}" "${FIRMWARE_OUTPUT}"
 	printf 'mmz_base=0x14000000\nmmz_size=0x08000000\n'
 	printf 'transport_base=0x1c000000\ntransport_size=0x02000000\n'
 	printf 'camera=gc2093-csi2\nai_engines=gnne,ai2d,fft\n'
+	printf 'ai_job_abi=1\nai_job_backend=ai2d\nai_job_control=0x1dff2000\n'
 	printf 'worker_sha256='
 	sha256sum "${SDK_RTSMART_BUILD_DIR}/tdvp-vision/tdvp-vision-worker.elf" | awk '{print $1}'
 	printf 'firmware_size='

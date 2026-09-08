@@ -51,14 +51,40 @@ fi
 "${cross}size" "$output/tdvp-capture-probe.elf"
 sha256sum "$output/tdvp-capture-probe.elf"
 echo 'PASS RT-Smart capture probe cross-linked (not booted, not production integration)'
-"${cross}gcc" -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -O2 \
-    -mcmodel=medany -march=rv64imafdcv -mabi=lp64d "${includes[@]}" \
-    "$source_dir/tdvp_cpu1_capture.c" "$source_dir/tdvp_cpu1_transport.c" \
-    "$source_dir/tdvp_cpu1_vision_worker.c" "$output/mpi_sensor.o" "$output/mpi_sensor_type_to_mirror.o" \
+runtime="$(dirname "$mpp")/libs/nncase/riscv64"
+grep -Fxq '#define NNCASE_VERSION "2.9.0"' "$runtime/nncase/include/nncase/version.h"
+for entry in \
+    'f6674a664be8133e368ab0f08df3e42d351e1f50811fdbddb6cf195cab6c0264:libNncase.Runtime.Native.a' \
+    '5f6baf7c785916beb7e18bda2535585cabaa62315dd8446f256d651900c06564:libnncase.rt_modules.k230.a' \
+    '1ac694e7197944e7217e21b50acfa2a8b14956355cf28e2f887d16d2a608fb01:libfunctional_k230.a'; do
+    [ "$(sha256sum "$runtime/nncase/lib/${entry#*:}" | awk '{print $1}')" = "${entry%%:*}" ] || {
+        echo "FAIL CPU1 nncase archive pin: ${entry#*:}" >&2; exit 1;
+    }
+done
+ai_flags=(-O2 -mcmodel=medany -march=rv64imafdcv -mabi=lp64d -I"$source_dir")
+worker_objects=()
+for unit in tdvp_cpu1_capture tdvp_cpu1_transport tdvp_cpu1_vision_worker tdvp_ai_job tdvp_cpu1_ai_owner tdvp_cpu1_ai_guard; do
+    "${cross}gcc" -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror "${ai_flags[@]}" "${includes[@]}" \
+        -c "$source_dir/$unit.c" -o "$output/$unit.o"
+    worker_objects+=("$output/$unit.o")
+done
+"${cross}g++" -std=c++17 -DBUILDING_RUNTIME -Wall -Wextra "${ai_flags[@]}" \
+    -I"$runtime" -I"$runtime/nncase/include" -c "$source_dir/tdvp_cpu1_ai_service.cpp" -o "$output/tdvp_cpu1_ai_service.o"
+"${cross}g++" "${ai_flags[@]}" "${worker_objects[@]}" "$output/tdvp_cpu1_ai_service.o" \
+    "$output/mpi_sensor.o" "$output/mpi_sensor_type_to_mirror.o" \
+    -T "$source_dir/tdvp_nncase_tls.lds" \
     -T "$linker" -n --static -Wl,-Map,"$output/tdvp-vision-worker.map" \
-    -Wl,--start-group "${archives[@]}" -lpthread -lm -Wl,--end-group \
+    -Wl,--wrap=open,--wrap=close,--wrap=poll \
+    -Wl,--start-group "${archives[@]}" -L"$runtime/nncase/lib" \
+    -lNncase.Runtime.Native -lnncase.rt_modules.k230 -lfunctional_k230 -lpthread -lm -Wl,--end-group \
     -o "$output/tdvp-vision-worker.elf"
 "${cross}nm" "$output/tdvp-vision-worker.elf" > "$output/tdvp-vision-worker.symbols"
+"${cross}readelf" -SW "$output/tdvp-vision-worker.elf" > "$output/tdvp-vision-worker.sections"
+test "$(grep -Ec '\] \.tbss[[:space:]]' "$output/tdvp-vision-worker.sections")" -eq 1
+if grep -Eq '\] \.tbss\.' "$output/tdvp-vision-worker.sections"; then
+    echo 'FAIL orphan nncase TLS sections in CPU1 worker' >&2; exit 1
+fi
+grep -Eq ' T tdvp_cpu1_ai_service_start$' "$output/tdvp-vision-worker.symbols"
 if grep -Eq ' [tT] (kd_mpi_vo_.*|kd_mpi_connector_.*|vg_lite_.*|sample_vicap_vo.*)$' "$output/tdvp-vision-worker.symbols"; then
     echo 'FAIL CPU1 worker linked a display owner' >&2
     exit 1

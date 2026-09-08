@@ -9,6 +9,7 @@
 #include "tdvp_cpu1_vision_layout.h"
 #include "tdvp_vision_owner_io.h"
 #include "tdvp_cpu1_shared_map.h"
+#include "tdvp_cpu1_ai_service.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -84,6 +85,9 @@ int main(void)
     }
     if (tdvp_cpu1_transport_init(&transport, control, slots, epoch))
         return 1;
+    /* Independent supervisor/executor; a failed AI job stays resident without
+     * granting Linux direct accelerator access or restarting the capture loop. */
+    (void)tdvp_cpu1_ai_service_start((void *)control, (void *)ownership, owner_cookie, owner_linux_cookie);
     puts("TDVP CPU1 vision: ready; waiting for Linux stream request (frame transport, no model loaded)");
 
     for (;;) {

@@ -10,6 +10,7 @@ TDVP_CPU1_VISION_INSTALL_STAGING = YES
 
 define TDVP_CPU1_VISION_INSTALL_STAGING_CMDS
 	$(INSTALL) -D -m 0644 $(@D)/tdvp_vision_abi.h $(STAGING_DIR)/usr/include/tdvp/tdvp_vision_abi.h
+	$(INSTALL) -D -m 0644 $(@D)/tdvp_ai_abi.h $(STAGING_DIR)/usr/include/tdvp/tdvp_ai_abi.h
 endef
 
 define TDVP_CPU1_VISION_INSTALL_TARGET_CMDS

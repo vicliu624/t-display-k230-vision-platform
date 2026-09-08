@@ -21,12 +21,14 @@
 #include "tdvp_cpu1_vision_layout.h"
 #include "tdvp_cpu1_owner.h"
 #include "tdvp_vision_observer.h"
+#include "tdvp_cpu1_ai_linux.h"
 
 #define VISION_FRAME_BYTES (1920U * 1080U * 3U / 2U)
 #define VISION_WATCHDOG (10 * HZ)
 #define VISION_TICK msecs_to_jiffies(50)
 
 struct vision_device {
+    struct tdvp_ai_linux *ai;
     struct tdvp_linux_owner owner;
     struct tdvp_vision_observer observer;
     struct miscdevice misc;
@@ -93,6 +95,8 @@ static void vision_tick(struct work_struct *work)
     mutex_lock(&vision->lock);
     if (!vision->dead) {
         ownership = tdvp_linux_owner_poll(&vision->owner);
+        tdvp_ai_linux_owner_update(vision->ai, ownership,
+            vision->owner.session.observed_cookie, vision->owner.session.own.cookie);
         if (ownership && ownership != -EAGAIN)
             vision->fault = ownership;
         if (!ownership) {
@@ -363,6 +367,11 @@ static int vision_probe(struct platform_device *pdev)
         result = -ENOMEM;
         goto failed;
     }
+    vision->ai = tdvp_ai_linux_create(&pdev->dev, vision->control);
+    if (IS_ERR(vision->ai)) {
+        result = PTR_ERR(vision->ai);
+        goto failed;
+    }
     vision->misc.minor = MISC_DYNAMIC_MINOR;
     vision->misc.name = "tdvp-vision";
     vision->misc.fops = &vision_fops;
@@ -386,6 +395,7 @@ static int vision_probe(struct platform_device *pdev)
     dev_info(&pdev->dev, "CPU1 ownership OFFER; boot-lifetime resource holds, asynchronous frame bridge\n");
     return 0;
 failed:
+    tdvp_ai_linux_abort(vision->ai);
     tdvp_linux_owner_abort(&vision->owner);
     kref_put(&vision->ref, vision_free);
     return dev_err_probe(&pdev->dev, result, "CPU1 ownership preparation failed; no offer issued\n");

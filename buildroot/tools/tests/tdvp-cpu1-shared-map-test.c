@@ -58,6 +58,8 @@ int main(void)
         {TDVP_VISION_CONTROL_BASE, TDVP_VISION_CONTROL_SIZE, PROT_READ | PROT_WRITE},
         {TDVP_VISION_SHARED_BASE, TDVP_VISION_SLOT_COUNT * TDVP_VISION_SLOT_BYTES,
          PROT_READ | PROT_WRITE},
+        {TDVP_AI_INPUT_BASE, TDVP_AI_BUFFER_BYTES, PROT_READ | PROT_WRITE},
+        {TDVP_AI_OUTPUT_BASE, TDVP_AI_BUFFER_BYTES, PROT_READ | PROT_WRITE},
     };
     for (size_t i = 0; i < sizeof(regions) / sizeof(regions[0]); ++i) {
         expected_physical = regions[i].physical;
@@ -66,28 +68,31 @@ int main(void)
         assert(!(expected_physical & 4095) && !(expected_bytes & 4095));
         assert(tdvp_cpu1_shared_map(expected_physical, expected_bytes) == map_result);
     }
-    assert(opens == 3 && maps == 3 && closes == 3);
+    assert(opens == 5 && maps == 5 && closes == 5);
     /* Reject MMZ, MMIO, a wider shared range, misalignment and overflow. */
     const uint64_t rejected[] = {TDVP_VISION_MMZ_BASE, 0x91100000,
-                                TDVP_OWNER_BASE + 1, UINT64_MAX};
+                                TDVP_OWNER_BASE + 1, TDVP_AI_INPUT_BASE + 1,
+                                TDVP_AI_OUTPUT_BASE + TDVP_AI_BUFFER_BYTES, UINT64_MAX};
     for (size_t i = 0; i < sizeof(rejected) / sizeof(rejected[0]); ++i) {
         assert(tdvp_cpu1_shared_map(rejected[i], 4096) == MAP_FAILED);
         assert(errno == EINVAL);
     }
     assert(tdvp_cpu1_shared_map(TDVP_VISION_SHARED_BASE, TDVP_VISION_SHARED_SIZE) == MAP_FAILED);
     assert(tdvp_cpu1_shared_map(TDVP_OWNER_BASE, 0) == MAP_FAILED);
-    assert(opens == 3 && maps == 3 && closes == 3);
+    assert(tdvp_cpu1_shared_map(TDVP_AI_INPUT_BASE, 2 * TDVP_AI_BUFFER_BYTES) == MAP_FAILED);
+    assert(tdvp_cpu1_shared_map(TDVP_AI_OUTPUT_BASE, TDVP_AI_BUFFER_BYTES + 4096) == MAP_FAILED);
+    assert(opens == 5 && maps == 5 && closes == 5);
 
     open_result = -1;
     assert(tdvp_cpu1_shared_map(expected_physical, expected_bytes) == MAP_FAILED);
-    assert(errno == EACCES && opens == 4 && maps == 3 && closes == 3);
+    assert(errno == EACCES && opens == 6 && maps == 5 && closes == 5);
     open_result = 7;
     map_result = MAP_FAILED;
     assert(tdvp_cpu1_shared_map(expected_physical, expected_bytes) == MAP_FAILED);
-    assert(errno == ENXIO && opens == 5 && maps == 4 && closes == 4);
+    assert(errno == ENXIO && opens == 7 && maps == 6 && closes == 6);
     map_result = NULL;
     assert(tdvp_cpu1_shared_map(expected_physical, expected_bytes) == MAP_FAILED);
-    assert(errno == ENOMEM && opens == 6 && maps == 5 && closes == 5);
+    assert(errno == ENOMEM && opens == 8 && maps == 7 && closes == 7);
     puts("PASS CPU1 fixed shared mappings: O_SYNC, exact ranges, errors and descriptor cleanup");
     return 0;
 }
