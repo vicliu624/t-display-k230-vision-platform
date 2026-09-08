@@ -8,7 +8,8 @@ _Static_assert(offsetof(sysctl_media_clk_t, ai_clk_cfg)==8, "AI clock layout");
 _Static_assert(offsetof(sysctl_media_clk_t, ddr_clk_cfg)==0x60, "DDR clock layout");
 _Static_assert(offsetof(sysctl_rst_t, ai_rst_ctl)==0x14, "AI reset layout");
 _Static_assert(offsetof(sysctl_pwr_s, ai_pwr_lpi_state)==0x2c, "AI power layout");
-static uint32_t cmu[25], pll[4], power[89], reset_reg;
+static uint32_t cmu[25], pll[4], power[89], reset_registers[0x1000 / 4];
+#define reset_reg reset_registers[0x14 / 4]
 static int scenario, maps, unmaps, writes, masks, delays, grant_calls, reset_writes;
 extern int tdvp_cpu1_ai_clock_prepare(void);
 int tdvp_cpu1_vision_ownership_status(void)
@@ -22,11 +23,11 @@ void *rt_ioremap(void *base, unsigned long size)
     case 0x91100000: assert(size==0x64); return cmu;
     case 0x91102000: assert(size==0x10); return pll;
     case 0x91103000: assert(size==0x164); return power;
-    case 0x91101014: assert(size==4); return &reset_reg;
+    case 0x91101000: assert(size==0x1000); return reset_registers;
     default: abort();
     }
 }
-void rt_iounmap(void *p) { assert(p==cmu || p==pll || p==power || p==&reset_reg); ++unmaps; }
+void rt_iounmap(void *p) { assert(p==cmu || p==pll || p==power || p==reset_registers); ++unmaps; }
 uint32_t readl(const volatile void *p)
 {
     if (scenario==18 && reset_writes==2 && p==pll) return pll[0]^1U;

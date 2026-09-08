@@ -14,7 +14,8 @@
  */
 #define CMU_PHYS 0x91100000UL
 #define PLL_PHYS 0x91102000UL
-#define LOCK_PHYS 0x911040a0UL
+#define LOCK_PAGE_PHYS 0x91104000UL
+#define LOCK_OFFSET (0xa0 / sizeof(uint32_t))
 #define LS_GATE (0x24 / 4)
 #define I2C_DIV (0x2c / 4)
 #define I2C4_GATE (1U << 25)
@@ -27,6 +28,7 @@ _Static_assert(TIMER_CLK_FREQ == 27000000, "revalidate early hardlock timeout ti
 int tdvp_cpu1_i2c4_clock_prepare(void)
 {
     volatile uint32_t *cmu = RT_NULL, *pll = RT_NULL, *lock = RT_NULL;
+    volatile uint32_t *lock_page = RT_NULL;
     uint32_t cfg0, cfg1, ctl, state, divider, gates;
     uint64_t numerator, denominator, ratio, started;
     unsigned int polls;
@@ -37,8 +39,13 @@ int tdvp_cpu1_i2c4_clock_prepare(void)
     if (!cmu) goto out;
     pll = rt_ioremap((void *)PLL_PHYS, 0x10);
     if (!pll) goto out;
-    lock = rt_ioremap((void *)LOCK_PHYS, 4);
-    if (!lock) goto out;
+    /* The pinned RT-Smart iounmap walks whole pages from its input address.
+     * Keep the mapping base aligned; unmapping base+0xa0 would span a second,
+     * unowned page. Only the lock register below is ever read or written.
+     */
+    lock_page = rt_ioremap((void *)LOCK_PAGE_PHYS, 0x1000);
+    if (!lock_page) goto out;
+    lock = lock_page + LOCK_OFFSET;
 
     irq = rt_hw_interrupt_disable();
     started = rdtime();
@@ -99,7 +106,7 @@ unlock:
     }
     rt_hw_interrupt_enable(irq);
 out:
-    if (lock) rt_iounmap((void *)lock);
+    if (lock_page) rt_iounmap((void *)lock_page);
     if (pll) rt_iounmap((void *)pll);
     if (cmu) rt_iounmap((void *)cmu);
     if (result)

@@ -19,6 +19,7 @@ extern int tdvp_cpu1_vision_ownership_status(void);
 int tdvp_cpu1_ai_clock_prepare(void)
 {
     volatile uint32_t *cmu = RT_NULL, *pll = RT_NULL, *power = RT_NULL, *reset = RT_NULL;
+    volatile uint32_t *reset_page = RT_NULL;
     uint32_t cfg0, cfg1, control, value;
     uint64_t numerator, denominator;
     unsigned int waited;
@@ -29,8 +30,12 @@ int tdvp_cpu1_ai_clock_prepare(void)
     cmu = rt_ioremap((void *)0x91100000UL, 0x64);
     pll = rt_ioremap((void *)0x91102000UL, 0x10);
     power = rt_ioremap((void *)0x91103000UL, 0x164);
-    reset = rt_ioremap((void *)0x91101014UL, 4);
-    if (!cmu || !pll || !power || !reset) goto out;
+    /* Retain an aligned mapping base for the pinned RT-Smart iounmap.
+     * Passing the register pointer at +0x14 would unmap a second page.
+     */
+    reset_page = rt_ioremap((void *)0x91101000UL, 0x1000);
+    if (!cmu || !pll || !power || !reset_page) goto out;
+    reset = reset_page + 0x14 / sizeof(uint32_t);
     result = -RT_EBUSY;
     if ((readl(power + 0x2c / 4) & 3U) != 2U ||
         !(readl(power + 0x160 / 4) & 2U) ||
@@ -79,7 +84,7 @@ int tdvp_cpu1_ai_clock_prepare(void)
         (readl(cmu + 0x60 / 4) & 0x50U) != 0x50U) goto out;
     result = tdvp_cpu1_vision_ownership_status();
 out:
-    if (reset) rt_iounmap((void *)reset);
+    if (reset_page) rt_iounmap((void *)reset_page);
     if (power) rt_iounmap((void *)power);
     if (pll) rt_iounmap((void *)pll);
     if (cmu) rt_iounmap((void *)cmu);

@@ -10,7 +10,8 @@
 #include <ioremap.h>
 #include "tdvp-startup-trace-stub.h"
 
-static uint32_t cmu[32], before[32], pll[4], semaphore;
+static uint32_t cmu[32], before[32], pll[4], lock_registers[0x1000 / 4];
+#define semaphore lock_registers[0xa0 / 4]
 static unsigned int maps, unmaps, locks, releases, clock_writes, pll_reads;
 static int scenario, held, irq_off, initialized, registered, speed_calls;
 static int ownership;
@@ -40,7 +41,7 @@ void *rt_ioremap(void *address, unsigned long size)
     switch ((uintptr_t)address) {
     case 0x91100000: assert(size == 0x34); return cmu;
     case 0x91102000: assert(size == 16); return pll;
-    case 0x911040a0: assert(size == 4); return &semaphore;
+    case 0x91104000: assert(size == 0x1000); return lock_registers;
     case 0x91409000:
         assert(size == 0x10000 && !held && !irq_off && releases == 1);
         assert((cmu[9] & 0x02000401U) == 0x02000401U);
@@ -51,7 +52,7 @@ void *rt_ioremap(void *address, unsigned long size)
 void rt_iounmap(void *address)
 {
     assert(!held && !irq_off);
-    assert(address == cmu || address == pll || address == &semaphore);
+    assert(address == cmu || address == pll || address == lock_registers);
     ++unmaps;
 }
 long rt_hw_interrupt_disable(void) { assert(!irq_off); irq_off = 1; return 123; }

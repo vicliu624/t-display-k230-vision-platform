@@ -31,7 +31,7 @@ PINNED_BSP=canmv_k230/src/rtsmart/rtsmart/kernel/bsp/maix3
 # partial-clone extraction to source/header dependencies of these regressions.
 # git archive prefetches unrelated blobs even with pathspecs on the CI Git
 # version; git show addresses one exact pinned blob without that traversal.
-for path in Kconfig board/board.h board/sdk_kernel_init.c c908/tick.h \
+for path in Kconfig board/board.h board/sdk_kernel_init.c c908/tick.h c908/mmu.c c908/riscv_mmu.h \
 	drivers/interdrv/i2c/drv_i2c.c drivers/interdrv/gnne/ai_module.c \
 	drivers/interdrv/gnne/gnne_dev.c drivers/interdrv/gnne/ai2d_dev.c \
 	drivers/interdrv/hardlock/drv_hardlock.c drivers/interdrv/hardlock/drv_hardlock.h \
@@ -41,9 +41,13 @@ for path in Kconfig board/board.h board/sdk_kernel_init.c c908/tick.h \
 	mkdir -p "${TEMP_DIR}/${PINNED_BSP}/$(dirname "${path}")"
 	git -C "${CHECKOUT}" show "HEAD:${PINNED_BSP}/${path}" > "${TEMP_DIR}/${PINNED_BSP}/${path}"
 done
+PINNED_IOREMAP=canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/components/lwp/ioremap.c
+mkdir -p "${TEMP_DIR}/$(dirname "${PINNED_IOREMAP}")"
+git -C "${CHECKOUT}" show "HEAD:${PINNED_IOREMAP}" > "${TEMP_DIR}/${PINNED_IOREMAP}"
 BSP="${TEMP_DIR}/canmv_k230/src/rtsmart/rtsmart/kernel/bsp/maix3"
 bash "${SCRIPT_DIR}/validate-k230-sdk-linux-patches.sh" "${CPU1_DIR}/vision"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-i2c4-early.sh" "${BSP}"
+bash "${SCRIPT_DIR}/test-tdvp-cpu1-mmio-unmap.sh" "${BSP}"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-ownership.sh" "${BSP}"
 bash "${SCRIPT_DIR}/test-tdvp-cpu1-linux-owner.sh"
 # Use exact pinned Git blobs for header-level regressions, never generated or
