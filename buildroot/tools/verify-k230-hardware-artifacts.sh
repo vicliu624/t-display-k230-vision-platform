@@ -113,6 +113,12 @@ for option in CONFIG_K230_GNNE_DRIVER CONFIG_K230_AI2D_DRIVER; do
 done
 
 require_file "$TARGET_DIR/usr/local/bin/vpl-hwctl"
+require_file "$TARGET_DIR/usr/local/bin/tdvp-nrf52840"
+[ -x "$TARGET_DIR/usr/local/bin/tdvp-nrf52840" ] &&
+file "$TARGET_DIR/usr/local/bin/tdvp-nrf52840" | grep -Fq 'RISC-V' || {
+	printf '%s\n' 'TDVP K230 preflight: nRF52840 AT client is not an executable RISC-V target binary' >&2
+	exit 1
+}
 [ -x "$TARGET_DIR/usr/local/bin/vpl-hwctl" ] || {
 	printf '%s\n' 'TDVP K230 preflight: vpl-hwctl is not executable' >&2
 	exit 1
@@ -170,6 +176,8 @@ bash "$(dirname "$0")/../k230-sdk-overlay/board/tdvp/cpu1/vision/verify-pair.sh"
 	printf 'camera_owner=cpu1-rtsmart\n'
 	printf 'linux_bridge=/dev/tdvp-vision\n'
 	printf 'hardware_status_tool=/usr/local/bin/vpl-hwctl\n'
+	printf 'nrf52840_at_client=/usr/local/bin/tdvp-nrf52840\n'
+	printf 'nrf52840_runtime_acceptance=requires_real_identity_and_BLE_GATT_tests\n'
 	printf 'onscreen_keyboard=/usr/bin/wvkbd-mobintl\n'
 	printf 'panel=wf-panel-pi\n'
 	printf 'background=pcmanfm\n'

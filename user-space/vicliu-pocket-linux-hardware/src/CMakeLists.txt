@@ -69,6 +69,17 @@ target_compile_features(vpl-nrf9151-probe PRIVATE cxx_std_17)
 target_compile_options(vpl-nrf9151-probe PRIVATE ${VPL_WARNING_FLAGS})
 target_link_libraries(vpl-nrf9151-probe PRIVATE vpl-hardware-core)
 
+# Separate from BlueZ/HCI: this speaks the official nRF52840 UART AT protocol.
+# It has no autostart or RF side effects unless an operator requests a command.
+add_library(tdvp-nrf52840-at STATIC hardware/nrf52840.cpp)
+target_compile_features(tdvp-nrf52840-at PUBLIC cxx_std_17)
+target_compile_options(tdvp-nrf52840-at PRIVATE ${VPL_WARNING_FLAGS})
+target_include_directories(tdvp-nrf52840-at PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(tdvp-nrf52840 nrf52840-main.cpp)
+target_compile_options(tdvp-nrf52840 PRIVATE ${VPL_WARNING_FLAGS})
+target_link_libraries(tdvp-nrf52840 PRIVATE tdvp-nrf52840-at)
+install(TARGETS tdvp-nrf52840 RUNTIME DESTINATION local/bin)
+
 install(TARGETS vpl-hwctl vpl-lora-probe vpl-nrf9151-probe tdvp-cpu1ctl tdvp-cpu1-acceptance RUNTIME DESTINATION local/bin)
 install(TARGETS vpl-hardwared RUNTIME DESTINATION libexec/vicliu-pocket-linux-hardware)
 install(TARGETS tdvp_cpu1 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
