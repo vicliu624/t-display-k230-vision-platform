@@ -51,6 +51,88 @@ bool parse(const std::string &text, State *fields)
             return false;
     return true;
 }
+
+bool parse_ai_status(const std::string &text, State *fields)
+{
+    if (text.empty() || text.size() > 4096)
+        return false;
+    std::istringstream input(text);
+    std::string line;
+    while (std::getline(input, line)) {
+        const auto equal = line.find('=');
+        if (equal == std::string::npos || !equal || equal + 1 == line.size() ||
+            !fields->emplace(line.substr(0, equal), line.substr(equal + 1)).second)
+            return false;
+    }
+    // This is the paired image's read-only ABI, not a claim inferred from a
+    // camera endpoint, an old Linux model file, or an acceptance marker.
+    if ((*fields)["ai_abi"] != "1" || (*fields)["backend"] != "cpu1-ai2d,fft,kpu-kws" ||
+        (*fields)["kpu_jobs"] != "kws-reference" || (*fields)["fft_jobs"] != "available")
+        return false;
+    const auto &phase = (*fields)["state"];
+    if (phase != "idle" && phase != "pending" && phase != "running" &&
+        phase != "result" && phase != "fault")
+        return false;
+    int error, owner_error;
+    unsigned int opened, pending, detached;
+    std::uint64_t submitted, accepted, completed;
+    if (!number(*fields, "error", &error) || error > 0 || error < -4095 ||
+        !number(*fields, "owner_error", &owner_error) || owner_error > 0 || owner_error < -4095 ||
+        !number(*fields, "client_open", &opened) || opened > 1 ||
+        !number(*fields, "pending", &pending) || pending > 1 ||
+        !number(*fields, "detached", &detached) || detached > 1 ||
+        !number(*fields, "submitted", &submitted) || !number(*fields, "accepted", &accepted) ||
+        !number(*fields, "completed", &completed) || completed > accepted || accepted > submitted)
+        return false;
+    if ((phase == "fault") != (error != 0) || (detached && (!pending || opened)) ||
+        (phase == "idle" && (pending || submitted != completed)) ||
+        ((phase == "running" || phase == "result") && !pending) ||
+        (phase == "result" && completed != submitted))
+        return false;
+    return true;
+}
+
+void append_cpu1_ai_state(State *state, bool ownership_ready, const std::string &owner)
+{
+    const bool endpoint = paths::exists("/dev/tdvp-ai");
+    const bool driver = paths::exists("/sys/class/misc/tdvp-ai/device/driver");
+    State fields;
+    const bool valid = endpoint && driver &&
+        parse_ai_status(paths::read("/sys/class/misc/tdvp-ai/status"), &fields);
+    const std::string phase = valid ? fields["state"] :
+        (endpoint && driver ? "status-unavailable" : "unavailable");
+    const bool available = ownership_ready && valid && fields["error"] == "0" &&
+        fields["owner_error"] == "0" && phase != "pending" && phase != "fault";
+    (*state)["cpu1_ai_status_valid"] = valid ? "1" : "0";
+    (*state)["cpu1_ai_available"] = available ? "1" : "0";
+    (*state)["cpu1_ai_state"] = phase;
+    (*state)["cpu1_ai_active"] = available && phase == "running" ? "1" : "0";
+    (*state)["cpu1_ai_abi"] = valid ? fields["ai_abi"] : "unknown";
+    for (const char *key : {"backend", "kpu_jobs", "fft_jobs", "error", "owner_error",
+            "client_open", "pending", "detached", "submitted", "accepted", "completed"})
+        (*state)[std::string("cpu1_ai_") + key] = valid ? fields[key] : "unknown";
+    (*state)["cpu1_ai_ai2d_available"] = available ? "1" : "0";
+    (*state)["cpu1_ai_fft_available"] = available ? "1" : "0";
+
+    (*state)["kpu_owner"] = "cpu1";
+    (*state)["kpu_transport"] = endpoint ? "1" : "0";
+    (*state)["kpu_driver"] = driver ? "1" : "0";
+    (*state)["kpu_runtime"] = valid ? "cpu1-rtsmart-kws-reference" : "";
+    (*state)["kpu_available"] = available ? "1" : "0";
+    (*state)["kpu_reference_runtime_available"] = available ? "1" : "0";
+    (*state)["kpu_acceptance"] = available ? "unverified" : "unavailable";
+    (*state)["kpu_acceptance_state"] = available ? "cpu1-reference-unverified" :
+        (!ownership_ready ? owner : phase == "idle" || phase == "running" || phase == "result"
+            ? "owner-not-ready" : phase);
+    // Shared AI job state does not identify which accelerator is currently
+    // executing. Report that activity above, not as fabricated KPU activity.
+    // Runtime counters are telemetry, never numerical/physical acceptance.
+    // Linux GNNE/AI2D devices and the retired Linux acceptance service stay off.
+    for (const char *key : {"kpu_functional", "kpu_active", "kpu_gnne_device", "kpu_ai2d_device",
+            "kpu_kernel_ready", "kpu_acceptance_service_active", "kpu_acceptance_passed",
+            "kpu_acceptance_skipped"})
+        (*state)[key] = "0";
+}
 }
 
 void append_cpu1_vision_state(State *state)
@@ -86,15 +168,6 @@ void append_cpu1_vision_state(State *state)
     (*state)["camera_active"] = "0";
     (*state)["camera_acceptance"] = available ? "unverified" : "unavailable";
 
-    (*state)["kpu_owner"] = "cpu1";
-    (*state)["kpu_transport"] = endpoint ? "1" : "0";
-    (*state)["kpu_driver"] = initialized ? "1" : "0";
-    (*state)["kpu_runtime"] = initialized ? "cpu1-rtsmart-no-model" : "";
-    (*state)["kpu_acceptance"] = initialized ? "unverified" : "unavailable";
-    (*state)["kpu_acceptance_state"] = initialized ? "cpu1-model-unconfigured" : owner;
-    for (const char *key : {"kpu_available", "kpu_functional", "kpu_active", "kpu_gnne_device",
-            "kpu_ai2d_device", "kpu_kernel_ready", "kpu_reference_runtime_available",
-            "kpu_acceptance_service_active", "kpu_acceptance_passed", "kpu_acceptance_skipped"})
-        (*state)[key] = "0";
+    append_cpu1_ai_state(state, initialized, owner);
 }
 }
