@@ -32,3 +32,8 @@ assert 'tdvp_owner_publish(&wire->cpu1_side, &owner.own)' in trace
 assert 'TDVP_OWNER_STARTING' in trace and 'TDVP_OWNER_READY' in trace
 print('CPU1 status source contract: PASS read-only sysfs callback; not runtime/hardware acceptance')
 PY
+
+# Keep the early behavioral test tied to the production post-image assertions.
+# Inspect production code alone so assertion strings in the test cannot mask
+# a missing runtime marker or an obsolete image requirement.
+bash "$project/buildroot/tools/test-tdvp-cpu1-hwctl-image-contract.sh"

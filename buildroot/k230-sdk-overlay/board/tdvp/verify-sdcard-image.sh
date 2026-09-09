@@ -437,7 +437,16 @@ bash "$(dirname "$0")/verify-uart1-dtb.sh" "${SELECTED_DTB}" "${BUILDROOT_HOST_D
 # for the bridge and absence of all retired Linux AI/ISP owners as well.
 bash "$(dirname "$0")/cpu1/vision/verify-rootfs-image.sh" "${ROOTFS}"
 require_rootfs_content '/usr/local/bin/vpl-hwctl' '/sys/class/misc/tdvp-vision/status'
-require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1-model-unconfigured'
+# The publisher reads the real AI bridge independently of camera ownership.
+# Runtime availability is not a numerical/hardware acceptance result.
+require_rootfs_content '/usr/local/bin/vpl-hwctl' '/sys/class/misc/tdvp-ai/status'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1_ai_status_valid'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1_ai_available'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1_ai_state'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1-rtsmart-kws-reference'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1-reference-unverified'
+reject_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1-model-unconfigured'
+reject_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1-rtsmart-no-model'
 reject_rootfs_content '/usr/local/bin/vpl-hwctl' '/root/app/ai2d_kpu'
 reject_rootfs_content '/usr/local/bin/vpl-hwctl' 'tdvp-kpu-acceptance.service'
 for required_dtb_string in \

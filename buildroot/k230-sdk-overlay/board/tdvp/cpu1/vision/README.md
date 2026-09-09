@@ -455,9 +455,11 @@ publication uses the same lock as status reads and stream opens.
 The Linux hardware publisher now consumes this record, not V4L2/old Linux
 KPU devices or old camera/KPU pass markers. It distinguishes CPU1 initialized,
 vision worker available/running and frame counters from physical acceptance.
-KPU model availability remains false with `cpu1-model-unconfigured` until a
-CPU1 model service is actually integrated. It does not claim ASR or successful
-inference from driver initialization. Unit tests exercise the real observer
+The publisher also reads `/sys/class/misc/tdvp-ai/status` to report the paired
+CPU1 AI2D/FFT/KWS reference service's live availability and job state. An available
+reference runtime reports `cpu1-reference-unverified`, not a completed numerical
+or hardware acceptance result. It does not claim ASR or successful inference
+from driver initialization. Unit tests exercise the real observer
 and parser, and the bridge plus complete hardware service cross-build on
 Ubuntu 24.04. Board runtime behavior remains an acceptance requirement.
 
