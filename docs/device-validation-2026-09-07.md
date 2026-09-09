@@ -1,6 +1,10 @@
 # 2026-09-07 K230 实机检查与定点修复
 
-本记录不是整张镜像的发布验收。基线为 `codex/cpu1-rtsmart-integration` 的
+本文保留 2026-09-07 的定点修复与测试结果，适用于下述基线及各节记录的会话。
+其中的 Linux 摄像头链路和 Pixman 配置已退出当前 profile；现行分工见
+[架构](architecture.zh-CN.md)。新镜像验收见 [发布契约](release-contract.zh-CN.md)。
+
+基线为 `codex/cpu1-rtsmart-integration` 的
 `8db973f4e948b9379ab729333259787632dd7626`；检查后设备已应用以下定点修复。
 没有替换 nRF 固件，没有正式安装/启用相机服务，没有生成新的完整 SD 镜像。
 相机已在隔离候选目录中完成实机采集，详见下文，不等于烧录镜像已具备该能力。
@@ -68,8 +72,8 @@ v0.8.0，保留许可；由构建主机的 wayland-scanner 生成客户端代码
 实际 Linux CPU0 工具链/sysroot 在 Ubuntu 24.04.4 中以
 `-Wall -Wextra -Werror` 交叉编译通过。候选 benchmark SHA256 为
 `7fa4f9f0cce3595b5243d5de43a38f7e31591656791c5d74eb3de6b3ba900aaa`。
-session Gate、diagnostics 和 renderer stack lock 回归均通过。Gate 测试不再
-依赖 0644 源码 helper 的可执行位，而是在临时目录按镜像的 0755 安装权限测试；
+session Gate、diagnostics 和 renderer stack lock 回归均通过。Gate 测试在临时目录
+按镜像的 0755 安装权限运行 helper；
 该回归现已纳入 PR workflow。
 
 临时 VGLite 会话 Labwc PID `6895`，layer-shell overlay 为 `1232x568`，
@@ -264,7 +268,7 @@ reconfigure/rebuild。不是只调用一次交叉编译器。实际 target 相�
 1080p NV12 实测 **29.956 / 30.013 FPS**。停止 module unit 会先停止 ISP，
 全部模块卸载、MCLK 门控关闭，没有新增内核生命周期告警，greetd/Labwc 没有重启。
 
-桌面入口不再打开 MVX 编解码器 `/dev/video0`，而是查询真实 VVCAM capture 节点。
+该历史候选的桌面入口通过查询找到真实 VVCAM capture 节点。
 原有 MPV 参数覆盖了 low-latency 的 `fflags=+nobuffer`，并在关闭相机后继续归还
 预读缓存，出现 descriptor/ownership 警告。最终入口保留低延迟选项、禁用线程预读，
 将全分辨率采集转换为 640×360 BGRA 预览。以 `tdvp` 用户执行真实启动器，

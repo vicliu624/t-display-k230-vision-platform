@@ -1,9 +1,15 @@
 # K230 VGLite / wlroots 合成实现契约
 
+## 阅读范围
+
+当前策略已于 2026-09-09 对照集成分支核对：登录页与用户桌面均使用 VGLite，
+失败后结束会话并记录故障，禁止软件渲染回退。本文保留 2026-09-03 至 2026-09-05
+的测量数据；其中的 Pixman 会话只描述历史测试环境。新镜像的操作入口见
+[显示验证](display-validation.zh-CN.md)，整体交付边界见 [发布契约](release-contract.zh-CN.md)。
+
 ## 目标和边界
 
-本项目的目标不是把桌面程序改为直接使用 DRM，也不是把 Quick
-Settings 变成一个直接控制显示器的特殊程序。目标合成链为：
+桌面程序通过 Wayland 提交内容，Labwc/wlroots 使用 VGLite 合成，并由 DRM/KMS 输出到面板：
 
 ```text
 Wayland clients (Foot / PCManFM / Quick Settings / …)
@@ -52,7 +58,7 @@ K230 内核已经启用了 `CONFIG_GPU_VGLITE`，平台镜像也安装了与它�
 所以 `WLR_RENDERER=gles2` 不代表硬件加速。当前镜像只允许认证后的桌面使用
 `WLR_RENDERER=vglite`，不提供 Pixman 桌面 profile 或软件回退。镜像策略标记、watchdog、
 失败熔断与本节 Gate 1 分别约束准入、超时、失败退出和实机验收；策略标记本身不代表
-硬件验收通过。独立 greeter 仍使用 Pixman，但它不能启动 Pixman 用户桌面。
+硬件验收通过。独立 greeter 同样使用 VGLite。
 
 当前登录会话由 `dbus-run-session` 提供私有 session bus，而镜像没有启用
 `systemd --user` manager。因此环境文件必须固定
@@ -75,7 +81,7 @@ Buildroot 打包和硬件验收；以下三个边界是后续出现上游无法�
 
 | 责任域 | 受控来源和当前状态 | 允许承担的修复 | 明确不承担的修复 |
 | --- | --- | --- | --- |
-| Kernel | `vicliu624/linux-xuantie-kernel`，本地工作分支 `tdvp/k230-pageflip-7d4e1f`；当前候选从固定 `7d4e…` 基线重放平台 `0053`–`0061` 补丁 | Canaan DRM/VO、vblank、page-flip event、GEM/format、KMS plane 和同步原语 | 把客户端重绘、Labwc 策略或 VGLite 失败伪装为内核问题 |
+| Kernel | `vicliu624/linux-xuantie-kernel`，内核锁定信息见 `sdk-sources.lock`；显示队列从固定 `7d4e…` 基线重放平台 `0053`–`0062` 补丁 | Canaan DRM/VO、vblank、page-flip event、GEM/format、KMS plane 和同步原语 | 把客户端重绘、Labwc 策略或 VGLite 失败伪装为内核问题 |
 | VGLite SDK | `vicliu624/k230_linux_sdk` 的 `dev` fork；平台当前 vendor lock 仍是已验证的上游基线 | `vg_lite` 用户态 ABI、`/dev/vg_lite` 权限、DRM dumb-buffer/PRIME 映射和版本兼容性 | 用 SDK 改写 client DMA-BUF acquire/release 协议，或使应用直接成为 DRM master |
 | Labwc | 目前使用固定的上游 package 与少量可审计 patch；当输入/窗口策略不能继续在 package queue 维护时再创建并锁定 TDVP fork | 输入、焦点、layer-shell、窗口和会话策略；每个 patch 需保留可回放的上游基线 | 合成渲染、buffer 生命周期、KMS page flip 或 VGLite command submission |
 
@@ -87,7 +93,7 @@ SDK 决定 GPU ABI，Labwc 决定窗口策略，wlroots 只在三者提供的合
 
 ### 上游漂移检查（2026-09-05）
 
-上游 `kendryte/k230_linux_sdk` 的 `dev` ref 当前为 `0b890a12e3b07fa7524722de3ab53280840e833e`；
+2026-09-05 检查时，上游 `kendryte/k230_linux_sdk` 的 `dev` ref 为 `0b890a12e3b07fa7524722de3ab53280840e833e`；
 该 revision 的 `k230_canmv_v3_defconfig` 仍把
 `BR2_LINUX_KERNEL_CUSTOM_REPO_VERSION` 固定为
 `7d4e1f444f461dbe3833bd99a4640e7b6c2cd529`，也就是本平台锁定的旧 kernel 基线。因而 SDK
@@ -99,9 +105,10 @@ context open 强制 `0061`：九者都是必须从本平台 queue 重放、编�
 
 以后上游 SDK `dev` 变更其 kernel ref 时，不能直接跟随。必须先在三个独立方向比较：
 `canaan_crtc/canaan_vo` 的 vblank/page-flip 生命周期、VGLite kernel/userspace ABI、以及
-Buildroot recipe/overlay；随后对 `0053` 至 `0061` 和 wlroots/Labwc queue 逐个做 dry-run 回放、
-重建 stack fingerprint，并重新走 Gate 0.5/1。这样 SDK fork 才是可控责任域，而不是把一个
-可能改变 DRM/VGLite 合同的上游快照直接带入桌面镜像。
+Buildroot recipe/overlay；随后对当前完整显示队列 `0053` 至 `0062` 和 wlroots/Labwc queue
+逐个做 dry-run 回放、重建 stack fingerprint，并重新走 Gate 0.5/1。
+上述 2026-09-05 记录中的九个补丁之外，当前队列还包含 `0062` 窄损伤修复；
+CPU1 mailbox 已排在 `0063`。补丁名称和哈希以当前 lock 及补丁清单为准。
 
 从本轮开始，该要求由 staging 流程强制执行：`sdk-sources.lock` 锁定
 `wlroots_vglite`、Labwc ABI 与 VGLite SDK 的交叉身份，
@@ -128,14 +135,15 @@ DRM format modifier、acquire fence 或 release fence 暴露为该 API 的一部
 且 VGLite 能 map DMA-BUF”不足以宣称一般桌面 DMA-BUF 已完成。Gate 2 必须按以下顺序推进，且每
 一步失败均拒绝该 buffer；它不能在运行中的 VGLite 会话里偷偷换成 Pixman renderer。Pixman
 本身也只声明 `WLR_BUFFER_CAP_DATA_PTR`，并不能充当 GPU-only DMA-BUF 的逐帧 import fallback。
-可恢复策略只能分两层：单个 import 失败时保留该 surface 既有的已上传 texture（若有）并记录
-失败；连续/致命失败则由受控 session profile 在**下次会话**选用 Pixman/SHM 基线。
+后续 import 实现应明确单个 buffer 拒绝与会话失败的边界，并记录错误。
+现有连续渲染失败处理会结束 VGLite 会话、清理子进程并写入故障标记。
+下一次登录仍要求有效的 VGLite 策略和已清除的故障标记。
 
 更严格地说，当前 vendor SDK 的 `vg_lite_map()` 源码会在调用 kernel 前拒绝同时缺少
 `buffer->memory` 与 `buffer->address` 的对象；它对 `VG_LITE_MAP_DMABUF` 也仍如此。当前
 输出 target 恰好从 `wlr_buffer_begin_data_ptr_access()` 取得了前者，因而可以工作；这并不等于
 任意 client 的 DMA-BUF fd 能被 VGLite 直接导入。Gate 2.0 必须先用真实 producer 验证这一个
-SDK ABI 前置条件，而不是先修改 renderer 的 capability：
+SDK ABI 前置条件，通过后才可扩展 renderer capability：
 
 1. **CPU-mappable linear import probe。** 只对单平面、offset 为 0、`XR24/AR24`、linear 的
    producer DMA-BUF 做受控 `mmap`，把得到的 logical address、stride 与 fd 传给
@@ -159,7 +167,7 @@ SDK ABI 前置条件，而不是先修改 renderer 的 capability：
 5. 2026-09-05 的真机观察结果是：活动 primary plane 与两个 overlay plane 对 `XR24/AR24` 声明
     linear modifier `0`，并有 `IN_FENCE_FD`；活动 CRTC 有 `OUT_FENCE_PTR`；但两个 syncobj
     capability 都是 `0`。所以现有内核不能创建 wlroots 的 `linux-drm-syncobj-v1` backing object，
-    该 global 不得启用。Kernel 受控 fork 的工作不是机械添加 feature bit，而是先验证
+    该 global 不得启用。Kernel 受控 fork 必须先验证
     `DRM_IOCTL_SYNCOBJ_EVENTFD`、sync-file 与 timeline 的 import/export、`IN_FENCE_FD` 的消费/关闭
     语义、以及 release 仅在硬件完成/page-flip 后 signal；任一项失败即保持 capability 关闭。
 6. 在 Kernel 与 wlroots DRM backend 之间验证 `IN_FENCE_FD`/`OUT_FENCE_PTR` 的 ownership、关闭
@@ -176,7 +184,8 @@ SDK ABI 前置条件，而不是先修改 renderer 的 capability：
 
 ## Gate 0：独立运行时证明
 
-Gate 0 是 renderer 工作开始前的硬条件，且不会改变当前显示结果。
+Gate 0 在隔离维护窗口验证离屏 GPU 路径。开始前保存桌面数据、停止 greetd/Labwc，
+并确认 `/dev/vg_lite` 没有其他 owner。生产系统禁止与 VGLite compositor 并发运行 probe。
 
 1. 通过现有 SDK `vg_lite` Buildroot recipe 安装 `/usr/lib/libvg_lite.so`；
    不引入另一个内核模块，当前 VGLite driver 已内建在目标内核中。
@@ -201,7 +210,7 @@ Gate 0 是 renderer 工作开始前的硬条件，且不会改变当前显示结
 
 该 probe 的代码中禁止 `drmSetMaster`、`drmModeAddFB*`、modeset、atomic
 commit 和 page flip。它只验证可以被 wlroots 使用的 **off-screen**
-DMA-BUF 路径，绝不干扰正在运行的 Labwc。
+DMA-BUF 路径。它仍会占用唯一的 VGLite context，因此必须在无 compositor owner 时执行。
 
 “off-screen”并不等于旧 kernel 上无风险：历史 `VG_LITE_INFINITE` wait 在 completion IRQ
 丢失时仍可能把测试 client 与其后的 compositor 一同拖入无限等待。因此源码中的 probe 在只打开并关闭
@@ -211,11 +220,10 @@ DMA-BUF 路径，绝不干扰正在运行的 Labwc。
 分配 dumb-buffer、`vg_lite_init()` 或任一 GPU 命令之前拒绝运行。它是 `0059/0060` kernel 的安全前置
 条件，不是“GPU 可用”的成功证据。
 
-Gate 0 的通过条件是：普通 `tdvp` 用户在默认的一帧 smoke 之后，完成
-`--frames 120` 的有界重复提交并返回 `PASS`；桌面不得退出，且输出必须
-包含成功的 DMA-BUF 映射、每帧 `finish` 后内容更新、非空且至少三种绘制
-结果以及 finish 的最小/平均/最大耗时。若不通过，保持 Pixman，不修改
-Labwc 的 renderer。
+Gate 0 的通过条件是：在无 VGLite owner 的维护窗口内，普通 `tdvp` 用户完成
+一帧 smoke，再完成 `--frames 120` 的有界重复提交并返回 `PASS`。
+输出必须包含成功的 DMA-BUF 映射、每帧 `finish` 后内容更新、至少三种绘制结果
+以及 finish 的最小/平均/最大耗时。失败时保存诊断并停止验收，不切换 renderer。
 
 ## Gate 0.5：KMS page-flip 生命周期
 
@@ -230,24 +238,25 @@ K230 DRM 在 vblank 前后正确持有/释放 framebuffer。因此 VGLite 不能
 | VTTH IRQ | IRQ 中 `drm_crtc_handle_vblank()` 后发送保存的 event，并释放引用 | page-flip 永不完成或过早复用旧 buffer |
 | 时序寄存器 | 以实际 `vth_line`（本板为 10）设置 VTTH，不能把 `log2(vtotal)` 当作行号 | 不稳定或错误时机的 vblank |
 
-门禁只能通过 SSH/串口维护模式执行，不能在正在显示的 Labwc 里直接运行：
+门禁通过 SSH/串口发起专用维护事务。开始前取得桌面用户同意并保存应用数据：
 
 ```sh
-sudo systemctl stop greetd
-while pgrep -x labwc >/dev/null; do sleep 0.1; done
-sudo systemctl start tdvp-kms-acceptance
+sudo systemctl start tdvp-kms-maintenance
+sudo systemctl --no-pager status tdvp-kms-maintenance
+sudo cat /run/tdvp/acceptance/kms-maintenance.status
+sudo cat /run/tdvp/acceptance/kms-maintenance.log
 sudo cat /run/tdvp/acceptance/kms.status
 sudo cat /run/tdvp/acceptance/kms.log
-sudo systemctl start greetd
 ```
 
-在请求真机维护窗口前，`buildroot/tools/test-tdvp-kms-acceptance-guard.sh` 必须在
-`bwrap` sandbox 中通过。它以 fake `systemctl`、`pgrep` 和 `tdvp-display-smoke` 覆盖三种
-情况：`greetd=active` 时拒绝、Labwc/gtkgreet 仍在时拒绝，以及仅在两者均退出时调用
-display-smoke。最后一种情况必须逐字验证
-`--format XR24 --pattern counter --seconds 10 --fps 30 --page-flip-timeout-ms 1000`；因此
-该测试能防止维护 wrapper 的 guard 或固定参数在构建机上静默退化，但不能替代真实 KMS
-event/old-FB 验收。
+主机先执行 `buildroot/tools/test-tdvp-kms-maintenance.sh` 和
+`buildroot/tools/test-tdvp-vblank-observer-maintenance-master.sh`。
+它们使用临时目录和模拟命令检查会话停止、进程残留拒绝、执行顺序与恢复路径，
+并检查被动观察器没有新增 modeset/page-flip 操作。真实 KMS event 和旧 framebuffer
+生命周期仍需实机验证。
+
+维护服务负责有界等待和结束后恢复 greetd，完整操作说明见
+[显示验证](display-validation.zh-CN.md)。
 
 该服务以 `XR24` 运行 10 秒、30 fps 的 `counter` 模式。它交替提交两个 dumb
 buffer，并在重写旧 buffer 前等待相同 CRTC 的 page-flip event。测试结束时，它还会
@@ -266,7 +275,7 @@ buffer，并在重写旧 buffer 前等待相同 CRTC 的 page-flip event。测�
 `released_buffers`。这个延迟是用户态可观察的提交到事件时间，不把调度延迟误报为
 硬件 vblank 周期；硬件 cadence 仍以 event timestamp 和 sequence 验证。任何 timeout、
 错误 CRTC、重复 sequence、倒退 timestamp、无效时钟样本，或尝试在 release 前重写 FB，
-都使 Gate 0.5 失败，默认 Pixman 保持不变。
+都使 Gate 0.5 失败，应停止发布并保存诊断。
 
 2026-09-04 已在仍运行 Pixman/Labwc 的会话中，以不会成为 DRM master 的
 `tdvp-vblank-observer --device /dev/dri/card0 --frames 120 --max-interval-ms 250`
@@ -310,7 +319,7 @@ VG_LITE_MAP_USER_MEMORY(普通 Wayland SHM 映射) -> VG_LITE_OUT_OF_RESOURCES
 所以首版不能把任意 `wl_shm` 内存宣称为 VGLite 的零拷贝 texture。它将为
 每个可见 SHM surface 保留一个 VGLite 分配的 texture，只把客户端 damage
 区域以 CPU `memcpy` 上传到该 texture，再由 GPU 完成缩放、alpha、旋转和
-所有场景合成。该 CPU copy 是输入上传，不是 Pixman 合成 fallback。对应
+所有场景合成。CPU copy 负责输入上传，VGLite 负责合成。对应
 probe 也会验证“CPU 写入 VGLite 分配的 source -> GPU blit -> DRM DMA-BUF
 target”的完整路径。
 
@@ -354,7 +363,7 @@ collect scene -> record VGLite -> vg_lite_finish()
 `WLR_SCENE_DISABLE_DIRECT_SCANOUT=1`。wlroots 默认会为单一、全屏、无 transform
 的 scene entry 尝试 generic direct scan-out；该优化会绕过 VGLite render pass，因而也绕过
 本阶段已验收的 `finish() -> atomic page flip -> old-FB release` 责任链。这个开关只属于
-受控 VGLite profile，不改变保守的 Pixman 回退会话。将来只有 client DMA-BUF import、format/
+受控 VGLite profile。只有 client DMA-BUF import、format/
 modifier 协商、`IN_FENCE_FD`/`OUT_FENCE_PTR` 和 K230 真机验收都通过后，才按 Gate 2 的
 fullscreen policy 重新开放该分支。
 
@@ -407,10 +416,11 @@ stdout/stderr、当前 `$XDG_RUNTIME_DIR/tdvp-labwc.log`、VGLite diagnostics �
   --width 1232 --height 568 --format ar24 --damage-size 64 --frames 120 --max-frame-ms 1000 --repeat 3
 ```
 
-最终基线必须在干净的 Pixman 和获准的 VGLite 会话中各连续采样至少三轮，连同
-`SCHED` 行、renderer diagnostics、page-flip/vblank 日志及屏幕截图保存。`1000 ms`
+新镜像基线必须在获准的 VGLite 会话中连续采样至少三轮，连同
+`SCHED` 行、renderer diagnostics、page-flip/vblank 日志及屏幕截图保存。
+历史 Pixman 数据只用于相同负载条件下的参考比较，不要求在新镜像上恢复旧会话。`1000 ms`
 只用于阻断卡死或 buffer release 停滞，不能作为 VGLite 性能达标线；性能结论应由
-同一硬件、同一输入负载、同一面板尺寸下的两组完整分布比较得出。
+同一硬件、同一输入负载、同一面板尺寸下的完整分布比较得出。
 
 获准的 Gate 1 诊断轮次将只在该单次 session 导出
 `TDVP_VGLITE_DIAGNOSTICS=1`。它会为每次 client texture update 输出
@@ -436,9 +446,9 @@ VGLite** 的登录会话前执行：
 ```
 
 第一个命令只在 `tdvp` 的私有 state 目录放入一个 0600 marker；`tdvp-labwc-session` 仅在
-effective renderer 是 `vglite` 时，先删除该 marker、再导出诊断变量。若 profile 被 breaker
-解析为 Pixman，marker 不会被消费，下一次获准的 VGLite 登录才会使用它；若 VGLite 随后异常并触发
-同一认证会话的 Pixman self-recovery，变量也不会继承。root 可在重启会话前用
+effective renderer 是 `vglite` 时，先删除该 marker、再导出诊断变量。若 breaker
+阻止会话启动，marker 保留到下一次获准的 VGLite 登录。VGLite 异常退出会结束该会话，
+诊断变量不会作为持久环境留给后续会话。root 可在重启会话前用
 `clear-diagnostics-next-vglite-session` 撤销。该开关既不修改 profile/approval/breaker，也不打开
 DRM 或 `/dev/vg_lite`。
 
@@ -486,7 +496,7 @@ blit 时，仍可能把一笔窄带更新放大为多次完整 source cache 操�
 blit 保留 `source->memory`，仍走 SDK 原有的全 buffer clean；成功提交后，同一 texture
 在余下 clip 和后续无 CPU 写入的帧内临时隐藏该 CPU 指针，再立刻恢复。锁定 SDK 中该指针
 在 `vg_lite_blit()` 的 source 路径仅用于这次 cache clean（GPU 仍使用 address/handle），
-所以这不是跳过上传同步，而是把一次 upload 的同步限制为一次。它也**不**使用
+每次 upload 保留一次必要的同步，随后没有新 CPU 写入的 blit 复用该结果。该路径不使用
 `vg_lite_flush_mapped_buffer()`：锁定 K230 内核的 `VG_LITE_CACHE` ioctl 目前为空成功，
 不能作为替代一致性合同。每次 SDK 更新都必须重新审计这一 ABI 条件。
 
@@ -553,7 +563,7 @@ SHM 矩阵；原始记录固定保存于
 microseconds（delivery max `27015` microseconds）；记录中的完整 dmesg 没有 VGLite timeout/error、
 DRM error 或 blocked task。
 
-这次数据同时界定了当前 SHM 模型的性能边界，而不是把“全部 PASS”误称为任何场景都高帧率：
+这次测量给出了该候选在不同 SHM 负载下的性能边界：
 
 | workload | round 1 / 2 / 3 average callback | 解释 |
 | --- | --- | --- |
@@ -576,8 +586,7 @@ plane detach 后的 buffer release 收紧为“matching page-flip event 加一�
 它将旧的 `elapsed_seconds` 改为 `nominal_seconds`，并输出
 `wall_elapsed_ms`/`achieved_fps`；下一次维护模式验收必须在观察面板的条件下记录这些字段。
 
-Gate 1 的 VGLite 数据也必须与这一次 workload 的时间边界绑定，而不是把整个登录期的旧
-renderer log 混进平均值。候选新增只读的 `/usr/bin/tdvp-vglite-diagnostics-report`：它只解析
+Gate 1 的 VGLite 统计只计入该次 workload 时间范围内的日志。候选新增只读的 `/usr/bin/tdvp-vglite-diagnostics-report`：它只解析
 `TDVP_VGLITE_DIAG`，汇总新记录的 upload bytes、damage/copy 次数、`vglite_finish` 的
 min/avg/max 耗时和 clip/blit 数，也汇总 state-recovery 尝试/失败次数。读回路径若在
 `vg_lite_finish()` 中失败，还会写入 `texture_readback_finish` quarantine record；报告会把它与
@@ -596,14 +605,13 @@ sudo /usr/local/bin/tdvp-renderer-profile diagnostics-next-vglite-session
 ```
 
 Gate 在启动 workload 前只记录该日志已有的行数；完成后报告器只解析新增行。因此没有启用
-一次性诊断、没有新的成功 `vglite_finish`，或诊断本身报告错误，都会使 Gate 失败而不是制造
-“无数据也 PASS”的结论。每个计入 `--require-page-flip-transition` 的 page-flip 还必须消费同一
+一次性诊断、没有新的成功 `vglite_finish`，或诊断本身报告错误，都会使 Gate 失败。每个计入 `--require-page-flip-transition` 的 page-flip 还必须消费同一
 `submitted_buffer` 的一个未消费、成功的 `vglite_finish` 记录；仅有无关 finish 和无关 page-flip
 的混合日志同样会失败。完整的原始 log 仍要和 Gate stdout/stderr 一起保留；该汇总不是
 page-flip 生命周期或 fence 正确性的替代证据。
 
 `tdvp-vglite-client-churn` 与 `tdvp-vglite-inflight-close-gate` 保留为**隔离维护模式**的 driver
-恢复工具：必须在 Labwc 已停止、或当前会话明确为 Pixman 且没有 VGLite owner 时运行。它们会拒绝
+恢复工具：必须在 Labwc 已停止且没有 VGLite owner 时运行。它们会拒绝
 运行中的 VGLite Labwc，不能再被列为 live Gate 1 测试，更不能以它们的通过替代合成器持续渲染证明。
 现场采集继续统一使用 `buildroot/tools/tdvp-hardware-audit.sh`；它只读记录 boot ID、watchdog、
 profile、Labwc 状态、日志和 VGLite/DRM/VO dmesg，不打开 DRM master 或 `/dev/vg_lite`。
@@ -616,8 +624,8 @@ profile、Labwc 状态、日志和 VGLite/DRM/VO dmesg，不打开 DRM master �
 该 client 路径已被实际执行；这只覆盖 CPU 可访问的 linear `wl_shm`，不能外推为 client DMA-BUF
 import 通过。
 
-候选镜像仍安装 `/usr/bin/tdvp-vglite-client-churn`，但它现在是隔离维护工具，而不是普通
-图形登录用户应执行的 Gate 1 步骤。它只顺序执行并退出既有的 off-screen probe；自身不取得 DRM
+候选镜像安装 `/usr/bin/tdvp-vglite-client-churn` 作为隔离维护工具，
+普通图形会话的 Gate 1 不执行它。它只顺序执行并退出既有的 off-screen probe；自身不取得 DRM
 master，也不创建 FB、modeset、atomic commit 或 page flip。它要求运行前没有 live VGLite Labwc
 owner；若检测到 compositor 已持有 `/dev/vg_lite`，会拒绝运行而不是试图与它共用硬件 context。
 
@@ -636,7 +644,7 @@ release 或 page flip 做出结论。
 Gate 1 在开始时固定同一个 Labwc PID；每轮 workload 后必须仍是该 PID，不能以“另一个同样导出
 VGLite 环境变量的 Labwc”替代它。PASS 同时记录该 PID 的 `/proc` user/system CPU tick 增量与
 前后 `VmRSS`，使 full-damage、small-damage、XR24 与 AR24 结果可以在同一 compositor 进程上比较。
-这些数字是性能样本而不是阈值：是否优化仍须结合 `finish()`、frame callback、release 和 vblank/page
+这些数字用于性能分析：是否优化仍须结合 `finish()`、frame callback、release 和 vblank/page
 flip 时序判断。
 
 在上述 live SHM 负载通过、boot 与 renderer-stack 备份已存在之后，异常 close recovery 注入只能
@@ -665,7 +673,7 @@ renderer 只在本次 upload 后的第一个真实 texture blit 保留 SDK 的�
 `texture_cache_flushes <= texture_blit_attempts`、`copied_bytes/source_bytes`、CPU 和
 `finish()` 分布证明该收敛实际发生且未损坏画面。全屏动态 SHM 仍受全 buffer clean、target
 cache 维护和完整 raster 成本约束；应优先避免它，后续再以 direct scan-out/plane gate
-解决，而不是猜测性跳过新 upload 的同步。
+解决，并保留新 upload 所需的同步。
 
 Gate 1 的 CPU/`finish()`/frame-callback 分布必须包含“小窗口拖动覆盖静态大 surface”
 和“全屏动态 SHM”两种负载。若前一种场景在“每次 upload 最多一次 source clean”后仍由
@@ -678,14 +686,14 @@ coherent allocation/import 合同；在此之前，wlroots 只可去除没有新
 当前产品策略要求认证后的桌面只使用 VGLite。`tdvp-renderer-profile` 只接受 `vglite`；
 缺失、重复或不支持的 profile、缺失有效的 `/etc/tdvp/labwc/vglite-enabled` 策略标记，
 或已有的 GPU 失败标记都会阻止桌面启动。不得以 Pixman 或其他 renderer 掩盖这些错误。
-镜像使用 greetd/gtkgreet 密码登录；独立 greeter 的 Pixman compositor 不属于用户桌面。
+镜像使用 greetd/gtkgreet 密码登录，独立 greeter 同样以 VGLite 合成。
 
 图形登录模式与 renderer profile 是两条独立开关。`tdvp-graphical-login select greeter` 会原子地
 将 `/etc/greetd/config.toml` 切为现有 `greeter` session；`select autologin` 则切回 `tdvp` 的
 Labwc session。任选其一后执行 `systemctl restart greetd` 即生效，且该操作不改变
 `tdvp-renderer-profile`、VGLite approval marker 或 circuit breaker。这使无人值守默认桌面和
 独立的 greeter 入口各自可验证，不必修改 renderer 配置或重建镜像。无论使用哪种登录模式，
-进入用户桌面都必须通过同一个 VGLite-only 启动器；自动登录不是当前镜像的默认模式。
+进入用户桌面都必须通过同一个 VGLite-only 启动器；当前镜像默认显示密码登录页。
 
 VGLite 不能在初始化失败后悄悄把**当前帧**切回 Pixman；这会破坏 renderer、texture、
 allocator 与 KMS buffer 的所有权，也会让用户误以为已得到 GPU 加速。初始化失败仍应记录
@@ -694,7 +702,7 @@ allocator 与 KMS buffer 的所有权，也会让用户误以为已得到 GPU �
 由 greetd 返回登录页。启动器没有切换 renderer 的 self-exec 或内部强制软件渲染入口。
 即使 breaker 无法写入，也必须结束失败会话，不能启动其他 renderer 或进入重启循环。
 
-后续登录会被 circuit breaker 阻止，不会解析为 Pixman。该 circuit breaker 不是隐式 GPU 成功：
+后续登录会被 circuit breaker 阻止；故障状态需诊断和显式清除：
 `tdvp-renderer-profile status` 同时显示 configured/effective profile、批准状态和 breaker
 状态，重新尝试 VGLite 必须由 root 清除失败标记。正常 logout 与 greetd/KMS maintenance
 使用的预期终止信号不会触发 breaker。
@@ -703,8 +711,7 @@ allocator 与 KMS buffer 的所有权，也会让用户误以为已得到 GPU �
 5000 ms 返回失败；wlroots render pass 因而返回 false，Labwc 的 `0004` patch 在仅由
 `TDVP_LABWC_VGLITE_FAILURE_RECOVERY=1` 开启的 VGLite 会话中计数该失败。三个**连续**失败
 才令 Labwc 以非零状态结束 event loop，随后由上述 session wrapper 写 breaker 并结束桌面。
-因此在最坏情况下该路径约需要三个 watchdog 窗口，而不是在一个正常的慢帧后任意
-kill compositor；任一成功 output commit 都会把计数归零。这是 kernel 有界等待、renderer
+最坏情况下该路径约需要三个 watchdog 窗口；任一成功 output commit 都会把计数归零。这是 kernel 有界等待、renderer
 错误返回、Labwc 退出和会话清理的明确责任链，仍须在 K230 以真实硬件故障注入和
 Gate 1 验证，不能由 host-side sandbox 证明已经通过。
 
@@ -717,7 +724,7 @@ breaker、清理已登记的子进程组，并阻止下一次登录；同时覆�
 
 启用 VGLite 的最终板端验收包括：
 
-1. `tdvp` 的 Gate 0 probe 连续运行通过；
+1. `tdvp` 在无 VGLite owner 的维护窗口完成 Gate 0 probe，随后再启动 VGLite 桌面；
 2. Labwc、Foot、PCManFM、wf-panel-pi、Quick Settings 均仍为 `tdvp`；
 3. 物理 90 度显示与触摸坐标保持正确；
 4. Top-down / bottom-up Quick Settings 手势期间无全屏撕裂、无越帧堆积；
@@ -728,4 +735,5 @@ breaker、清理已登记的子进程组，并阻止下一次登录；同时覆�
 
 发布时 `vg-lite`（运行时）和 `wlroots-vglite`（compositor runtime）各有
 唯一 ABI 所有者和版本化依赖；它们不能被静态塞进 Labwc 或应用程序。对应
-IPK 进入匹配 K230 ABI 的 TDVP feed，固件只引用同一 release 的版本。
+这些是软件包发布必须满足的条件。当前 feed 的基础库所有权和 CPU0 指令集兼容性
+尚待修复，软件包验收暂停，详见 [软件源状态](package-feed-status.zh-CN.md)。

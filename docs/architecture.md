@@ -1,78 +1,80 @@
 # Architecture
 
-## Runtime layers
+## Processor and hardware ownership
+
+The image uses an AMP layout: Linux on CPU0 and RT-Smart on CPU1.
 
 ```text
-T-Display K230 V1.3 hardware
-  |
-K230 Linux kernel, board DTB and vendor firmware runtime
-  |
-DRM/KMS, DSI, libinput, I2C, SDIO, USB, ALSA, camera/ISP and KPU runtime
-  |
-systemd, udev, NetworkManager, OpenSSH, seatd and D-Bus
-  |
-greetd / gtkgreet authenticates a selected Linux account
-  |
-Labwc Wayland compositor in that account's session
-  |-- PCManFM desktop: wallpaper, icons and blank-desktop context menu
-  |-- Raspberry Pi wf-panel-pi: menu, network, volume, battery and clock
-  `-- Foot, Cog/WPE WebKit, PCManFM and nm-connection-editor
+CPU0 / Linux                         CPU1 / RT-Smart
+  Login, apps, network, audio          GC2093 → VICAP / ISP → vision buffers
+  greetd / gtkgreet                    AI2D, FFT, nncase / KPU, job processing
+  Labwc / VGLite → DRM/KMS display     AI memory and accelerator resources
+        |                                      |
+        +---- /dev/tdvp-vision: frame reads -----+
+        +---- /dev/tdvp-ai: write/poll/read -----+
 ```
 
-The system is intentionally a small standard Wayland desktop for a constrained
-keyboard handheld. It uses no GNOME Shell, custom launcher, custom Wi-Fi UI or
-custom audio player.
+CPU1 manages camera/AI registers, interrupts, memory and resource lifetimes.
+CPU0 retains display, VGLite, input, network and audio drivers. Linux applications
+use controlled asynchronous bridges; the Linux scheduler sees one CPU.
+Linux userspace packages must use CPU0-compatible scalar instructions.
+System SDMA remains owned by Linux; the current CPU1 FFT path uses PIO.
+The paired device tree and ownership declaration define AI resource boundaries.
+They do not authorize arbitrary CPU1 access to shared clocks, power or DMA controllers.
 
-## Authenticated session contract
+`/dev/tdvp-vision` delivers CPU1-captured frames. `/dev/tdvp-ai` accepts bounded
+AI jobs: selected AI2D operations, FFT/IFFT and a fixed KWS reference model.
+Complete vision applications, arbitrary model APIs and speech-to-text remain
+development work. The video group grants ordinary users access to both nodes.
+The current profile retires the former Linux VVCAM/ISP/GNNE/AI2D production paths.
 
-`greetd` starts the `tdvp-labwc` Wayland session for the account selected at
-the greeter. The launch wrapper derives `HOME`, `USER`, `XDG_CONFIG_HOME`,
-`XDG_CACHE_HOME`, `XDG_DATA_HOME` and `XDG_RUNTIME_DIR` from that account; it
-does not hard-code a particular user or `/home/tdvp`.
+Read-only status lives at `/sys/class/misc/tdvp-vision/status` and
+`/sys/class/misc/tdvp-ai/status`. vpl-hwctl, the hardware daemon and Quick Settings
+share the publisher. Availability, job counters and acceptance results are
+separate fields. See the [AI interface](cpu1-ai-jobs.zh-CN.md) and
+[status contract](cpu1-ai-status-remote-validation-20260909.zh-CN.md).
 
-The session environment in `/etc/tdvp/labwc/environment` selects the K230 DRM
-device, VGLite renderer, seatd backend and the 1232x568 logical desktop. The
-authenticated session requires the image-owned VGLite policy and a clear GPU
-failure marker; invalid policy or an abnormal GPU exit blocks the desktop
-without selecting another renderer. The independent login compositor still
-uses Pixman and is not an authenticated-desktop fallback. Labwc
-then starts PCManFM, per-user PulseAudio, the upstream panel and the LilyGO key
-bridge. The bridge maps the board Menu key to `wfpanelctl smenu menu`; Fn is an
-XKB Mod5 layer, not a user-space key remapper.
+## Login, desktop and locking
 
-The touch rules keep normal taps and drags as left-pointer input. A stationary
-long press on an empty PCManFM desktop is delivered as a right click so its
-normal context menu opens. GTK clients receive the standard committed-text
-compatibility fix required by this touch stack.
+greetd starts gtkgreet as the dedicated greeter user, then starts Labwc for the
+authenticated Linux account. Session directories derive from that account.
+Both the greeter and user desktop specify `WLR_RENDERER=vglite`.
+The user desktop checks renderer policy and the failure marker before startup;
+GPU faults require diagnosis and explicit recovery.
 
-## Network, browser and sound
+Labwc owns windows, workspaces and composition. PCManFM supplies wallpaper,
+icons and file management; wf-panel-pi supplies the panel. Foot is the terminal
+and nm-connection-editor edits network connections. The logical desktop is
+1232×568. The Menu key opens the application menu and Fn uses XKB Mod5.
+A long press on blank desktop space opens the context menu.
 
-NetworkManager exclusively owns Ethernet and Wi-Fi. It starts the bundled
-`wpa_supplicant` only through D-Bus when needed; neither a standalone
-`wpa_supplicant@wlan0` service nor `systemd-networkd` is enabled. `wfplug-netman`
-and upstream `nm-connection-editor` use NetworkManager's public D-Bus API.
+After 300 seconds of inactivity, swayidle calls `tdvp-session-lock` and gtklock
+displays its password window. At 330 seconds, wlopm turns off the output.
+Wake and unlock the existing session. The PAM unix_chkpwd helper is installed
+root:root 4755; graphical programs retain ordinary user privileges.
+See [Login and locking](session-login-and-lock.zh-CN.md).
 
-Cog is the native Wayland browser. It launches as a non-maximized window below
-the panel; the Labwc Cog rule forces server decorations, which leaves minimize,
-maximize and close controls usable on touch hardware. HTTPS is supplied by
-`glib-networking` and its GIO OpenSSL module.
+## Network, audio and board radios
 
-The panel has exactly one output-volume plugin. That upstream Raspberry Pi
-plugin uses `libcanberra` and the Freedesktop `audio-volume-change` event, so
-volume adjustment has standard sound feedback without a private TDVP daemon or
-asset format.
+NetworkManager owns Wi-Fi and wired connection policy and uses wpa_supplicant
+through D-Bus. PulseAudio, ALSA and the volume plugin handle audio; the ASoC
+driver controls the external amplifier GPIO.
 
-## Storage and field updates
+nRF52840 is an independent programmable board coprocessor. The Linux client
+implements the official UART AT protocol. Desktop Bluetooth uses BlueZ/HCI;
+integration between these interfaces remains unfinished. Physical UART identity,
+BLE behavior, board power preservation and firmware updates require their own
+validation. See [nRF integration](nrf52840-at-host.zh-CN.md).
+LoRa control/status is exposed by the hardware service; RF acceptance is pending.
 
-The image carries GPT boot partition 1 and ext4 root partition 2 only. On a
-larger card the one-shot root expansion service relocates the GPT backup header,
-extends partition 2 while preserving its exact PARTUUID, reboots, then expands
-ext4. It deliberately leaves a card with a later user partition untouched.
+## Storage and packages
 
-U-Boot mounts root by PARTUUID rather than `/dev/mmcblkN`, avoiding controller
-enumeration differences between boards. The image never creates `/data`.
+The GPT filesystem partitions are boot 1 and rootfs 2. Boot payloads and CPU1
+firmware occupy fixed raw regions. U-Boot selects root by PARTUUID. First boot
+can expand rootfs on a larger card while preserving later user partitions.
 
-`opkg` is configured with the release's ABI-fixed application feed. A boot
-service imports and fingerprint-checks only the embedded public release key;
-signature checking remains mandatory. This gives a constrained device a safe
-field-update path without embedding a signing key.
+On invocation, tdvp-opkg imports and checks the embedded public key before
+running opkg. Boot does not access the feed. Devices configure the mutable
+`stable` channel. The r6 installation test on 2026-09-09 exposed instruction-set
+and base-library replacement problems. Pause installation and upgrades.
+See [Package-feed status](package-feed-status.md).

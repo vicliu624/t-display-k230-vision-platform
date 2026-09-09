@@ -1,9 +1,14 @@
-# CPU0 camera ISP integration work
+# Historical CPU0 camera ISP integration
 
-The product profile now selects the dedicated GC2093 camera packages, replacing
-vendor VVCAM/OV5647. This is **not a claim that a new complete image has been
-built or deployed**. It contains a scalar-ISP sensor ABI adapter, a board-specific
-transport, managed device-tree configuration and VVCAM lifecycle patches.
+The current product profile disables these Linux camera packages and removes the
+Camera menu entry. CPU1 owns GC2093, capture/ISP and vision buffers; Linux reads
+frames through the asynchronous bridge. See [architecture](../../docs/architecture.md)
+and [AI/vision records](../../docs/cpu1-ai-jobs.zh-CN.md).
+
+The following record belongs to the 2026-09-07 CPU0 camera candidate. It preserves
+the scalar-ISP sensor ABI adapter, board-specific transport, managed device tree
+and VVCAM lifecycle work for reference. Its build and deployment results apply
+only to that historical candidate.
 **Physical GC2093 identification
 and bounded 1920x1080 NV12 frame capture passed on 2026-09-07**, including two
 complete module load/capture/unload cycles. This is not yet a production image

@@ -13,6 +13,11 @@ uses asynchronous requests/results, with no production direct GNNE/AI2D
 execution path. Audio capture/playback initially remains on Linux. Earlier
 Linux KPU acceptance cannot establish CPU1 inference or ASR readiness.
 
+As of 2026-09-09, CPU1 has [asynchronous jobs and hardware records (Chinese)](cpu1-ai-jobs.zh-CN.md)
+for a fixed KWS model, limited AI2D operations and FFT/IFFT. These are inputs to
+future ASR development; acoustic features, streaming models, decoding and text
+events remain to be implemented.
+
 ## Hardware Contract
 
 The ASR service requires all of the following:

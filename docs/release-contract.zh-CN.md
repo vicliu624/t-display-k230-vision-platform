@@ -1,73 +1,79 @@
 # 发布契约
 
-每个发行版交付一张可刷写的 T-Display K230 SD 卡镜像以及 Windows 可见的 release bundle。
-它是低性能、全键盘 Linux 掌机的长期维护基线，不是实验性的 Launcher 镜像。
+本文规定 T-Display K230 镜像的交付物与验收范围。代码集成、CI 构建和实机验收
+分别记录；一次构建通过只证明该次构建检查覆盖的内容。
 
 ## 交付文件
 
+`collect-release-bundle.sh` 生成以下文件，`<release-name>` 由调用者指定：
+
 ```text
-vicliu-pocket-linux-k230-<revision>.img
-vicliu-pocket-linux-k230-<revision>.img.gz
+<release-name>.img.gz
 tdvp-image-manifest
+tdvp-cpu1-rtsmart.bin
+tdvp-cpu1-rtsmart.manifest
 tdvp-sdk-baseline-manifest
 README.txt
 SHA256SUMS
 ```
 
-最终 bundle 必须复制到本 Windows 仓库的 `output/`；只存在于 WSL 中的构建物不构成发布
-交付。镜像包含 K230 启动 payload、内核、RM69A10 DTB、systemd、OpenSSH 恢复、
-NetworkManager、seatd、greetd/gtkgreet、Labwc、PCManFM、Raspberry Pi `wf-panel-pi`
-插件、Foot、Cog/WPE WebKit、`nm-connection-editor`、`opkg`、签名软件源 bootstrap 与
-板级 package。
+最终 bundle 位于仓库 `output/<release-name>/`；本地 WSL 构建应收集到用户可见的
+仓库目录，CI 则上传这个目录。bundle 只交付压缩镜像。CPU1 固件同时嵌入整卡镜像，
+单独附带的文件用于核对配对关系与校验值。
 
-## 必须满足的镜像不变量
+镜像包含 CPU0 Linux、CPU1 RT-Smart/OpenSBI、systemd、OpenSSH、NetworkManager、
+seatd、greetd/gtkgreet、Labwc/VGLite、PCManFM、wf-panel-pi、Foot、
+nm-connection-editor、gtklock、板级服务及 opkg 签名信任材料。
+浏览器和 Linux Camera demo 已从基础桌面移除。
 
-- U-Boot 使用固定 root `PARTUUID`，绝不能硬编码 `/dev/mmcblkN`。
-- GPT 只有 boot 分区 1 与 root 分区 2；首次启动可安全扩展根文件系统，不存在 `/data`
-  provisioner 或第三数据分区。
-- Greeter 登录的账户获得其自身 home 和 runtime 目录。
-- LilyGO/Menu 打开上游应用菜单；Fn 输出黄色字符；桌面空白处长按出现普通右键菜单。
-- PCManFM 提供壁纸、Desktop 与 Files；唯一面板是 `wf-panel-pi`，只有一个 NetworkManager
-  项和一个输出音量项。
-- Cog 具备 GIO TLS 支持且 Labwc 标题栏控制可触摸。
-- `libcanberra` 与 Freedesktop theme 提供输出音量的系统事件声音。
-- NetworkManager 独占网络并启动上游 `nm-connection-editor`；不交付直接配置旧
-  wpa_supplicant 的 UI。
-- 默认应用软件源 ABI 固定，且在使用 `opkg` 前会校验其发行公钥与索引签名。
+## 镜像不变量
 
-## 发布门禁
+- U-Boot 通过固定 root `PARTUUID` 找到根分区。
+- GPT 包含 boot 分区 1 和 root 分区 2；启动固件另占 raw 区域，CPU1 槽位为 10–30 MiB。
+  首次启动可扩展根分区，保留已有后续分区，不创建 `/data`。
+- Linux 运行在 CPU0，使用 CPU0 支持的标量指令集。CPU1 独占 GC2093、采集/ISP、
+  KPU、AI2D、FFT 和相关 AI 内存；Linux 通过 `/dev/tdvp-vision`、`/dev/tdvp-ai` 异步交互。
+- 登录页和桌面均使用 VGLite；渲染异常会结束会话并留下诊断状态，禁止切换到 Pixman。
+- Greeter 认证所选账户并使用其 home/runtime。gtklock 使用当前会话账户密码，
+  默认空闲 300 秒锁定、330 秒关闭屏幕，唤醒后显示密码窗口。
+- PCManFM 提供壁纸、桌面与 Files；wf-panel-pi 提供面板。Menu、Fn、触摸和键盘背光
+  必须在实物上检查。
+- NetworkManager 管理网络；nm-connection-editor 提供连接编辑。
+- 软件源保留签名校验。签名有效和 ABI 元数据一致还需配合 CPU 指令集、文件所有权、
+  依赖闭包及冷启动验证，才能确认可安全安装。
 
-1. 准备锁定的 SDK，回放 SDK/Linux/Buildroot/package 补丁并执行 patch-only 断言。
-2. 使用发行 defconfig 构建完整可启动镜像。
-3. 执行 post-image SD 卡校验：检查分区身份、rootfs 文件、systemd 链接、桌面配置、TLS、
-   事件声音及软件源信任物料，而不只依赖编译退出码。
-4. 运行硬件构建预检并保留其 evidence report。
-5. 实机检查 Greeter/会话、菜单键、键盘、触摸、Files、面板、Wi-Fi 编辑器和音量事件声音；
-   再从已签名 feed 安装浏览器（`tdvp-netsurf`）并验证 HTTPS 浏览。
-6. 通过 HTTPS 下载配置的软件源的 `Packages.gz`、`Packages.gz.asc` 与
-   `release.json`；使用镜像内置公钥验证 detached signature，并要求每个已发布包精确依赖
-   当前镜像 ABI。
-7. 将镜像、压缩镜像、manifest 与 checksum 收集到 `output/`。
+## 检查与验收
 
-`tdvp-image-manifest` 记录源码版本、构建输入、文件系统/GPT 身份与镜像哈希；
-`tdvp-sdk-baseline-manifest` 记录实际 staged SDK 输入；`SHA256SUMS` 覆盖全部交付文件。
+| 阶段 | 检查内容 | 结论范围 |
+| --- | --- | --- |
+| 构建前 | 锁定 SDK、补丁结构和回放、源码契约、硬件预检 | 已检查的输入与配置 |
+| 完整构建 | 发行 defconfig、CPU1 配对固件、post-image verifier | 产物布局、rootfs 文件和配置符合断言 |
+| 软件源静态门禁 | HTTPS、索引签名、release 元数据、包 ABI 依赖、必需包名 | 发布索引与信任材料 |
+| 新卡实机 | 启动/重启、CPU1 数据与数值、VGLite、登录锁屏、输入、网络、音频 | 该镜像与该硬件的运行结果 |
+| 软件包实机 | 安装依赖闭包、启动应用、卸载/升级边界、重启 | 包管理与软件源的端到端可用性 |
 
-## 签名软件发行源策略
+实机步骤见 [硬件基线验证](hardware-baseline-validation.zh-CN.md)。
+历史热部署结果应注明基线镜像和替换文件；每张候选整卡镜像仍需单独验收。
 
-标准镜像只配置：
+`tdvp-image-manifest` 记录源码、构建输入、分区身份和镜像哈希；
+CPU1 manifest 记录配对固件信息；SDK manifest 记录 staged 输入；
+`SHA256SUMS` 覆盖其余交付文件。
 
-```text
-https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r6/riscv64
-```
+## 软件源的当前状态与待满足条件
 
-公钥指纹为 `2B091A2A8E5810954FB9FD64EA9D1CD5EFC81500`。镜像只含公钥；镜像本身是很小的
-硬件/桌面种子，这个 ABI 匹配的软件源才是可扩展的用户态发行目录，承载库、工具、桌面程序
-和设备应用。发布端必须用离线私钥为 ABI 匹配的软件包、`Packages`/`Packages.gz` 及
-detached signature 签名。设备与本仓库不应持有私钥，发布说明也绝不能要求关闭签名校验。
+镜像配置的是 `stable` 可变通道，完整 URL 与公钥见
+[软件源状态](package-feed-status.zh-CN.md)。平台标识末尾的 `r1` 是 ABI 标签的一部分；
+2026-09-09 观察到的 feed 修订版为 `r6`。
 
-该 feed 的可组合性是发行契约：对本发行版中的每一个软件组件，每一个非 ABI 动态运行时库、插件和
-runtime helper 在同一 feed 修订版中都必须有且只有一个可独立安装的 IPK 所有者。应用是叶子，只能通过
-精确版本依赖使用这些提供者；不得静态塞入通用库，也不得因为某个库恰好存在于基础镜像中就暗中依赖它。
+**软件包端到端验收未通过，安装与升级暂缓。** NetSurf 安装涉及的运行库含 CPU0
+不支持的 RVV 指令，随后设备启动失败。镜像发布现在独立检查最终 ext4 的文件归属和
+预装包数据库，并导出相应清单。线上软件源签名/元数据检查单独运行；每个 IPK 的
+兼容性与端到端验收仍需完成。配套 SDK/sysroot 发布后，才能建立对外软件源的构建基线。
 
-release collector 会对在线 Pages endpoint 强制执行该策略；镜像里仅仅存在一个 URL 和公钥，
-不能证明设备在现场一定可以通过软件源更新。
+恢复软件交付前，至少要保证：
+
+- 所有 Linux 可执行文件和运行库均兼容 CPU0。
+- 基础镜像与 feed 的公共运行库具有明确、可核对的版本和包所有权。
+- 每个运行库、插件与 helper 的提供者唯一，依赖闭包完整。
+- 签名持续开启；私钥留在发布端，设备和镜像只携带公钥。
+- 在配对的候选镜像上完成 NetSurf 安装、HTTPS 页面访问和重启验收。

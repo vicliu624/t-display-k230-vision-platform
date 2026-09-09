@@ -1,6 +1,6 @@
 # nRF52840 官方 AT 主机端
 
-这是 Linux 主机端会话组件与命令行入口，不是 BlueZ/HCI 适配器。
+该组件提供 Linux 主机端 AT 会话与命令行入口，BlueZ/HCI 适配尚未实现。
 当前只完成主机协议组件；Quick Settings/顶栏尚未接入，实机 UART 对端仍未完成
 身份识别，不能称为蓝牙已集成或射频验收通过。
 
@@ -11,7 +11,7 @@
 [AT 协议](https://github.com/Xinyuan-LilyGO/T-Display-K230-nRF52840/blob/4646a728580739d487126f47a521e9b8032b3c2c/docs/AT_COMMANDS.md)和
 [实现](https://github.com/Xinyuan-LilyGO/T-Display-K230-nRF52840/blob/4646a728580739d487126f47a521e9b8032b3c2c/src/main.cpp)。
 
-- 115200 8N1、无 RTS/CTS，命令 CRLF；USB CDC 不是主机 AT 接口。
+- 主机 AT 使用 UART，115200 8N1、无 RTS/CTS，命令 CRLF；USB CDC 用于调试日志。
 - `OK` 仅表示受理；扫描等待 DONE、连接等待 CONNECTED、GATT 等待带句柄和
   状态码的结果。正常发现结束允许 ATT attribute-not-found `0x10a`，读写只接受 0。
 - 官方 `handle_connect` 把数字开头的参数解析为索引，包括数字开头的 MAC。
@@ -29,8 +29,7 @@ tdvp-nrf52840
 ```
 
 同一进程保持一个 UART 会话；每个命令是一个独立的命令行参数。确认测试外设
-及无线操作范围后，才能执行相应操作。下面地址只是格式示例，不是已授权或
-已识别的外设；句柄也必须从实际发现结果取得：
+及无线操作范围后，才能执行相应操作。下面地址用于展示参数格式，执行时请换成已确认的测试外设；句柄从实际发现结果取得：
 
 ```sh
 tdvp-nrf52840 --timeout-ms 10000 \
@@ -39,9 +38,9 @@ tdvp-nrf52840 --timeout-ms 10000 \
   'read 37' 'cccd 38 notify' 'listen 5' 'cccd 38 off' 'disconnect'
 ```
 
-`write HANDLE HEX` 仅发送带响应的写请求，最多 244 字节；不是任意 AT passthrough。
+`write HANDLE HEX` 仅发送带响应的写请求，最多 244 字节；入口只接受已实现的命令。
 输出为 JSON Lines，响应、异步事件和已完成的请求分开表示，控制字符转义。
-这是低层固定命令序列入口，不是交互式 BLE 浏览器；还需要常驻服务/应用接口、
+当前入口执行固定命令序列；交互式使用还需要常驻服务/应用接口、
 GUI 选择与状态呈现、配对交互和真实外设数据验收。
 
 所有权和失败处理：
@@ -49,7 +48,7 @@ GUI 选择与状态呈现、配对交互和真实外设数据验收。
 - advisory flock + TIOCEXCL，禁止同组件并发；不声称能够撤销另一程序已打开的
   文件描述符。部署常驻服务前仍必须协调现有串口所有者。
 - 首次接管先清理本机队列，严格核对官方版本前缀、OK 和完整状态；不识别为
-  官方协议时不发送 BLE 命令。版本字符串不是密码学身份认证。
+  官方协议时不发送 BLE 命令。版本字符串用于协议匹配，不能提供密码学身份保证。
 - 发现预存扫描/GATT 或中央连接，不擅自接管、断开或重置；可以读取状态。
 - 绝对截止时间、行/累计字节限制；有界轮询且不调用阻塞 tcdrain。
 - 错误、超时、复位事件或不匹配结果会使当前会话不可再用；没有自动重试。
@@ -70,7 +69,7 @@ bash buildroot/tools/test-tdvp-nrf52840-at.sh
 应答、身份拒绝、时限、取消、串口锁、注入拒绝、受理/完成分离、地址解析、
 GATT 数据格式/句柄/状态、通知和断线。测试不访问真实 UART、不发射无线信号，
 不生成蓝牙 acceptance 标记。CI 在完整镜像构建前执行该测试；镜像 preflight
-另检查安装入口是可执行的 RISC-V ELF，但这仍不是硬件功能验收。
+另检查安装入口是可执行的 RISC-V ELF。物理 UART 和 BLE 功能另行验收。
 
 主机代码可以在等待 nRF USB 枚举时继续验证；正式上线仍必须取得真实模块
 身份、稳定 UART、扫描、指定外设连接、GATT 读写/通知与断线恢复的证据，
@@ -120,7 +119,7 @@ SIGTERM 取消。每个场景检查原 termios 恢复、TIOCEXCL 清除、退出
 部署在 `/root/tdvp-nrf-at-host.X5HXzS/tdvp-nrf52840-target-selftest`。
 物理 UART1 计数前后完全相同；AI idle/error=0、completed=596，VGLite PID/FD
 不变。该结果比 `--help` 多验证了目标机的真实 libc/termios/poll/进程路径，
-**仍然不是物理 UART 或 BLE 无线验收**。
+物理 UART 和 BLE 无线功能仍待验收。
 
 ## 桌面接口核对
 
@@ -137,5 +136,5 @@ SIGTERM 取消。每个场景检查原 termios 恢复、TIOCEXCL 清除、退出
 因此不能在镜像服务里把 AT ready 映射成 power-control-available 来强行显示
 此按钮；那会暴露一个并不存在的电源控制。还需要按用户用途扩展独立 UI 的
 契约和 Linux 后端，或选择经明确授权的另一固件路线。BLE 数据、系统级 HID
-和音频用途不是同一能力，不能在未明确需求时把其中一个替代为全部蓝牙集成。
+和音频用途需要各自的协议与验收范围，应先明确用途再实现对应能力。
 检查时独立 UI 工作树已有未提交修改，本轮没有编辑、提交或推送该仓库。

@@ -64,6 +64,7 @@ TDVP_STAGE_DRY_RUN=1 \
 bash buildroot/tools/test-tdvp-image-source-contract.sh
 bash buildroot/tools/test-tdvp-session-idle-contract.sh
 bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
+bash buildroot/tools/test-tdvp-cpu1-vision-status.sh
 ```
 
 源码契约测试从 greeter 和桌面 package recipe 提取安装路径，把真实源码文件复制到
@@ -79,6 +80,12 @@ bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
 生成的清单字段及产物哈希、完整
 分区内容或硬件行为。仍须保留独立的 CPU1 固件预检和最终完整镜像/发布校验。应分别
 记录这些阶段的结果，不能把其中一项通过表述为后续阶段也已通过。
+
+CPU1 状态回归还会调用 `test-tdvp-cpu1-hwctl-image-contract.sh`：以 C++17、`-O0`
+编译生产状态发布对象，放入临时 ext4 文件系统，执行镜像校验器对 `vpl-hwctl` 的真实
+内容断言，并逐项制造失败样本。该步骤需要 C++17 编译器，检查的是产物中的接口标识。
+已有交叉编译的 `vpl-hwctl` 时，可把路径作为此脚本的唯一参数，核对真实目标 ELF。
+测试不会执行 RISC-V 程序，也不替代完整镜像或设备验收。
 
 ## 固定输入
 

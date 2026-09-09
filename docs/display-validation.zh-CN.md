@@ -1,15 +1,15 @@
 # 显示验证
 
 镜像通过 K230 DRM/KMS 路径驱动内置 RM69A10 面板，使用 `DSI-1`、输出旋转
-`90` 和逻辑尺寸 `1232x568`。2026-09-07 按产品要求将认证后桌面的默认策略
-限定为 VGLite；Pixman 仅用于独立登录页，不能用于用户桌面或渲染失败回退。
+`90` 和逻辑尺寸 `1232x568`。当前登录页与认证后的桌面均使用 VGLite，
+不提供 Pixman 会话或软件渲染回退。本文带日期的测量属于当时的候选和会话。
 
 默认选择不等于设备验收通过。此前 VGLite 工程师的受控会话通过结果属于
 对应的软件栈和会话。设备实际启用情况和每项硬件 Gate 必须单独记录，
 不能仅凭策略改变宣称 gtklock 锁屏/息屏唤醒共存验证通过。
 
 `renderer-profile` 和镜像内 `vglite-enabled` 必须同时安装；策略缺失/错误、helper
-失效或已有故障标记都会阻止桌面启动。启用文件只是产品策略，不是测试报告。
+失效或已有故障标记都会阻止桌面启动。启用文件记录产品策略；硬件通过情况由测试报告记录。
 连续三次渲染失败仍触发受控退出，启动器清理会话子进程、记录故障并返回 greetd，
 绝不启动其他 renderer。管理员诊断并清除故障标记后，才可再次登录 VGLite 桌面。
 镜像校验同时检查环境、profile、启用文件及 manifest，防止“有驱动但默认不启用”。
@@ -19,10 +19,10 @@
 镜像断言会检查下列已安装内容：
 
 - 通过 greetd 和认证后的 Labwc 会话建立的 `/dev/dri/card0` 会话契约。
-- `seatd`、`labwc`、`swaybg`、`wf-panel-pi`、其上游 `wfplug-*` 模块、`pcmanfm`、
+- `seatd`、`labwc`、`wf-panel-pi`、其上游 `wfplug-*` 模块、`pcmanfm`、
   `foot` 和 `wlr-randr`。
 - 包含 K230 输出参数的 `/etc/tdvp/labwc/environment`。
-- 启动 Swaybg、PCManFM 桌面处理与 wf-panel-pi 的 `/etc/xdg/labwc/autostart`。
+- 启动 PCManFM 桌面、wf-panel-pi 与会话辅助程序 的 `/etc/xdg/labwc/autostart`。
 - GT9895 的 libinput 校准规则。
 
 构建完成后在主机执行：
@@ -57,7 +57,7 @@ wlroots 和客户端启动错误不再依赖登录 VT 仍然可见。
 ## 维护模式 KMS 验收
 
 `tdvp-display-smoke` 会取得 DRM master 并直接 modeset/atomic commit，**不能**在
-greetd、Labwc 或图形桌面运行时执行；它不是桌面健康检查。它的 systemd 包装器会在
+greetd、Labwc 或图形桌面运行时执行。它的 systemd 包装器会在
 检测到上述进程时拒绝运行。需要验证 page-flip 时，使用单独命名的维护事务：
 
 ```sh
@@ -125,7 +125,7 @@ socket，并在由 root 启动时降权到该会话用户。它不会假定目�
 （`WL_SHM_FORMAT_XRGB8888`）；传入 `--format ar24` 后使用带非不透明 alpha 的
 `AR24`（`WL_SHM_FORMAT_ARGB8888`）缓冲。client 会先要求真实 `wl_shm` global
 通告所选格式，因此 alpha 路径不被支持时会明确失败。它不会打开 `/dev/dri/card0`，也
-不会取得 DRM master，因此这是普通桌面健康检查，而不是维护模式 KMS 测试。成功时输出
+不会取得 DRM master，可用于普通桌面健康检查。成功时输出
 callback 的最小、平均和最大延迟；缺少 callback、compositor 断开、缓冲释放停滞、格式
 不受支持或 callback 超过设置上限时都会以非零状态退出。
 
@@ -199,7 +199,7 @@ frame callback 分别为 `22851.7 us`、`22995.4 us` 与 `22815.5 us`，最大�
 
 这组结果必须与此前 CPU 密集客户端在场的样本分开解释：后者的 SHM callback 平均
 `103468.9 us`、最大 `355043 us`，而硬件 event 间隔仍紧密。故该对照将“触摸事件落后/
-桌面像崩溃”的现象归因为单核用户态调度压力，而不是 vblank 丢失或 page-flip 已知失败。
+桌面像崩溃”的现象定位到单核用户态调度压力。该组样本的硬件 vblank 时间戳仍然稳定。
 它仍不是独占 KMS 动态 page-flip 验收，也不能替代后续 DMA-BUF、fence 或 direct scan-out
 测试。
 

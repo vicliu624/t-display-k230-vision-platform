@@ -11,10 +11,11 @@ ext4 工作目录中准备 overlay、应用受跟踪的补丁队列、注册本�
 k230_canmv_t_display_rm69a10_labwc_desktop_defconfig
 ```
 
-profile 提供 systemd rootfs、K230 vendor 内核和 firmware runtime、RM69A10
-板级设备树，以及由 seatd、Labwc、Swaybg、PCManFM、Raspberry Pi 维护的
-wf-panel-pi／wfplug 模块与 Foot 组成的 Wayland 桌面。所有构建产物统一位于一个
-固定的工作目录输出路径：
+profile 提供 CPU0 Linux/systemd、配对的 CPU1 RT-Smart/OpenSBI、RM69A10 设备树，
+以及 seatd、greetd/gtkgreet、Labwc/VGLite、PCManFM、wf-panel-pi、Foot、
+NetworkManager 和 gtklock。登录页与桌面均使用 VGLite；背景由 PCManFM 提供。
+CPU1 托管摄像头与 AI，Linux 通过跨核设备访问；旧 Linux camera/KPU package、
+Swaybg 和浏览器均未纳入当前基础镜像。所有构建产物位于：
 
 ```text
 $WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/

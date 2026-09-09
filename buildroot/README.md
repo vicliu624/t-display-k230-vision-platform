@@ -74,6 +74,7 @@ TDVP_STAGE_DRY_RUN=1 \
 bash buildroot/tools/test-tdvp-image-source-contract.sh
 bash buildroot/tools/test-tdvp-session-idle-contract.sh
 bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
+bash buildroot/tools/test-tdvp-cpu1-vision-status.sh
 ```
 
 The source-contract test derives installation paths from the greeter and desktop
@@ -95,6 +96,15 @@ and artifact hashes, complete partition contents, or
 hardware behavior. Keep the independent CPU1 firmware preflight and the final
 full-image/release guards. Record these as separate validation results; passing
 one does not imply that the later stages have passed.
+
+The CPU1 status regression also calls `test-tdvp-cpu1-hwctl-image-contract.sh`.
+It compiles the production status object with C++17 and `-O0`, places it in a
+temporary ext4 filesystem, runs the image verifier's actual `vpl-hwctl` content
+assertions, and creates a negative control for every rule. This step requires a
+C++17 compiler and checks the interface identifiers in the compiled payload.
+Pass an existing cross-compiled `vpl-hwctl` as that script's sole argument to
+check a real target ELF. It does not execute RISC-V code or replace full-image
+and hardware acceptance.
 
 ## Persistent Inputs
 

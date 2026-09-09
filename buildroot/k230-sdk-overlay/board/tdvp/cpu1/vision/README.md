@@ -1,6 +1,15 @@
-# CPU1 AI and vision migration — production cutover, hardware acceptance pending
+# CPU1 AI and vision service
 
-The intended production split is:
+Current integration and historical validation are recorded separately below.
+As of 2026-09-09, the production worker supports GC2093 capture, limited AI2D,
+FFT/IFFT and a fixed KWS model through Linux asynchronous interfaces.
+See [AI jobs](../../../../../../docs/cpu1-ai-jobs.zh-CN.md) and the
+[2026-09-09 device record](../../../../../../docs/cpu1-ai-status-remote-validation-20260909.zh-CN.md)
+for supported operations and actual tests. Those successful device runs preceded
+the [package-feed incident](../../../../../../docs/package-feed-status.md).
+Each new candidate image requires fresh whole-card and hardware acceptance.
+
+The production resource split is:
 
 - CPU1: the AI subsystem (KPU/GNNE, AI2D, FFT, AI working memory and interrupt/
   driver ownership), GC2093/CSI2, ISP/capture, private visual buffers,
@@ -18,14 +27,14 @@ sends bounded PCM chunks to CPU1 and receives text. No ASR model is implemented
 or accepted by these changes. See `docs/k230-offline-asr.md` and its Chinese
 counterpart for the revised service boundary and memory constraints.
 
-This directory is an **in-progress migration**. The production firmware builder
-now includes AI/vision; the Linux product profile selects the asynchronous
-bridge and patch 0071 installs the reviewed ownership DT. Linux ISP/KPU
-packages and direct runtime services are retired. Packaging rejects mixed
-firmware/DT pairs and competing Linux owners in both target and final ext4.
-The complete Buildroot/SD image and paired hardware acceptance are still
-pending. Do not deploy an individual kernel, DTB or CPU1 payload from this
-checkpoint on a device running the other half of an older ownership model.
+The production firmware builder includes AI/vision; the Linux product profile
+selects the asynchronous bridge and patch 0071 installs the ownership DT.
+Linux ISP/KPU packages and direct runtime services are retired. Packaging
+rejects mixed firmware/DT pairs and competing Linux owners in target and final
+ext4. Deploy kernel, DTB, bridge and CPU1 payload only as a verified compatible
+pair. The dated build hashes below identify earlier checkpoints, not the
+current downloadable image; use [Getting Started](../../../../../../docs/getting_started.md)
+to select a candidate.
 
 The former `vpl-camera` Linux V4L2 desktop demo is retired: no menu entry or
 launcher is shipped, including in reused Buildroot targets. A replacement demo
@@ -33,7 +42,7 @@ has not been designed or selected. Future Linux previews must consume CPU1
 results, not open the camera directly. Removing the old demo does not itself
 complete the camera ownership migration described below.
 
-## Implemented and cross-built
+## Implementation
 
 - A camera-only MPP kernel initializer with explicit strong dependencies and
   latched stage failures; no VO, connector, audio, codec, global PM or default
@@ -46,8 +55,10 @@ complete the camera ownership migration described below.
   Do not use `VICAP_DATABASE_PARSE_HEADER`: the pinned MPI implementation
   maps a bootloader-populated blob at physical `0x00300000`, outside CPU1's
   owned memory, and falls back to files when it cannot find that blob.
-- A bounded 30-frame diagnostic and an asynchronous worker. Neither claims
-  model inference. The worker waits for a Linux request; peer-heartbeat loss
+- A bounded 30-frame capture diagnostic and an asynchronous vision/AI worker.
+  The capture path returns frames; the separate AI job path provides the
+  supported numerical operations and fixed KWS model. The worker waits for a
+  Linux request; peer-heartbeat loss
   stops capture, faults are latched, and failed teardown retains the process
   and potentially DMA-owned buffers.
 - Embedded ROMFS mounting and LWP launch glue; no CPU1 SD/USB/network startup.
@@ -103,7 +114,7 @@ complete the camera ownership migration described below.
   ownership faults latch AI failure and propagate to the main owner heartbeat.
   Runtime readers use sequence-checked, fresh publications without advancing
   the main thread's state machine; an in-progress publication gets a bounded
-  retry. No numerical FFT or model execution on the board is claimed yet.
+  retry. Numerical FFT and fixed-model board results are linked at the top of this guide.
 - A shared, versioned ownership policy and RT-Smart startup adapter. Linux
   publishes OFFER only after preparing/retaining resources, CPU1 requires an
   advancing heartbeat before writing HELLO, Linux validates the matching
@@ -117,7 +128,7 @@ complete the camera ownership migration described below.
   gates use Linux CCF's shared-register serialization; CPU1 never writes that
   register. Ownership contract 2 refuses contract-1 firmware which did not
   require these retained ports. No PLL retuning is performed. This remains a
-  production-selected path whose board acceptance is still pending.
+  production-selected path requiring matched firmware and per-image board checks.
   Separate 128-byte records, sequence-checked snapshots and fences prevent
   mixed publications; boot/peer timeouts and identity changes latch faults.
   Startup is attempted once. Failure does not reset shared resources or free
@@ -308,7 +319,7 @@ The new clock helper is linked into the curated MPP path. The candidate DTB
 still passes the 273-node baseline comparison and 22 invalid-candidate tests,
 and no enabled Linux composite clock may write camera CMU registers.
 
-## Required before production activation
+## Historical pre-cutover builds
 
 The ownership-gated candidate also passed the real Ubuntu 24.04 cross-link
 with the updated heartbeat-monitoring worker embedded in ROMFS:
@@ -567,7 +578,7 @@ and the boot-time decompressor quiescence still require explicit verification.
 Do not grant CPU1 ownership of system SDMA or reset shared infrastructure as a
 shortcut. VGLite and non-AI2D display resources remain Linux-owned.
 
-## Remaining release requirements
+## Follow-up evidence and per-image acceptance
 
 See [2026-09-08 remote deployment evidence](../../../../../../docs/cpu1-remote-validation-20260908.zh-CN.md)
 for the subsequent board tests. A compatible CPU1 slot can be updated remotely
@@ -618,12 +629,12 @@ acceptance or proof that the boot decompressor has stopped using shared SRAM.
 2. Validate GC2093 CSI2/MCLK/reset and physical frame bytes through the Linux
    bridge, slow-reader/close/reopen/error paths, and VGLite coexistence, with
    an atomic paired rollback prepared.
-3. Complete CPU1 nncase/fixed-model execution and typed asynchronous results;
+3. Verify CPU1 nncase/fixed-model execution and typed asynchronous results;
    check AI memory/SRAM use, interrupt/error behavior and FFT numerical
    references. Registered drivers and a frame test are not AI subsystem
    acceptance. No ASR model has been selected or verified.
 4. Validate the new read-only status interface on the paired board, including
    missing/stalled worker and active/idle streams. Do not report an initialized
    engine as successful inference or delivered bytes as image-quality acceptance.
-5. Build and verify the complete Buildroot/PR SD image, then perform hardware
-   acceptance. Until then this is not a validated replacement image.
+5. Build and verify each complete Buildroot/PR SD candidate, then perform
+   hardware acceptance. Preserve the candidate identity with its results.

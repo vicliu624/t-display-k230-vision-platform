@@ -1,7 +1,7 @@
 # K230 SDK Overlay
 
-这个 overlay 会在配置前被复制到固定版本的 K230 Linux SDK 工作目录。它提供
-镜像需要的板级配置和本地 package recipe。
+此 overlay 在配置前复制到固定版本的 K230 Linux SDK 工作目录。
+准备脚本还会从 `user-space/*/src` 同步本地源码，并用 manifest 校验两者一致。
 
 ## 当前板级 Profile
 
@@ -9,21 +9,27 @@
 configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig
 ```
 
-## 本地 Package
+## 当前主要 Package
 
 | Package | 职责 |
 | --- | --- |
-| `gtk-layer-shell` | 为面板提供 layer-shell 协议支持。 |
-| `wf-panel-pi` 与 `wfplug-*` | Raspberry Pi 维护的应用菜单、任务列表与状态模块。 |
-| `tdvp-labwc-desktop` | Labwc 会话、输出旋转、触摸校准、背景与面板启动。 |
-| `tdvp-display-smoke` | DRM/KMS 显示验收工具。 |
-| `tdvp-keyboard-layout` | T-Display K230 键盘布局服务。 |
-| `tdvp-wayland-acceptance` | Wayland 会话验收工具。 |
-| `tdvp-kpu-acceptance` | KPU runtime 验收工具。 |
-| `vicliu-pocket-linux-hardware` | 板级硬件状态发布与集成服务。 |
+| `gtk-layer-shell`、`wf-panel-pi`、`wfplug-*` | 面板及应用菜单、网络、音量、电量和时钟 |
+| `tdvp-greetd`、`tdvp-gtkgreet`、`tdvp-greeter` | 所选账户登录、VGLite 登录页 |
+| `tdvp-labwc-desktop` | VGLite 桌面、输入、PCManFM、面板与会话生命周期 |
+| `gtklock`、`gtk-session-lock`、`swayidle`、`wlopm` | 密码窗口、会话锁定、空闲计时与息屏 |
+| `tdvp-quick-settings` | 独立触摸控制中心 |
+| `tdvp-cpu1-vision` | Linux 视觉/AI 内核桥接与公共 ABI 头文件 |
+| `tdvp-display-smoke` | 维护模式 DRM/KMS 验收 |
+| `tdvp-vglite-acceptance`、`tdvp-wayland-acceptance` | VGLite 与 Wayland 验收工具 |
+| `tdvp-keyboard-layout`、`vicliu-pocket-linux-hardware` | 键盘配置、板级控制、状态发布和 nRF AT 主机工具 |
+| `nm-connection-editor` | NetworkManager 连接编辑 |
+| `tdvp-opkg-trust` | 签名公钥与按需信任初始化 |
 
-`board/tdvp/` 包含 rootfs hook、Linux fragment、可重复镜像配置和镜像验证脚本。
-`linux/` 包含受跟踪的 K230 内核补丁序列。
+CPU1 RT-Smart 固件由板级构建流程配对生成，并写入整卡 raw 区域。
+旧 `tdvp-camera-isp`、`tdvp-camera-isp-runtime` 和 `tdvp-kpu-acceptance`
+recipe 保留在源码中，当前 profile 不选择它们。基础桌面无 Camera demo、Swaybg 或浏览器。
 
-在准备工作目录时，
-`buildroot/tools/register-k230-sdk-tdvp-packages.sh` 会注册这些 package。
+`board/tdvp/` 包含 rootfs hook、Linux fragment、镜像布局与校验脚本；
+`linux/` 包含受控内核补丁队列。package 注册由
+`buildroot/tools/register-k230-sdk-tdvp-packages.sh` 在 staging 时执行。
+软件源的实际验收边界见 [软件源状态](../../docs/package-feed-status.zh-CN.md)。

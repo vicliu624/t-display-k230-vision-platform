@@ -1,10 +1,9 @@
 # Display Validation
 
 The image drives the internal RM69A10 panel through K230 DRM/KMS, connector
-`DSI-1`, transform `90`, and logical size `1232x568`. On 2026-09-07 the product
-policy requires the authenticated desktop to use VGLite exclusively. Pixman
-is confined to the independent login compositor, never a desktop selection
-or render-failure fallback.
+`DSI-1`, transform `90`, and logical size `1232x568`. Both the current greeter and authenticated
+desktop use VGLite. Pixman sessions and software-renderer fallback are excluded.
+Dated measurements below belong to their recorded candidates and sessions.
 
 A default selection is not a hardware acceptance result. The display team's
 earlier VGLite results belong to their measured stack and session. Device
@@ -27,11 +26,11 @@ The image assertion verifies these installed artifacts:
 
 - `/dev/dri/card0` session contract through greetd and the authenticated Labwc
   session.
-- `seatd`, `labwc`, `swaybg`, `wf-panel-pi`, its upstream `wfplug-*`
+- `seatd`, `labwc`, `wf-panel-pi`, its upstream `wfplug-*`
   modules, `pcmanfm`, `foot`, and `wlr-randr`.
 - `/etc/tdvp/labwc/environment` with the K230 output values.
-- `/etc/xdg/labwc/autostart` launching Swaybg, PCManFM desktop handling, and
-  wf-panel-pi.
+- `/etc/xdg/labwc/autostart` launching the PCManFM desktop, wf-panel-pi and
+  session helpers.
 - GT9895 libinput calibration rule.
 
 Run the host-side check after a build:
