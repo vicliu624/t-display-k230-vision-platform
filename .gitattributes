@@ -2,6 +2,7 @@
 # of the host Git checkout so PowerShell and WSL cannot introduce CRLF.
 .gitattributes text eol=lf
 *.sh text eol=lf
+*.py text eol=lf
 *.mk text eol=lf
 *.patch text eol=lf
 *.config text eol=lf

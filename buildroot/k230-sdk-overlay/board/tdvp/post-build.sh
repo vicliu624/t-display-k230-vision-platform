@@ -356,3 +356,9 @@ profile: k230_canmv_t_display_rm69a10_labwc_desktop_defconfig
 sdk_commit: 5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7
 linux_commit: 7d4e1f444f461dbe3833bd99a4640e7b6c2cd529
 EOF
+
+# Capture selected package versions from this build, without consulting a
+# feed or guessing versions from old SDK directories. The final file ownership
+# records are generated after mkusers and service finalization in post-fakeroot.
+make --no-print-directory -s -C "${O:?Buildroot output is missing}" show-info \
+	> "${BUILD_DIR:?Buildroot build directory is missing}/tdvp-package-info.json"

@@ -84,6 +84,7 @@ jobs:
           bash buildroot/tools/test-tdvp-session-idle-contract.sh
           bash buildroot/tools/test-tdvp-auth-image.sh
           bash buildroot/tools/test-tdvp-image-source-contract.sh
+          python3 buildroot/tools/test-tdvp-opkg-image-seed.py
           bash buildroot/tools/test-verify-sdcard-image-volumepulse-guard.sh
           bash buildroot/tools/test-tdvp-display-smoke-cleanup.sh
           bash buildroot/tools/test-tdvp-vblank-observer-maintenance-master.sh
@@ -117,6 +118,8 @@ jobs:
 
       - name: Verify image and collect the release bundle
         run: |
+          bash buildroot/tools/test-tdvp-opkg-image-native.sh \
+            "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/build/opkg-0.7.0"
           bash buildroot/tools/test-tdvp-cpu1-linux-package.sh \
             "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/target/lib/modules/6.6.36/updates/tdvp_cpu1_vision.ko" \
             "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/host/sbin/depmod"

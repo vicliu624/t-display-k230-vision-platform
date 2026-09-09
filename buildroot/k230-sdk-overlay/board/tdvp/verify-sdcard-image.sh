@@ -67,6 +67,7 @@ bash "$(dirname "$0")/cpu1/vision/verify-pair.sh" \
 
 # Check real ext4 metadata, not permissions in the unprivileged staging tree.
 bash "$(dirname "$0")/verify-auth-rootfs.sh" "${ROOTFS}"
+bash "$(dirname "$0")/verify-opkg-rootfs.sh" "${ROOTFS}"
 
 # U-Boot must identify the root partition by its deterministic GPT UUID.  The
 # Linux mmcblk index is not a stable board ABI: it changes when optional SDIO
@@ -783,6 +784,10 @@ reject_rootfs_line '/etc/opkg/opkg.conf' '^src/gz '
 require_rootfs_content '/var/lib/opkg/status' 'Package: tdvp-platform-abi'
 require_rootfs_content '/var/lib/opkg/status' 'Version: 2025.02.1-k230.6.6.36-glibc2.33-rv64-lp64d-r1'
 require_fs_path "${ROOTFS}" '/var/lib/opkg/info/tdvp-platform-abi.list'
+require_rootfs_content '/var/lib/opkg/status' 'Package: tdvp-image-base'
+require_fs_path "${ROOTFS}" '/var/lib/opkg/info/tdvp-image-base.list'
+require_fs_path "${ROOTFS}" '/usr/share/tdvp/opkg/image-base.json'
+require_rootfs_content '/usr/share/tdvp/opkg/image-base.json' '"/usr/lib/libmount.so.1.1.0"'
 require_rootfs_content '/usr/local/bin/vpl-package-manager' 'exec /usr/local/bin/tdvp-terminal'
 require_rootfs_content '/usr/local/bin/vpl-opkg-console' 'TDVP Software Manager (opkg)'
 require_rootfs_content '/usr/local/bin/vpl-opkg-console' 'sudo tdvp-opkg update'
