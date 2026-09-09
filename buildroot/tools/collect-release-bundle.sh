@@ -38,6 +38,7 @@ cp "${WORKTREE}/.tdvp/sdk-baseline-manifest" "${RELEASE_DIR}/tdvp-sdk-baseline-m
 bash "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/verify-opkg-rootfs.sh" \
 	"${IMAGES}/rootfs.ext2" "${RELEASE_DIR}"
 cp "${WORKTREE}/output/${PROFILE}/build/tdvp-package-info.json" "${RELEASE_DIR}/tdvp-buildroot-packages.json"
+python3 "${SCRIPT_DIR}/export-tdvp-sdk.py" "$WORKTREE" "$RELEASE_DIR" "$RELEASE_NAME"
 cat > "${RELEASE_DIR}/README.txt" <<EOF
 ${RELEASE_NAME}
 
@@ -77,15 +78,19 @@ filesystem. tdvp-buildroot-packages.json records the selected source versions.
 The image-owned tdvp-image-* packages are held and essential; applications
 must depend on the published image's exact providers and add new files.
 
-This bundle alone is not yet a software-feed build baseline: matching portable
-SDK/sysroot publication and image/feed device acceptance are still pending.
-Do not bind or promote a public software feed using a temporary CI artifact.
+${RELEASE_NAME}-cpu0-sdk.tar.gz contains the paired CPU0 compiler and sysroot.
+tdvp-sdk-manifest.json binds its complete inventory and final-image libraries
+to the compressed image and package metadata. See the SDK README for setup.
+CI validates it at two paths in an isolated Ubuntu 24.04 container before upload.
+Image/feed device acceptance is recorded separately. A public software feed
+must use a tagged Release baseline; do not promote a temporary CI artifact.
 EOF
 (
 	cd "${RELEASE_DIR}"
 	sha256sum "${RELEASE_NAME}.img.gz" \
 		tdvp-image-manifest tdvp-cpu1-rtsmart.bin tdvp-cpu1-rtsmart.manifest \
 		tdvp-sdk-baseline-manifest tdvp-image-base.json tdvp-opkg-status \
-		tdvp-opkg-info.tar.gz tdvp-buildroot-packages.json README.txt > SHA256SUMS
+		tdvp-opkg-info.tar.gz tdvp-buildroot-packages.json \
+		"${RELEASE_NAME}-cpu0-sdk.tar.gz" tdvp-sdk-manifest.json README.txt > SHA256SUMS
 )
 printf 'TDVP product release bundle: %s\n' "${RELEASE_DIR}"

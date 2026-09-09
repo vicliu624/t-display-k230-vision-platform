@@ -83,8 +83,14 @@ Ubuntu 24.04 容器已分别以 root 和普通用户通过 15 项回归，包括
 预装依赖解析、生产 post-fakeroot hook、特殊权限与内容篡改拒绝。
 旧 SDK 完整 rootfs 副本在加入 `unix_chkpwd=04755` 场景后，重新生成并通过 ext4 校验，
 覆盖 12,245 个路径和 165 条包记录。此前完整副本测试中的 helper 为 `0755`，未覆盖这个场景。
-这些检查不代表本次新镜像已完成构建或实机验收。
-配套可迁移 SDK/sysroot 的导出、已发布基线解析和软件源端到端验收仍待完成。
+提交 `6cd7b34` 的 [CI 构建已通过](https://github.com/vicliu624/t-display-k230-vision-platform/actions/runs/34351987911)，
+解决了上述 inode 权限校验问题。该次产物仍是候选镜像，未新增带 tag 的 Release，
+也未完成新卡实机验收。
+
+本轮已增加[配套 CPU0 SDK/sysroot 导出和隔离验证](cpu0-application-sdk.zh-CN.md)。
+在 Ubuntu 24.04 中使用现有 SDK 与临时 rootfs 副本验证导出、迁移及应用编译；
+这些本地样本不作为发布基线。后续 CI 必须从同一次完整构建中生成镜像与 SDK，
+通过产物配对检查后再上传。已发布基线解析和软件源端到端验收仍待完成。
 
 ## 新镜像后的验收要求
 

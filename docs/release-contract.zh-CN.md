@@ -13,6 +13,12 @@ tdvp-image-manifest
 tdvp-cpu1-rtsmart.bin
 tdvp-cpu1-rtsmart.manifest
 tdvp-sdk-baseline-manifest
+tdvp-image-base.json
+tdvp-opkg-status
+tdvp-opkg-info.tar.gz
+tdvp-buildroot-packages.json
+<release-name>-cpu0-sdk.tar.gz
+tdvp-sdk-manifest.json
 README.txt
 SHA256SUMS
 ```
@@ -20,6 +26,9 @@ SHA256SUMS
 最终 bundle 位于仓库 `output/<release-name>/`；本地 WSL 构建应收集到用户可见的
 仓库目录，CI 则上传这个目录。bundle 只交付压缩镜像。CPU1 固件同时嵌入整卡镜像，
 单独附带的文件用于核对配对关系与校验值。
+CI 在隔离 SDK 测试通过后追加 `tdvp-sdk-validation.log` 及其 SHA-256。
+应用 SDK 包含配套编译器、开发 sysroot 和镜像包记录，使用方法见
+[CPU0 应用 SDK](cpu0-application-sdk.zh-CN.md)。
 
 镜像包含 CPU0 Linux、CPU1 RT-Smart/OpenSBI、systemd、OpenSSH、NetworkManager、
 seatd、greetd/gtkgreet、Labwc/VGLite、PCManFM、wf-panel-pi、Foot、
@@ -48,6 +57,7 @@ nm-connection-editor、gtklock、板级服务及 opkg 签名信任材料。
 | --- | --- | --- |
 | 构建前 | 锁定 SDK、补丁结构和回放、源码契约、硬件预检 | 已检查的输入与配置 |
 | 完整构建 | 发行 defconfig、CPU1 配对固件、post-image verifier | 产物布局、rootfs 文件和配置符合断言 |
+| SDK 交付 | 文件哈希、镜像配对、两个隔离路径、C/C++/GTK/CMake 与 ELF 属性 | 应用编译器及已检查依赖可脱离原构建目录使用 |
 | 软件源静态门禁 | HTTPS、索引签名、release 元数据、包 ABI 依赖、必需包名 | 发布索引与信任材料 |
 | 新卡实机 | 启动/重启、CPU1 数据与数值、VGLite、登录锁屏、输入、网络、音频 | 该镜像与该硬件的运行结果 |
 | 软件包实机 | 安装依赖闭包、启动应用、卸载/升级边界、重启 | 包管理与软件源的端到端可用性 |
@@ -56,7 +66,8 @@ nm-connection-editor、gtklock、板级服务及 opkg 签名信任材料。
 历史热部署结果应注明基线镜像和替换文件；每张候选整卡镜像仍需单独验收。
 
 `tdvp-image-manifest` 记录源码、构建输入、分区身份和镜像哈希；
-CPU1 manifest 记录配对固件信息；SDK manifest 记录 staged 输入；
+CPU1 manifest 记录配对固件信息；`tdvp-sdk-baseline-manifest` 记录 staged 输入；
+`tdvp-sdk-manifest.json` 将应用 SDK 与镜像、包清单绑定；
 `SHA256SUMS` 覆盖其余交付文件。
 
 ## 软件源的当前状态与待满足条件

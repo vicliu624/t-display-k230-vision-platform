@@ -14,6 +14,12 @@ tdvp-image-manifest
 tdvp-cpu1-rtsmart.bin
 tdvp-cpu1-rtsmart.manifest
 tdvp-sdk-baseline-manifest
+tdvp-image-base.json
+tdvp-opkg-status
+tdvp-opkg-info.tar.gz
+tdvp-buildroot-packages.json
+<release-name>-cpu0-sdk.tar.gz
+tdvp-sdk-manifest.json
 README.txt
 SHA256SUMS
 ```
@@ -22,6 +28,9 @@ The bundle lives in the repository's `output/<release-name>/`. Local WSL builds
 must collect into the user-visible repository directory; CI uploads that directory.
 The bundle delivers only the compressed image. CPU1 firmware is also embedded
 in the whole-card image; its separate copy supports pairing and checksum inspection.
+CI also adds `tdvp-sdk-validation.log` and its SHA-256 after the isolated SDK test.
+The application SDK contains the paired compiler, development sysroot and image
+package records; see [CPU0 application SDK](cpu0-application-sdk.md).
 
 The image includes CPU0 Linux, CPU1 RT-Smart/OpenSBI, systemd, OpenSSH,
 NetworkManager, seatd, greetd/gtkgreet, Labwc/VGLite, PCManFM, wf-panel-pi,
@@ -55,6 +64,7 @@ Browsers and the Linux Camera demo have been removed from the base desktop.
 | --- | --- | --- |
 | Pre-build | Pinned SDK, patch structure/replay, source contracts, hardware preflight | Checked inputs and configuration |
 | Full build | Release defconfig, paired CPU1 firmware, post-image verifier | Asserted image layout, rootfs files and configuration |
+| SDK handoff | File hashes, image binding, two isolated paths, C/C++/GTK/CMake and ELF attributes | Application compiler and checked dependencies work without the original build tree |
 | Static feed gate | HTTPS, index signatures, release metadata, package ABI dependencies, required names | Published index and trust material |
 | Fresh-card hardware | Boot/reboot, CPU1 data and numerical results, VGLite, login/lock, input, network, audio | That image on that hardware |
 | On-device packages | Dependency installation, app startup, removal/upgrade boundaries, reboot | End-to-end package-manager and feed usability |
@@ -64,8 +74,9 @@ Historical hot-deployment results must identify the base image and replaced
 files. Each candidate whole-card image still requires its own acceptance.
 
 `tdvp-image-manifest` records source/build inputs, partition identities and image
-hashes. The CPU1 manifest describes paired firmware; the SDK manifest records
-staged inputs. `SHA256SUMS` covers the other delivered files.
+hashes. The CPU1 manifest describes paired firmware; `tdvp-sdk-baseline-manifest`
+records staged inputs. `tdvp-sdk-manifest.json` binds the application SDK to the
+image and package inventory. `SHA256SUMS` covers the other delivered files.
 
 ## Feed status and remaining requirements
 

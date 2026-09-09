@@ -85,10 +85,16 @@ jobs:
           bash buildroot/tools/test-tdvp-auth-image.sh
           bash buildroot/tools/test-tdvp-image-source-contract.sh
           python3 buildroot/tools/test-tdvp-opkg-image-seed.py
+          python3 buildroot/tools/test-tdvp-sdk.py
           bash buildroot/tools/test-verify-sdcard-image-volumepulse-guard.sh
           bash buildroot/tools/test-tdvp-display-smoke-cleanup.sh
           bash buildroot/tools/test-tdvp-vblank-observer-maintenance-master.sh
           bash buildroot/tools/test-tdvp-kms-maintenance.sh
+
+      - name: Prepare isolated SDK validation host
+        run: |
+          docker build -t tdvp-sdk-validation:ubuntu24.04 \
+            -f buildroot/tools/sdk/Dockerfile.validation buildroot/tools/sdk
 
       - name: Build and regress CPU1 firmware before the Linux image
         run: |
@@ -131,6 +137,14 @@ jobs:
           bash buildroot/tools/collect-release-bundle.sh \
             "$TDVP_WORKTREE" \
             "$TDVP_K230_RELEASE_NAME"
+
+      - name: Validate the paired SDK in isolated Ubuntu 24.04
+        run: |
+          set -euo pipefail
+          bash buildroot/tools/test-tdvp-sdk-relocation.sh \
+            "output/${TDVP_K230_RELEASE_NAME}/${TDVP_K230_RELEASE_NAME}-cpu0-sdk.tar.gz" \
+            "output/${TDVP_K230_RELEASE_NAME}" 2>&1 | tee "output/${TDVP_K230_RELEASE_NAME}/tdvp-sdk-validation.log"
+          (cd "output/${TDVP_K230_RELEASE_NAME}" && sha256sum tdvp-sdk-validation.log >> SHA256SUMS)
 
       - name: Upload candidate image
         uses: actions/upload-artifact@v4

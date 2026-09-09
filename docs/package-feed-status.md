@@ -100,8 +100,15 @@ resolution, the production post-fakeroot hook, special permissions and payload
 tamper rejection. A copy of an older SDK's full rootfs was regenerated with
 `unix_chkpwd=04755` and passed ext4 checks for 12,245 paths and 165 package
 records. The earlier full-copy test had a `0755` helper and missed this case.
-These checks do not establish a successful new-image build or hardware
-acceptance. Portable SDK/sysroot export, published baseline resolution and
+The [CI build for 6cd7b34 passed](https://github.com/vicliu624/t-display-k230-vision-platform/actions/runs/34351987911),
+closing the inode-permission verification failure. Its image is still a
+candidate; no new tagged Release or fresh-card hardware acceptance is recorded.
+
+This revision adds [paired CPU0 SDK/sysroot export and isolated validation](cpu0-application-sdk.md).
+Local Ubuntu 24.04 tests use the existing SDK and a disposable rootfs copy to
+exercise export, relocation and application builds. These fixtures are not a
+published baseline. CI must produce image and SDK from the same complete build
+and pass their pairing checks before upload. Published baseline resolution and
 end-to-end feed acceptance remain pending.
 
 ## Acceptance on the new image
