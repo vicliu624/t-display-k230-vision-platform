@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -236,6 +237,95 @@ class ImageSeed(unittest.TestCase):
                        check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         self.assertNotEqual(result.returncode, 0, result.stdout.decode())
+
+    def make_privileged_image(self):
+        (self.root / "usr/sbin").mkdir()
+        for name, mode in (("unix_chkpwd", 0o4755), ("setgid-helper", 0o2755),
+                           ("sticky-file", 0o1644), ("ordinary-helper", 0o755)):
+            path = self.root / "usr/sbin" / name
+            path.write_bytes(b"inert permission fixture\n")
+            path.chmod(mode)
+        # Exercise quoted debugfs paths and both kinds of link.
+        (self.root / "usr/lib/library alias.so").symlink_to("libmount.so.1.1.0")
+        os.link(str(self.root / "usr/sbin/unix_chkpwd"), str(self.root / "usr/sbin/helper-hardlink"))
+        info, build = make_build_info(self.work)
+        SEED.seed(self.root, build_info=info, build_dir=build)
+        image = self.work / "privileged.ext4"
+        result = subprocess.run(["mkfs.ext4", "-q", "-F", "-d", str(self.root), str(image), "8192"],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.assertEqual(result.returncode, 0, result.stdout.decode())
+        return image
+
+    def check_ext4(self, image):
+        return subprocess.run(["bash", str(PROJECT / "buildroot/k230-sdk-overlay/board/tdvp/verify-opkg-rootfs.sh"),
+                               str(image)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    def test_ext4_special_modes_are_read_from_image(self):
+        image = self.make_privileged_image()
+        before = hashlib.sha256(image.read_bytes()).hexdigest()
+        actual_modes = SEED.ext4_file_modes(image, SEED.inventory(self.root))
+        self.assertEqual(actual_modes["/usr/sbin/unix_chkpwd"], 0o4755)
+        self.assertEqual(actual_modes["/usr/sbin/setgid-helper"], 0o2755)
+        self.assertEqual(actual_modes["/usr/sbin/sticky-file"], 0o1644)
+        self.assertEqual(actual_modes["/usr/lib/library alias.so"], 0o777)
+        self.assertEqual(actual_modes["/lib"], 0o777)
+        extracted = self.work / "readback"
+        extracted.mkdir()
+        subprocess.run(["debugfs", "-R", "rdump / " + str(extracted), str(image)],
+                       check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        # Reproduce the regression explicitly on the e2fsprogs used by CI.
+        self.assertEqual((extracted / "usr/sbin/unix_chkpwd").stat().st_mode & 0o7777, 0o755)
+        with self.assertRaisesRegex(ValueError, "unix_chkpwd.*mode expected=04755 actual=00755"):
+            SEED.verify(extracted, require_buildroot=True)
+        SEED.verify(extracted, require_buildroot=True, rootfs_image=image)
+        result = self.check_ext4(image)
+        self.assertEqual(result.returncode, 0, result.stdout.decode())
+        self.assertEqual(hashlib.sha256(image.read_bytes()).hexdigest(), before)
+
+    def test_ext4_rejects_removed_added_and_changed_permission_bits(self):
+        image = self.make_privileged_image()
+        for name, mode, expected in (("unix_chkpwd", "0100755", "04755"),
+                                     ("setgid-helper", "0100755", "02755"),
+                                     ("sticky-file", "0100644", "01644"),
+                                     ("ordinary-helper", "0104755", "00755"),
+                                     ("ordinary-helper", "0100777", "00755")):
+            with self.subTest(name=name, mode=mode):
+                bad = self.work / "bad.ext4"
+                shutil.copyfile(str(image), str(bad))
+                subprocess.run(["debugfs", "-w", "-R", "set_inode_field /usr/sbin/{} mode {}".format(name, mode), str(bad)],
+                               check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                result = self.check_ext4(bad)
+                self.assertNotEqual(result.returncode, 0, result.stdout.decode())
+                self.assertIn((name + ": mode expected=" + expected).encode(), result.stdout)
+                self.assertIn(b"actual=", result.stdout)
+
+    def test_ext4_still_rejects_payload_and_missing_file_drift(self):
+        image = self.make_privileged_image()
+        for change in ("content", "missing"):
+            with self.subTest(change=change):
+                bad = self.work / "bad.ext4"
+                shutil.copyfile(str(image), str(bad))
+                path = "/usr/lib/libmount.so.1.1.0"
+                subprocess.run(["debugfs", "-w", "-R", "rm " + path, str(bad)],
+                               check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                if change == "content":
+                    replacement = self.work / "replacement"
+                    replacement.write_bytes(b"changed image library")
+                    subprocess.run(["debugfs", "-w", "-R", "write {} {}".format(replacement, path), str(bad)],
+                                   check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                result = self.check_ext4(bad)
+                self.assertNotEqual(result.returncode, 0, result.stdout.decode())
+                self.assertIn((path + ": ").encode(), result.stdout)
+                self.assertIn(b"sha256 expected=" if change == "content" else b"missing image path", result.stdout)
+
+    def test_ext4_inode_reader_rejects_missing_and_unsafe_paths(self):
+        image = self.make_privileged_image()
+        with self.assertRaisesRegex(ValueError, "ext4 inode read incomplete"):
+            SEED.ext4_file_modes(image, {"/missing-file": {"type": "file"}})
+        for path in ('/usr/lib/a"b', "/usr/lib/a\\b", "/usr/lib/a\nb"):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, "unsupported debugfs path"):
+                    SEED.ext4_file_modes(image, {path: {"type": "file"}})
 
     @unittest.skipUnless(os.environ.get("TDVP_TEST_OPKG"), "native opkg binary not provided")
     def test_native_opkg_rejects_overwrite_and_installs_new_application(self):

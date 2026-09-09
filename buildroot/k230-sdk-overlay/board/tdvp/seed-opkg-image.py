@@ -298,11 +298,73 @@ def seed(root, catalog=None, build_info=None, build_dir=None):
     print("TDVP opkg image seed: {} owned paths, {} verified runtime packages".format(len(records), len(packages) - 2))
 
 
-def verify(root, require_buildroot=False):
+def ext4_file_modes(image, records):
+    """Read inode permissions in one read-only debugfs batch.
+
+    rdump preserves payload bytes but drops setuid/setgid on extracted files.
+    Neither those host modes nor the expected manifest can supply the actual
+    image permissions. Query every observed path, including ordinary files so
+    an unexpected newly added privilege bit is also detected.
+    """
+    paths = sorted(records)
+    for path in paths:
+        if not path.startswith("/") or any(character in path for character in '\n\r"\\'):
+            raise ValueError("unsupported debugfs path: " + repr(path))
+    commands = "".join('stat "{}"\n'.format(path) for path in paths)
+    result = subprocess.run(["debugfs", "-f", "-", str(image)], input=commands.encode(),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            env=dict(os.environ, LC_ALL="C"))
+    output = result.stdout.decode("utf-8", errors="replace")
+    entries = re.findall(r"^Inode:\s+\d+\s+Type:\s+(.*?)\s+Mode:\s+([0-7]+)\s+Flags:", output, re.M)
+    # debugfs may return success after a failed individual command. Require
+    # one inode result per request before associating modes with the paths.
+    if result.returncode or len(entries) != len(paths):
+        raise ValueError("ext4 inode read incomplete: expected {} paths, got {}\n{}".format(
+            len(paths), len(entries), result.stderr.decode("utf-8", errors="replace")[-4000:]))
+    modes = {}
+    for path, (kind, mode) in zip(paths, entries):
+        expected_kind = {"file": "regular", "symlink": "symlink"}[records[path]["type"]]
+        if kind != expected_kind:
+            raise ValueError("ext4/readback type differs at {}: image={}, readback={}".format(path, kind, expected_kind))
+        value = int(mode, 8)
+        if value > 0o7777:
+            raise ValueError("invalid ext4 permission mode at " + path)
+        modes[path] = value
+    return modes
+
+
+def inventory_difference(expected, actual):
+    differences = []
+    for path in sorted(set(expected) | set(actual)):
+        if path not in expected:
+            differences.append(path + ": unexpected image path")
+        elif path not in actual:
+            differences.append(path + ": missing image path")
+        elif expected[path] != actual[path]:
+            fields = []
+            for field in sorted(set(expected[path]) | set(actual[path])):
+                before, after = expected[path].get(field), actual[path].get(field)
+                if before == after:
+                    continue
+                if field == "mode":
+                    before = "{:05o}".format(before) if isinstance(before, int) else repr(before)
+                    after = "{:05o}".format(after) if isinstance(after, int) else repr(after)
+                fields.append("{} expected={} actual={}".format(field, before, after))
+            differences.append(path + ": " + "; ".join(fields))
+    return "{} differing paths\n{}".format(len(differences), "\n".join(differences[:20]))
+
+
+def verify(root, require_buildroot=False, rootfs_image=None):
     manifest = json.loads((root / MANIFEST.lstrip("/")).read_text())
     records = inventory(root)
-    if manifest.get("schema") != 1 or manifest.get("files") != records:
-        raise ValueError("final rootfs content/mode differs from its image inventory")
+    if rootfs_image is not None:
+        for path, mode in ext4_file_modes(rootfs_image, records).items():
+            records[path]["mode"] = mode
+    if manifest.get("schema") != 1:
+        raise ValueError("unsupported image inventory schema")
+    if manifest.get("files") != records:
+        raise ValueError("final rootfs content/mode differs from its image inventory: " +
+                         inventory_difference(manifest.get("files", {}), records))
     if require_buildroot and manifest.get("ownership_mode") != "buildroot":
         raise ValueError("production image requires Buildroot preinstalled-package records")
     digest = hashlib.sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -347,11 +409,14 @@ def main():
     parser.add_argument("--build-dir", type=Path)
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--require-buildroot", action="store_true")
+    parser.add_argument("--rootfs-image", type=Path, help="read actual permission modes from this ext4 image")
     args = parser.parse_args()
     try:
         if args.verify:
-            verify(args.target_root, args.require_buildroot)
+            verify(args.target_root, args.require_buildroot, args.rootfs_image)
         else:
+            if args.rootfs_image:
+                parser.error("--rootfs-image requires --verify")
             seed(args.target_root, args.catalog, args.build_info, args.build_dir)
     except (KeyError, ValueError, OSError, subprocess.CalledProcessError, tarfile.TarError) as error:
         parser.exit(1, "TDVP opkg image seed failed: {}\n".format(error))

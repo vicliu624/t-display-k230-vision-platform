@@ -73,9 +73,17 @@ opkg 数据库。collector 导出 `tdvp-image-base.json`、`tdvp-opkg-status`、
 `tdvp-opkg-info.tar.gz` 和 `tdvp-buildroot-packages.json`，一并纳入 `SHA256SUMS`。
 发布镜像的门禁与线上旧 feed 的签名/元数据检查已分开，设备签名校验继续保留。
 
-Ubuntu 24.04 主机已通过 11 项回归，包括真实 opkg 的文件覆盖拒绝、预装依赖解析、
-生产 post-fakeroot hook、ext4 导出与篡改拒绝；已用旧 SDK 的完整 rootfs 副本验证
-12,245 个路径和 165 条包记录。该检查不代表本次新镜像已完成构建或实机验收。
+提交 `d2d8395` 的 [CI 构建](https://github.com/vicliu624/t-display-k230-vision-platform/actions/runs/34336774692)
+在最终 rootfs 校验中失败：`debugfs rdump` 导出文件时会清除 setuid/setgid，
+导致 ext4 内实际为 `04755` 的文件在临时目录中变成 `0755`。校验器现已改为
+批量只读查询 ext4 inode 的实际权限；导出副本仍用于核对文件内容和链接目标。
+权限差异会列出文件路径、预期值和实际值，检查继续拒绝权限丢失和意外新增特权位。
+
+Ubuntu 24.04 容器已分别以 root 和普通用户通过 15 项回归，包括真实 opkg 的文件覆盖拒绝、
+预装依赖解析、生产 post-fakeroot hook、特殊权限与内容篡改拒绝。
+旧 SDK 完整 rootfs 副本在加入 `unix_chkpwd=04755` 场景后，重新生成并通过 ext4 校验，
+覆盖 12,245 个路径和 165 条包记录。此前完整副本测试中的 helper 为 `0755`，未覆盖这个场景。
+这些检查不代表本次新镜像已完成构建或实机验收。
 配套可迁移 SDK/sysroot 的导出、已发布基线解析和软件源端到端验收仍待完成。
 
 ## 新镜像后的验收要求

@@ -86,12 +86,23 @@ symlinks and the opkg database. The collector exports `tdvp-image-base.json`,
 `SHA256SUMS`. Image publication is independent of the old live feed's
 signature/metadata gate. On-device signature verification remains enabled.
 
-Eleven tests passed on Ubuntu 24.04, including real opkg overwrite rejection,
-preinstalled dependency resolution, the production post-fakeroot hook, ext4
-export and tamper rejection. A copy of an older SDK's full rootfs passed checks
-for 12,245 paths and 165 package records. This does not establish a successful
-new-image build or hardware acceptance. Portable SDK/sysroot export, published
-baseline resolution and end-to-end feed acceptance remain pending.
+The [CI build for d2d8395](https://github.com/vicliu624/t-display-k230-vision-platform/actions/runs/34336774692)
+failed at final rootfs verification: `debugfs rdump` clears setuid/setgid during
+extraction, leaving a temporary file at `0755` when its actual ext4 inode is
+`04755`. The guard now reads actual inode permissions in one read-only batch;
+the extracted copy still supplies file bytes and link targets. Permission
+failures report paths, expected values and actual values. Missing permission
+bits and unexpectedly added privilege bits remain rejected.
+
+Fifteen tests passed as both root and an ordinary user in an Ubuntu 24.04
+container, including real opkg overwrite rejection, preinstalled dependency
+resolution, the production post-fakeroot hook, special permissions and payload
+tamper rejection. A copy of an older SDK's full rootfs was regenerated with
+`unix_chkpwd=04755` and passed ext4 checks for 12,245 paths and 165 package
+records. The earlier full-copy test had a `0755` helper and missed this case.
+These checks do not establish a successful new-image build or hardware
+acceptance. Portable SDK/sysroot export, published baseline resolution and
+end-to-end feed acceptance remain pending.
 
 ## Acceptance on the new image
 

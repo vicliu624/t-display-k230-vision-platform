@@ -10,10 +10,12 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 temporary="$(mktemp -d)"
 trap 'rm -rf -- "$temporary"' EXIT
 mkdir "$temporary/root"
-# debugfs opens the filesystem read-only. Its rdump preserves link targets
-# and modes, so this check sees the packaged files after fakeroot hooks.
+# Read payload bytes and link targets without mounting or changing the image.
+# rdump clears special permission bits; verification reads modes separately
+# from the ext4 inodes, never from this temporary host copy or the manifest.
 debugfs -R "rdump / $temporary/root" "$rootfs" > "$temporary/debugfs.log" 2>&1
-python3 "$script_dir/seed-opkg-image.py" --verify --require-buildroot --target-root "$temporary/root"
+python3 "$script_dir/seed-opkg-image.py" --verify --require-buildroot \
+    --target-root "$temporary/root" --rootfs-image "$rootfs"
 if [[ $# -eq 2 ]]; then
     mkdir -p "$2"
     cp "$temporary/root/usr/share/tdvp/opkg/image-base.json" "$2/tdvp-image-base.json"
