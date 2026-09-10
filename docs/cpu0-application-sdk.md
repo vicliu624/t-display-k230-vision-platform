@@ -43,6 +43,12 @@ unsupported ISA attributes, wrong ABI and embedded runtime search paths;
 sample dependencies are checked recursively against final-image library hashes.
 CI performs this before artifact upload or tagged Release publication.
 
+The release directory uses `0755` and its listed public artifacts use `0644`.
+The collector sets these modes on release copies; source images can retain
+their build-time `0600` mode. Before compilation, a cross-UID regression checks
+that UID 1000 can read UID 1001's output under umasks 022 and 077. SDK extraction
+preserves the recorded archive permissions.
+
 Pixman 0.44.2 is a reviewed exception for image-library ISA metadata: its
 `pixman-riscv.c` selects the optional vector implementation only when Linux
 reports HWCAP.V. The dependency check requires that exact package version,

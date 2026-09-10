@@ -16,7 +16,8 @@ temporary="$(mktemp -d)"
 trap 'rm -rf -- "$temporary"' EXIT
 # Input is the locally generated archive, checked against the collected release.
 (cd "$bundle" && sha256sum --strict -c SHA256SUMS)
-tar -xzf "$archive" --no-same-owner -C "$temporary"
+# Preserve the SDK's recorded modes when the producer has a restrictive umask.
+tar -xzf "$archive" --no-same-owner --same-permissions -C "$temporary"
 sdk="$temporary/tdvp-sdk"
 [[ -f "$sdk/tdvp-sdk-manifest.json" ]]
 cmp "$sdk/tdvp-sdk-manifest.json" "$bundle/tdvp-sdk-manifest.json"

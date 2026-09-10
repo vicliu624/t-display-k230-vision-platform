@@ -267,6 +267,7 @@ def export(worktree, bundle, release):
                     "image_library_sha256": libraries, "files": records,
                     "files_sha256": hashlib.sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
         (root / "tdvp-sdk-manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+        (root / "tdvp-sdk-manifest.json").chmod(0o644)
         # Verify before packing. A second, isolated relocation test runs in CI.
         run(["python3", root / "verify-sdk.py", root])
         packed = Path(temporary) / archive.name
@@ -282,9 +283,11 @@ def export(worktree, bundle, release):
         # Publish only a complete archive; link refuses to overwrite an output
         # which appeared during export. The temporary directory is on the same
         # filesystem as the release bundle.
+        packed.chmod(0o644)
         os.link(packed, archive)
         with manifest_path.open("x") as destination:
             destination.write((root / "tdvp-sdk-manifest.json").read_text())
+        manifest_path.chmod(0o644)
     print("TDVP CPU0 SDK: PASS {} final-image libraries; {}".format(len(libraries), archive))
 
 

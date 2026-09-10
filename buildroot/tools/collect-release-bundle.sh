@@ -6,6 +6,10 @@ if [ "$#" -ne 2 ]; then
 	exit 2
 fi
 
+# Release artifacts are consumed by a different UID in the SDK validator.
+# Keep generated files/directories readable even with a restrictive caller mask.
+umask 022
+
 WORKTREE="$(cd "$1" && pwd)"
 RELEASE_NAME="$2"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -87,10 +91,16 @@ must use a tagged Release baseline; do not promote a temporary CI artifact.
 EOF
 (
 	cd "${RELEASE_DIR}"
-	sha256sum "${RELEASE_NAME}.img.gz" \
-		tdvp-image-manifest tdvp-cpu1-rtsmart.bin tdvp-cpu1-rtsmart.manifest \
-		tdvp-sdk-baseline-manifest tdvp-image-base.json tdvp-opkg-status \
-		tdvp-opkg-info.tar.gz tdvp-buildroot-packages.json \
-		"${RELEASE_NAME}-cpu0-sdk.tar.gz" tdvp-sdk-manifest.json README.txt > SHA256SUMS
+	release_files=(
+		"${RELEASE_NAME}.img.gz"
+		tdvp-image-manifest tdvp-cpu1-rtsmart.bin tdvp-cpu1-rtsmart.manifest
+		tdvp-sdk-baseline-manifest tdvp-image-base.json tdvp-opkg-status
+		tdvp-opkg-info.tar.gz tdvp-buildroot-packages.json
+		"${RELEASE_NAME}-cpu0-sdk.tar.gz" tdvp-sdk-manifest.json README.txt
+	)
+	# post-image.sh writes gzip through mktemp (0600); cp retains that mode.
+	# Normalize only the explicit public copies, before the cross-UID handoff.
+	chmod 0644 -- "${release_files[@]}"
+	sha256sum "${release_files[@]}" > SHA256SUMS
 )
 printf 'TDVP product release bundle: %s\n' "${RELEASE_DIR}"

@@ -1,5 +1,13 @@
 # CPU0 SDK 本地验证记录（2026-09-09）
 
+2026-09-10 补充：[270bcad 的 CI](https://github.com/vicliu624/t-display-k230-vision-platform/actions/runs/34422682601)
+完成了镜像编译与 SDK 导出，在隔离验证读取发布目录的 `.img.gz` 时因权限不足失败。
+下述本地样本通过重定向生成 gzip，文件权限为 `0644`；生产 post-image 使用 `mktemp`
+生成 `0600` 文件，collector 的 `cp` 保留了该权限。此前验证遗漏了这个交付差异。
+新增 `sudo python3 buildroot/tools/test-tdvp-release-permissions.py` 使用生产 collector、
+UID 1001 生产者和 UID 1000 消费者，在 `umask 022/077` 下复现并覆盖该问题。
+该快速回归使用镜像/SDK 构建替身，专门检查文件交付；真实 SDK 继续执行完整隔离测试。
+
 ## 结论与样本范围
 
 CPU0 SDK 导出、文件配对和隔离消费测试通过。此次只修改导出器、校验器、测试、

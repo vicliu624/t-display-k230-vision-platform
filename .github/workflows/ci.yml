@@ -86,6 +86,7 @@ jobs:
           bash buildroot/tools/test-tdvp-image-source-contract.sh
           python3 buildroot/tools/test-tdvp-opkg-image-seed.py
           python3 buildroot/tools/test-tdvp-sdk.py
+          sudo python3 buildroot/tools/test-tdvp-release-permissions.py
           bash buildroot/tools/test-verify-sdcard-image-volumepulse-guard.sh
           bash buildroot/tools/test-tdvp-display-smoke-cleanup.sh
           bash buildroot/tools/test-tdvp-vblank-observer-maintenance-master.sh
