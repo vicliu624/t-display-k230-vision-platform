@@ -280,7 +280,9 @@ def seed(root, catalog=None, build_info=None, build_dir=None):
     for name, (fields, paths) in sorted(packages.items()):
         # All validations precede writes. A seed never extracts payloads or
         # runs postinst, and each installed version comes from verified bytes.
-        fields = dict(fields, Essential="yes", Status="hold ok installed")
+        # opkg serializes Status as want / flags / state. HOLD is a flag;
+        # putting it in the first column logs an error but can still exit 0.
+        fields = dict(fields, Essential="yes", Status="install hold installed")
         record = "".join("{}: {}\n".format(key, value) for key, value in fields.items())
         package_status.append(record)
         (info / (name + ".list")).write_text("".join(path + "\n" for path in aliased_paths(records, paths)))
@@ -390,7 +392,7 @@ def verify(root, require_buildroot=False, rootfs_image=None):
             raise ValueError("installed file list differs: " + name)
         # JSON sorts keys; compare fields without imposing another key order
         # on the generated opkg control records.
-        expected_fields = dict(fields, Essential="yes", Status="hold ok installed")
+        expected_fields = dict(fields, Essential="yes", Status="install hold installed")
         control = Path(str(info) + ".control").read_text()
         parsed = dict(line.split(": ", 1) for line in control.splitlines())
         if parsed != expected_fields or len(control.splitlines()) != len(expected_fields):

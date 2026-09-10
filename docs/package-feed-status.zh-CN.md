@@ -1,10 +1,14 @@
 # 软件源状态与后续验收
 
-## 当前结论（2026-09-09）
+## 当前结论（2026-09-10）
 
 软件源的端到端验收失败。暂缓在交付卡上安装或升级软件包，包括 NetSurf。
-下一步先完成镜像侧包管理修复、CI 和发布准备，再提供新镜像进行整卡验证。
+最新候选镜像已经烧录并检查，发现预装包 `Status` 的 `hold` 列写错。
+代码已修正，Ubuntu 24.04 原生 opkg 测试及板上临时目录回归通过；设备真实包数据库保持原样。
+本次修复尚未生成新镜像，后续仍需 CI、最终产物检查和发布准备。
 软件源随后使用已发布镜像的基础库和包数据库。线上软件源配置与发布内容保持不变。
+
+详细范围与结果见 [opkg hold 修复验证记录](opkg-hold-validation-20260910.zh-CN.md)。
 
 ## 镜像实际配置
 
@@ -62,7 +66,8 @@ Packages.gz.asc 和 release.json，验证两份索引签名、频道元数据、
 在账户、权限和服务链接最终确定后生成 opkg 数据库。预装组件使用
 `tdvp-image-<Buildroot 包名>`，版本包含源码版本和最终文件摘要。
 同一路径有多个 Buildroot 申领者时，由 `tdvp-image-base` 统一持有，并在清单中记录歧义。
-镜像包登记为 `Essential: yes`、`hold ok installed`，同时登记 merged-/usr 的别名路径。
+镜像包登记为 `Essential: yes`、`Status: install hold installed`，同时登记 merged-/usr 的别名路径。
+`Status` 的三列依次为安装意图、标志、安装状态；`hold` 位于第二列。
 
 软件源后续必须按已发布清单生成依赖，不能沿用 r6 的运行库版本标签。
 这一步支持应用引用预装组件；基础系统升级仍通过镜像交付。
@@ -79,13 +84,26 @@ opkg 数据库。collector 导出 `tdvp-image-base.json`、`tdvp-opkg-status`、
 批量只读查询 ext4 inode 的实际权限；导出副本仍用于核对文件内容和链接目标。
 权限差异会列出文件路径、预期值和实际值，检查继续拒绝权限丢失和意外新增特权位。
 
-Ubuntu 24.04 容器已分别以 root 和普通用户通过 15 项回归，包括真实 opkg 的文件覆盖拒绝、
+当时 Ubuntu 24.04 容器分别以 root 和普通用户通过了 15 项回归，包括真实 opkg 的文件覆盖拒绝、
 预装依赖解析、生产 post-fakeroot hook、特殊权限与内容篡改拒绝。
 旧 SDK 完整 rootfs 副本在加入 `unix_chkpwd=04755` 场景后，重新生成并通过 ext4 校验，
 覆盖 12,245 个路径和 165 条包记录。此前完整副本测试中的 helper 为 `0755`，未覆盖这个场景。
 提交 `6cd7b34` 的 [CI 构建已通过](https://github.com/vicliu624/t-display-k230-vision-platform/actions/runs/34351987911)，
 解决了上述 inode 权限校验问题。该次产物仍是候选镜像，未新增带 tag 的 Release，
-也未完成新卡实机验收。
+当时也未完成新卡实机验收。
+
+2026-09-10 对后续候选镜像 `0e68645191925abe5acd38cd21c0c2c4789d922c` 的新卡检查，
+发现生成器与校验器都接受了错误的 `Status: hold ok installed`。opkg 0.7.0 读取后报告
+`Internal error`，状态变为 `unknown ok installed`，但部分命令仍返回 0。
+此前测试检查了文件冲突和返回码，遗漏了这个解析结果。
+
+本次同步修正生成器和校验器，增加独立字段检查、真实解析结果、hold 升级保护、
+Essential 删除保护及解除 hold 后可升级的正向对照。原生测试入口从源码重新编译 opkg，
+在 Ubuntu 24.04 中以 root、UID 1000 各通过 20 项测试，无跳过。
+CI 已将该入口移到完整镜像构建之前，原有 ext4 最终产物校验继续保留。
+板上 opkg 使用临时目录中的 159 条包记录副本通过安装、删除和文件冲突回归；
+真实 `/var/lib/opkg/status` 和 `libmount` 未修改。该结果只覆盖隔离测试，
+新镜像整卡验收、配套软件源安装和重启验收仍待完成。
 
 本轮已增加[配套 CPU0 SDK/sysroot 导出和隔离验证](cpu0-application-sdk.zh-CN.md)。
 在 Ubuntu 24.04 中使用现有 SDK 与临时 rootfs 副本验证导出、迁移及应用编译；

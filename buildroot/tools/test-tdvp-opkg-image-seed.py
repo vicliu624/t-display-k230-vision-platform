@@ -38,11 +38,11 @@ def make_root(root):
 
 
 def make_ipk(directory, package="libmount-1", payload=b"image-library", prefix="usr/lib",
-             symlink="libmount.so.1.1.0", depends=None, mode=0o644):
+             symlink="libmount.so.1.1.0", depends=None, mode=0o644, version="1-1"):
     directory.mkdir(parents=True, exist_ok=True)
     if depends is None:
         depends = "tdvp-platform-abi (= " + SEED.ABI_VERSION + ")"
-    control = ("Package: " + package + "\nVersion: 1-1\nArchitecture: riscv64\n"
+    control = ("Package: " + package + "\nVersion: " + version + "\nArchitecture: riscv64\n"
                "Depends: " + depends + "\nDescription: Test runtime\n").encode()
     with tempfile.TemporaryDirectory() as temporary:
         staging = Path(temporary)
@@ -58,7 +58,7 @@ def make_ipk(directory, package="libmount-1", payload=b"image-library", prefix="
             member = tarfile.TarInfo("./" + prefix + "/libmount.so.1")
             member.type, member.linkname = tarfile.SYMTYPE, symlink
             archive.addfile(member)
-        ipk = directory / (package + "_1-1_riscv64.ipk")
+        ipk = directory / (package + "_" + version + "_riscv64.ipk")
         subprocess.run(["ar", "rD", str(ipk), "debian-binary", "control.tar.gz", "data.tar.gz"],
                        cwd=str(staging), check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return ipk
@@ -82,6 +82,20 @@ def make_build_info(work):
     return info, build
 
 
+def add_local_feed(root, ipk):
+    """Expose a real newer candidate to the resolver without network access."""
+    control = subprocess.check_output(["ar", "p", str(ipk), "control.tar.gz"])
+    with tarfile.open(fileobj=io.BytesIO(control), mode="r:gz") as archive:
+        text = archive.extractfile("./control").read().decode()
+    data = ipk.read_bytes()
+    text += ("Filename: " + ipk.name + "\nSize: " + str(len(data)) +
+             "\nMD5Sum: " + hashlib.md5(data).hexdigest() +
+             "\nSHA256sum: " + hashlib.sha256(data).hexdigest() + "\n\n")
+    (root / "var/lib/opkg/lists/tdvp_test").write_text(text)
+    config = root / "etc/opkg/opkg.conf"
+    config.write_text(config.read_text() + "src tdvp_test " + ipk.parent.as_uri() + "\n")
+
+
 class ImageSeed(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="tdvp-image-seed-test-")
@@ -100,6 +114,63 @@ class ImageSeed(unittest.TestCase):
         before = (self.root / SEED.MANIFEST.lstrip("/")).read_bytes()
         SEED.seed(self.root)
         self.assertEqual(before, (self.root / SEED.MANIFEST.lstrip("/")).read_bytes())
+
+    def test_status_uses_opkg_want_flag_status_order(self):
+        info, build = make_build_info(self.work)
+        SEED.seed(self.root, build_info=info, build_dir=build)
+        records = (self.root / "var/lib/opkg/status").read_text().strip().split("\n\n")
+        self.assertEqual(len(records), 3)
+        for record in records:
+            fields = dict(line.split(": ", 1) for line in record.splitlines())
+            self.assertEqual(fields["Status"], "install hold installed")
+            self.assertEqual(fields["Essential"], "yes")
+            control = self.root / ("var/lib/opkg/info/" + fields["Package"] + ".control")
+            self.assertEqual(control.read_text().strip(), record)
+
+    def test_native_gate_precedes_full_image_build(self):
+        workflow = (PROJECT / ".github/workflows/ci.yml").read_text()
+        extract = 'bash buildroot/tools/build-k230-sdk-rm69a10.sh "$TDVP_WORKTREE" opkg-extract'
+        native = 'bash buildroot/tools/test-tdvp-opkg-image-native.sh'
+        image = '- name: Build the bootable SD image'
+        self.assertEqual(workflow.count(native), 1)
+        self.assertLess(workflow.index(extract), workflow.index(native))
+        self.assertLess(workflow.index(native), workflow.index(image))
+
+    def test_verify_rejects_legacy_status_in_both_database_copies(self):
+        SEED.seed(self.root)
+        for path in [self.root / "var/lib/opkg/status"] + list((self.root / "var/lib/opkg/info").glob("*.control")):
+            path.write_text(path.read_text().replace("Status: install hold installed", "Status: hold ok installed"))
+        with self.assertRaisesRegex(ValueError, "installed package control differs"):
+            SEED.verify(self.root)
+
+    def run_opkg(self, *arguments):
+        result = subprocess.run([os.environ["TDVP_TEST_OPKG"], "-f", str(self.root / "etc/opkg/opkg.conf"),
+                                 "-o", str(self.root)] + list(arguments),
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.assertNotIn(b"Internal error", result.stdout, result.stdout.decode())
+        self.assertNotIn(b"Status: unknown", result.stdout, result.stdout.decode())
+        return result
+
+    def assert_held_packages(self, expected):
+        result = self.run_opkg("status")
+        self.assertEqual(result.returncode, 0, result.stdout.decode())
+        records = {}
+        for record in result.stdout.decode().strip().split("\n\n"):
+            fields = dict(line.split(": ", 1) for line in record.splitlines())
+            records[fields["Package"]] = fields
+        for name, version in expected.items():
+            self.assertEqual(records[name]["Version"], version)
+            self.assertEqual(records[name]["Status"], "install hold installed")
+            self.assertEqual(records[name]["Essential"], "yes")
+        return records
+
+    @unittest.skipUnless(os.environ.get("TDVP_TEST_OPKG"), "native opkg binary not provided")
+    def test_native_opkg_reads_every_seeded_hold_flag_without_parser_errors(self):
+        info, build = make_build_info(self.work)
+        SEED.seed(self.root, build_info=info, build_dir=build)
+        manifest = json.loads((self.root / SEED.MANIFEST.lstrip("/")).read_text())
+        expected = {name: fields["Version"] for name, fields in manifest["installed_packages"].items()}
+        self.assertEqual(set(self.assert_held_packages(expected)), set(expected))
 
     def test_exact_catalog_gets_real_package_records(self):
         catalog = self.work / "catalog"
@@ -181,14 +252,21 @@ class ImageSeed(unittest.TestCase):
         version = manifest["installed_packages"][package]["Version"]
         app = make_ipk(self.work / "app", package="tdvp-fixture", prefix="usr/share/tdvp-fixture",
                        depends=package + " (= " + version + ")")
-        command = [os.environ["TDVP_TEST_OPKG"], "-f", str(self.root / "etc/opkg/opkg.conf"), "-o", str(self.root)]
-        result = subprocess.run(command + ["install", str(app)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        expected = {name: fields["Version"] for name, fields in manifest["installed_packages"].items()}
+        self.assert_held_packages(expected)
+        result = self.run_opkg("install", str(app))
         self.assertEqual(result.returncode, 0, result.stdout.decode())
+        self.assert_held_packages(expected)
         old_runtime = make_ipk(self.work / "old", payload=b"incompatible")
-        result = subprocess.run(command + ["install", str(old_runtime)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        result = self.run_opkg("install", str(old_runtime))
         self.assertNotEqual(result.returncode, 0, result.stdout.decode())
         self.assertIn(package.encode(), result.stdout)
         self.assertEqual((self.root / "usr/lib/libmount.so.1.1.0").read_bytes(), b"image-library")
+        self.assert_held_packages(expected)
+        result = self.run_opkg("remove", "tdvp-fixture")
+        self.assertEqual(result.returncode, 0, result.stdout.decode())
+        self.assertFalse((self.root / "usr/share/tdvp-fixture/libmount.so.1.1.0").exists())
+        self.assert_held_packages(expected)
 
     def test_final_inventory_rejects_content_mode_and_database_drift(self):
         info, build = make_build_info(self.work)
@@ -329,8 +407,10 @@ class ImageSeed(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get("TDVP_TEST_OPKG"), "native opkg binary not provided")
     def test_native_opkg_rejects_overwrite_and_installs_new_application(self):
-        opkg = os.environ["TDVP_TEST_OPKG"]
         SEED.seed(self.root)
+        manifest = json.loads((self.root / SEED.MANIFEST.lstrip("/")).read_text())
+        expected = {name: fields["Version"] for name, fields in manifest["installed_packages"].items()}
+        self.assert_held_packages(expected)
         library = self.root / "usr/lib/libmount.so.1.1.0"
         before = library.read_bytes()
         for prefix in ("usr/lib", "lib"):
@@ -339,20 +419,51 @@ class ImageSeed(unittest.TestCase):
             # instead of merely rejecting a reinstall of the first package.
             package = "libmount-" + prefix.replace("/", "-")
             ipk = make_ipk(self.work / package, package=package, payload=b"incompatible", prefix=prefix)
-            result = subprocess.run([opkg, "-f", str(self.root / "etc/opkg/opkg.conf"),
-                                     "-o", str(self.root), "install", str(ipk)],
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            result = self.run_opkg("install", str(ipk))
             self.assertNotEqual(result.returncode, 0, result.stdout.decode())
             self.assertIn(b"tdvp-image-base", result.stdout)
             self.assertEqual(before, library.read_bytes())
+            self.assert_held_packages(expected)
         # A package adding a new path still works with the same held base seed.
         ipk = make_ipk(self.work / "new", package="tdvp-fixture", prefix="usr/share/tdvp-fixture")
-        result = subprocess.run([opkg, "-f", str(self.root / "etc/opkg/opkg.conf"),
-                                 "-o", str(self.root), "install", str(ipk)],
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        result = self.run_opkg("install", str(ipk))
         self.assertEqual(result.returncode, 0, result.stdout.decode())
         self.assertEqual(before, library.read_bytes())
         self.assertTrue((self.root / "usr/share/tdvp-fixture/libmount.so.1.1.0").is_file())
+        self.assert_held_packages(expected)
+
+    @unittest.skipUnless(os.environ.get("TDVP_TEST_OPKG"), "native opkg binary not provided")
+    def test_native_opkg_holds_upgrade_install_and_essential_removal(self):
+        info, build = make_build_info(self.work)
+        SEED.seed(self.root, build_info=info, build_dir=build)
+        manifest = json.loads((self.root / SEED.MANIFEST.lstrip("/")).read_text())
+        expected = {name: fields["Version"] for name, fields in manifest["installed_packages"].items()}
+        package = "tdvp-image-util-linux-libs"
+        library = self.root / "usr/lib/libmount.so.1.1.0"
+        before = library.read_bytes()
+        newer = make_ipk(self.work / "newer", package=package, version="999-1", payload=b"incompatible")
+        same = make_ipk(self.work / "same", package=package, version=expected[package], payload=b"incompatible")
+        add_local_feed(self.root, newer)
+        cases = ((("upgrade", package), 0, b"marked hold"),
+                 (("upgrade",), 0, b"marked hold"),
+                 (("install", str(newer)), 0, b"due to held package"),
+                 (("install", str(same)), 255, b"matches the installed version"),
+                 (("remove", package), 255, b"Refusing to remove essential package"))
+        for arguments, code, message in cases:
+            with self.subTest(arguments=arguments):
+                result = self.run_opkg(*arguments)
+                self.assertEqual(result.returncode, code, result.stdout.decode())
+                self.assertIn(message, result.stdout)
+                self.assertEqual(before, library.read_bytes(), result.stdout.decode())
+                self.assert_held_packages(expected)
+        # Positive control: the very same candidate must really be resolvable
+        # and installable once HOLD is removed in this disposable fixture.
+        result = self.run_opkg("flag", "ok", package)
+        self.assertEqual(result.returncode, 0, result.stdout.decode())
+        result = self.run_opkg("upgrade", package)
+        self.assertEqual(result.returncode, 0, result.stdout.decode())
+        self.assertIn(b"999-1", result.stdout)
+        self.assertEqual(library.read_bytes(), b"incompatible")
 
 
 if __name__ == "__main__":
