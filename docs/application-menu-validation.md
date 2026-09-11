@@ -76,6 +76,22 @@ An additional Ubuntu 18.04 run hit an ext4 drift-test diagnostic mismatch with
 debugfs 1.44.1; the unchanged test passed on Ubuntu 24.04. Ubuntu 24.04 remains
 the release validation environment.
 
+### Follow-up: full fast-CI replay
+
+Action `34548763265` passed the menu tests, then failed in
+`test-tdvp-image-source-contract.sh`: its literal INSTALL-path parser treated
+`$(category)` in the new Make foreach as a filename. The package recipe now
+lists the six directory installations explicitly. No source-check assertion
+was removed or relaxed, and installed paths and menu contents are unchanged.
+
+The original failure was reproduced in Ubuntu 24.04 before the fix. Afterward,
+all 39 commands in the workflow's “Validate patch queue and CPU boot contracts”
+step were replayed directly from `ci.yml` and passed in an isolated Ubuntu
+24.04 container with networking disabled. The source contract checked 92
+assertions across 31 installed files and rejected all nine negative controls.
+The replay used Linux LF export semantics and the pinned vendor submodule;
+the four optional native-opkg cases remain in their separate native gate.
+
 The running card separately retains legacy `Status: hold ok installed` package
 metadata. Commit `35a521a` already fixes image generation to emit
 `Status: install hold installed` and gates it with opkg tests. This menu change

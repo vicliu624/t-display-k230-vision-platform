@@ -100,10 +100,19 @@ define TDVP_LABWC_DESKTOP_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/share/desktop-directories/tdvp-preferences.directory
 	$(INSTALL) -D -m 0644 $(@D)/menus/tdvp-system.directory \
 		$(TARGET_DIR)/usr/share/desktop-directories/tdvp-system.directory
-	# Ship every category referenced by the generic XDG application menu.
-	$(foreach category,graphics office development education science other,\
-		$(INSTALL) -D -m 0644 $(@D)/menus/tdvp-$(category).directory \
-			$(TARGET_DIR)/usr/share/desktop-directories/tdvp-$(category).directory;)
+	# Keep literal paths for the pre-build image source contract checker.
+	$(INSTALL) -D -m 0644 $(@D)/menus/tdvp-graphics.directory \
+		$(TARGET_DIR)/usr/share/desktop-directories/tdvp-graphics.directory
+	$(INSTALL) -D -m 0644 $(@D)/menus/tdvp-office.directory \
+		$(TARGET_DIR)/usr/share/desktop-directories/tdvp-office.directory
+	$(INSTALL) -D -m 0644 $(@D)/menus/tdvp-development.directory \
+		$(TARGET_DIR)/usr/share/desktop-directories/tdvp-development.directory
+	$(INSTALL) -D -m 0644 $(@D)/menus/tdvp-education.directory \
+		$(TARGET_DIR)/usr/share/desktop-directories/tdvp-education.directory
+	$(INSTALL) -D -m 0644 $(@D)/menus/tdvp-science.directory \
+		$(TARGET_DIR)/usr/share/desktop-directories/tdvp-science.directory
+	$(INSTALL) -D -m 0644 $(@D)/menus/tdvp-other.directory \
+		$(TARGET_DIR)/usr/share/desktop-directories/tdvp-other.directory
 	$(INSTALL) -D -m 0644 $(@D)/LICENSE \
 		$(TARGET_DIR)/usr/share/doc/tdvp-labwc-desktop/LICENSE
 endef
