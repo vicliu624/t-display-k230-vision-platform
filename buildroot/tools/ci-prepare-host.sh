@@ -19,7 +19,7 @@ sudo apt-get update
 sudo apt-get install -y \
     bc binutils bison build-essential bzip2 cpio curl diffutils e2fsprogs file flex gawk git \
 	libncurses-dev libssl-dev make parted patch perl python3-pcpp python3-pycryptodome rsync scons u-boot-tools \
-    unzip wget xz-utils libarchive-dev pkg-config
+    unzip wget xz-utils libarchive-dev pkg-config libmenu-cache-bin
 
 command -v mkimage >/dev/null
 /usr/bin/python3 -c 'from Cryptodome.Cipher import AES; from Cryptodome.PublicKey import RSA'

@@ -21,11 +21,47 @@
     <Name>Accessories</Name>
     <Directory>tdvp-accessories.directory</Directory>
     <Include>
+      <Category>Utility</Category>
       <Filename>tdvp-pcmanfm.desktop</Filename>
       <Filename>vpl-logs.desktop</Filename>
       <Filename>vpl-osk.desktop</Filename>
       <Filename>foot.desktop</Filename>
     </Include>
+  </Menu>
+  <Menu>
+    <Name>Internet</Name>
+    <Directory>tdvp-internet.directory</Directory>
+    <Include><Category>Network</Category></Include>
+  </Menu>
+  <Menu>
+    <Name>Sound &amp; Video</Name>
+    <Directory>tdvp-sound-video.directory</Directory>
+    <Include><Category>AudioVideo</Category><Category>Audio</Category><Category>Video</Category></Include>
+  </Menu>
+  <Menu>
+    <Name>Graphics</Name>
+    <Directory>tdvp-graphics.directory</Directory>
+    <Include><Category>Graphics</Category></Include>
+  </Menu>
+  <Menu>
+    <Name>Office</Name>
+    <Directory>tdvp-office.directory</Directory>
+    <Include><Category>Office</Category></Include>
+  </Menu>
+  <Menu>
+    <Name>Development</Name>
+    <Directory>tdvp-development.directory</Directory>
+    <Include><Category>Development</Category></Include>
+  </Menu>
+  <Menu>
+    <Name>Education</Name>
+    <Directory>tdvp-education.directory</Directory>
+    <Include><Category>Education</Category></Include>
+  </Menu>
+  <Menu>
+    <Name>Science</Name>
+    <Directory>tdvp-science.directory</Directory>
+    <Include><Category>Science</Category></Include>
   </Menu>
   <Menu>
     <Name>Games</Name>
@@ -43,6 +79,7 @@
     <Name>Preferences</Name>
     <Directory>tdvp-preferences.directory</Directory>
     <Include>
+      <Category>Settings</Category>
       <Filename>vpl-display.desktop</Filename>
     </Include>
   </Menu>
@@ -50,14 +87,40 @@
     <Name>System</Name>
     <Directory>tdvp-system.directory</Directory>
     <Include>
+      <Category>System</Category>
       <Filename>vpl-power.desktop</Filename>
       <Filename>vpl-package-manager.desktop</Filename>
     </Include>
+    <!-- Keep the existing accessories in their familiar location. -->
+    <Exclude>
+      <Category>Utility</Category>
+      <Category>Settings</Category>
+      <Filename>foot.desktop</Filename>
+      <Filename>tdvp-pcmanfm.desktop</Filename>
+      <Filename>vpl-logs.desktop</Filename>
+      <Filename>vpl-osk.desktop</Filename>
+    </Exclude>
+  </Menu>
+  <Menu>
+    <Name>Other</Name>
+    <Directory>tdvp-other.directory</Directory>
+    <!-- Accept future applications without per-package firmware changes.
+         menu-cache still applies Hidden, NoDisplay and TryExec visibility. -->
+    <OnlyUnallocated/>
+    <Include><All/></Include>
   </Menu>
   <Layout>
     <Menuname>Accessories</Menuname>
+    <Menuname>Internet</Menuname>
+    <Menuname>Sound &amp; Video</Menuname>
+    <Menuname>Graphics</Menuname>
+    <Menuname>Office</Menuname>
+    <Menuname>Development</Menuname>
+    <Menuname>Education</Menuname>
+    <Menuname>Science</Menuname>
     <Menuname>Games</Menuname>
     <Menuname>Preferences</Menuname>
     <Menuname>System</Menuname>
+    <Menuname>Other</Menuname>
   </Layout>
 </Menu>

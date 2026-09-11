@@ -79,6 +79,8 @@ jobs:
           bash buildroot/tools/test-tdvp-camera-legacy-abi.sh
           bash buildroot/tools/test-tdvp-camera-i2c.sh
           bash buildroot/tools/test-tdvp-camera-package.sh
+          python3 buildroot/tools/test-tdvp-application-menu.py
+          sh buildroot/tools/test-tdvp-application-menu.sh
           bash buildroot/tools/test-tdvp-profile-config.sh
           bash buildroot/tools/test-tdvp-cpu0-dts-queue.sh
           bash buildroot/tools/test-tdvp-session-idle-contract.sh

@@ -12,6 +12,8 @@
 *.xml text eol=lf
 *.css text eol=lf
 *.desktop text eol=lf
+*.menu text eol=lf
+*.directory text eol=lf
 Config.in text eol=lf
 Makefile text eol=lf
 

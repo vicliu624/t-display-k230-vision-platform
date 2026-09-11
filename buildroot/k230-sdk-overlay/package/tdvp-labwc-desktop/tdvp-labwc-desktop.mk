@@ -100,6 +100,10 @@ define TDVP_LABWC_DESKTOP_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/share/desktop-directories/tdvp-preferences.directory
 	$(INSTALL) -D -m 0644 $(@D)/menus/tdvp-system.directory \
 		$(TARGET_DIR)/usr/share/desktop-directories/tdvp-system.directory
+	# Ship every category referenced by the generic XDG application menu.
+	$(foreach category,graphics office development education science other,\
+		$(INSTALL) -D -m 0644 $(@D)/menus/tdvp-$(category).directory \
+			$(TARGET_DIR)/usr/share/desktop-directories/tdvp-$(category).directory;)
 	$(INSTALL) -D -m 0644 $(@D)/LICENSE \
 		$(TARGET_DIR)/usr/share/doc/tdvp-labwc-desktop/LICENSE
 endef
