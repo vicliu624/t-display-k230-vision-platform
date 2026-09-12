@@ -4,9 +4,14 @@ This directory contains source owned by the image build:
 
 | Source | Responsibility |
 | --- | --- |
-| `tdvp-labwc-desktop` | Systemd service and XDG configuration for the Labwc desktop session. It starts PCManFM desktop mode, the TDVP-themed wf-panel-pi top panel, and the user-session `swayidle` policy after Labwc has acquired the DRM backend; `swayidle` invokes PAM-backed `swaylock` before `wlopm` blanks Wayland outputs. Mouse-emulated touch retains left-click taps/drags and converts a stationary long press into a right click. |
-| `tdvp-kpu-acceptance` | KPU runtime inspection and acceptance utility. |
-| `vicliu-pocket-linux-hardware` | Board integration service and hardware-state publishing tools. |
+| `tdvp-greeter` | greetd login configuration and VGLite greeter for selected-account authentication. |
+| `tdvp-labwc-desktop` | Authenticated VGLite/Labwc session, XDG configuration, PCManFM, wf-panel-pi and input. Session-scoped swayidle invokes PAM-backed gtklock, then wlopm blanks outputs. |
+| `vicliu-pocket-linux-hardware` | Board service, hardware status/control, CPU1 clients and the nRF52840 AT host utility. |
+
+Legacy `tdvp-camera-isp` and `tdvp-kpu-acceptance` sources remain for reference;
+the product profile excludes their direct Linux camera/KPU paths. CPU1 owns
+camera and AI resources. See [architecture](../docs/architecture.md) and
+[AI jobs](../docs/cpu1-ai-jobs.zh-CN.md).
 
 Applications use normal Wayland and XDG conventions. The desktop recognizes
 their standard `.desktop` entries; application code does not need to link to

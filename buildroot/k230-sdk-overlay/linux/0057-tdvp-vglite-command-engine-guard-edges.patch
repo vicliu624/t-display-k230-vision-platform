@@ -1,0 +1,56 @@
+From 7d4e1f444f461dbe3833bd99a4640e7b6c2cd529 Mon Sep 17 00:00:00 2001
+From: TDVP Display Team <display@tdvp.local>
+Date: Fri, 4 Sep 2026 16:05:00 +0800
+Subject: [PATCH] gpu: vglite: close command-engine lease edge cases
+
+0056 serializes a command from VG_LITE_SUBMIT through VG_LITE_WAIT, but two
+ioctl edge cases can still undermine that contract:
+
+* a second SUBMIT through the same file can skip semaphore acquisition because
+  that file already owns a lease, and overwrite the in-flight command; and
+* a completed error interrupt, such as a Flexa error state, is not a timeout
+  but previously kept the lease forever.
+
+Reject a reentrant submit. Retain the lease only for a true WAIT timeout; any
+other WAIT result has observed completion and must release it. This does not
+turn the vendor's infinite WAIT into a new timeout policy; that needs separate
+hardware recovery evidence.
+---
+ drivers/gpu/vglite/vg_lite_hal.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/vglite/vg_lite_hal.c b/drivers/gpu/vglite/vg_lite_hal.c
+index c226967c989af..1ddc25b2cf0d 100644
+--- a/drivers/gpu/vglite/vg_lite_hal.c
++++ b/drivers/gpu/vglite/vg_lite_hal.c
+@@ -660,7 +660,12 @@ long drv_ioctl(/*struct inode *inode, */ struct file *file,
+ 
+ 	mutex_lock(&client->ioctl_lock);
+-	if (arguments.command == VG_LITE_SUBMIT && !client->submission_active) {
++	if (arguments.command == VG_LITE_SUBMIT) {
++		if (client->submission_active) {
++			/* One file cannot replace its own unfinished command. */
++			arguments.error = VG_LITE_INVALID_ARGUMENT;
++			goto out_unlock_client;
++		}
+ 		if (down_interruptible(&vg_lite_submit_lock) != 0) {
+ 			arguments.error = VG_LITE_TIMEOUT;
+ 			goto out_unlock_client;
+ 		}
+@@ -686,10 +691,11 @@ long drv_ioctl(/*struct inode *inode, */ struct file *file,
+ 	/*
+ 	 * A timeout means the submitted command may still own the hardware. Keep
+-	 * its lease so the same file can retry WAIT or terminate it; releasing
+-	 * here would again let a different file replace the command registers.
++	 * its lease so the same file can retry WAIT or terminate it. A non-timeout
++	 * WAIT error is an observed completion event and must release the lease;
++	 * otherwise a Flexa completion error permanently wedges all clients.
+ 	 */
+-	if ((arguments.command == VG_LITE_WAIT && error == VG_LITE_SUCCESS) ||
++	if ((arguments.command == VG_LITE_WAIT && error != VG_LITE_TIMEOUT) ||
+ 			(arguments.command == VG_LITE_TERMINATE && client->submission_active) ||
+ 			(arguments.command == VG_LITE_SUBMIT &&
+ 			 submission_lease_acquired && error != VG_LITE_SUCCESS))
+ 		vg_lite_release_submission_lease(client);
+-- 
+2.43.0

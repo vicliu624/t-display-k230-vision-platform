@@ -1,0 +1,15 @@
+[Unit]
+Description=TDVP K230 managed direct-KMS page-flip maintenance acceptance
+# K230's card0 is not a systemd-generated device unit, so its actual
+# existence is checked by ConditionPathExists instead of a false dependency.
+After=seatd.service
+Wants=seatd.service
+ConditionPathExists=/dev/dri/card0
+
+[Service]
+Type=oneshot
+TimeoutStartSec=60
+TimeoutStopSec=15
+Environment=TDVP_KMS_MAINTENANCE_SERVICE=1
+ExecStart=/usr/libexec/tdvp/tdvp-kms-maintenance
+ExecStopPost=/usr/libexec/tdvp/tdvp-kms-maintenance-recover

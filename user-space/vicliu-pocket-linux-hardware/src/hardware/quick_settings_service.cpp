@@ -1,6 +1,7 @@
 #include "quick_settings_service.hpp"
 
 #include "bluetooth.hpp"
+#include "lora_status.hpp"
 #include "nrf9151.hpp"
 #include "paths.hpp"
 
@@ -105,6 +106,13 @@ bool QuickSettingsService::initialise()
         return false;
     desktop_uid_ = desktop->pw_uid;
     desktop_gid_ = desktop_group->gr_gid;
+
+    // The generic pwm-backlight provider drives IO52 at 20 kHz, where this
+    // keyboard's LED rail cannot show meaningful intermediate levels.  Take
+    // exclusive ownership here before the desktop client can issue a preset.
+    // A missing keyboard is non-fatal: the rest of the hardware API remains
+    // available on bare-board variants.
+    (void)initialise_keyboard_backlight();
 
     if (mkdir(kRuntimeDirectory, 0755) != 0 && errno != EEXIST)
         return false;
@@ -235,13 +243,8 @@ void QuickSettingsService::refresh(State *state)
     update_gnss_startup();
     (*state)["dock_nrf9151_sku_state"] = lte_sku_state_;
 
-    const bool lora_available = is_keyboard_attached(*state) && lora_control_available();
-    const bool lora_enabled = lora_available && lora_is_enabled();
-    (*state)["lora_available"] = lora_available ? "1" : "0";
-    (*state)["lora_control_available"] = lora_available ? "1" : "0";
-    (*state)["lora_enabled"] = lora_enabled ? "1" : "0";
-    (*state)["lora_requested"] = lora_enabled ? "1" : "0";
-    (*state)["radio_profile"] = paths::read(kRadioProfilePath);
+    append_lora_state(state);
+    const bool lora_enabled = (*state)["lora_enabled"] == "1";
 
     const bool gps_available = lte_present();
     (*state)["gps_available"] = gps_available ? "1" : "0";

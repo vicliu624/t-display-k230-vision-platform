@@ -1,0 +1,8 @@
+config BR2_PACKAGE_GTK_SESSION_LOCK
+	bool "gtk-session-lock"
+	depends on BR2_PACKAGE_LIBGTK3_WAYLAND
+	select BR2_PACKAGE_WAYLAND
+	select BR2_PACKAGE_WAYLAND_PROTOCOLS
+	help
+	  GTK3 integration for the Wayland ext-session-lock protocol.
+	  https://github.com/Cu3PO42/gtk-session-lock

@@ -1,0 +1,42 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] riscv: dts: k230: describe scalar CPU0 for the AMP image
+
+The Linux SDK boots physical CPU1 while exposing it as hart 0. TDVP keeps
+U-Boot and Linux on physical CPU0 and reserves CPU1 for RT-Smart. Keep the
+local hart/interrupt-controller numbering but remove the vector extension
+and describe CPU0's 128 KiB L2 cache. Do not advertise RVV to Linux userspace.
+
+diff --git a/arch/riscv/boot/dts/canaan/k230.dtsi b/arch/riscv/boot/dts/canaan/k230.dtsi
+--- a/arch/riscv/boot/dts/canaan/k230.dtsi
++++ b/arch/riscv/boot/dts/canaan/k230.dtsi
+@@ -36,7 +36,7 @@
+ 			reg = <0>;
+-			riscv,isa = "rv64imafdcv_zba_zbb_zbc_zbs_zicbom_zicbop_zicboz_svpbmt";
++			riscv,isa = "rv64imafdc_zba_zbb_zbc_zbs_zicbom_zicbop_zicboz_svpbmt";
+ 			riscv,isa-base = "rv64i";
+-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "v", "zba", "zbb",
++			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zba", "zbb",
+ 					       "zbc", "zbs", "zicbom", "zicbop", "zicboz",
+ 					       "zicntr", "zicsr", "zifencei", "zihpm", "svpbmt";
+ 			riscv,cbom-block-size = <64>;
+@@ -62,8 +62,7 @@
+ 			compatible = "cache";
+ 			cache-block-size = <64>;
+ 			cache-level = <2>;
+-			cache-size = <262144>;
+-			cache-sets = <256>;
++			cache-size = <131072>;
+ 			cache-unified;
+ 		};
+ 	};
+diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+--- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
++++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+@@ -35,6 +35,6 @@
+ &uart0 { status = "okay"; };
+ &uart2 { status = "okay"; };
+-&uart3 { status = "okay"; };
++&uart3 { status = "disabled"; }; /* RT-Smart console owns UART3. */
+ &spi0 {
+ 	status = "okay";
+ 	pinctrl-names = "default";

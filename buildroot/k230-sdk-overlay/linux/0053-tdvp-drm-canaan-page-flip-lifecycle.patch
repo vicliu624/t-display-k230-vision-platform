@@ -1,0 +1,198 @@
+diff --git a/drivers/gpu/drm/canaan/canaan_crtc.c b/drivers/gpu/drm/canaan/canaan_crtc.c
+--- a/drivers/gpu/drm/canaan/canaan_crtc.c
++++ b/drivers/gpu/drm/canaan/canaan_crtc.c
+@@ -73,18 +73,30 @@ static void canaan_crtc_atomic_disable(struct drm_crtc *crtc,
+ {
+ 	struct canaan_crtc *canaan_crtc = to_canaan_crtc(crtc);
+ 	struct canaan_vo *vo = canaan_crtc->vo;
++	struct drm_pending_vblank_event *event;
+ 
+ 	DRM_DEBUG_DRIVER("Disable the CRTC:%d\n", crtc->base.id);
+ 	drm_crtc_vblank_off(crtc);
+ 	canaan_vo_disable_crtc(vo, canaan_crtc);
+ 
++	/*
++	 * A flip event queued by atomic_flush() holds a vblank reference. The
++	 * CRTC is being disabled, so no further VTTH interrupt can complete it.
++	 */
++	spin_lock_irq(&crtc->dev->event_lock);
++	event = canaan_crtc->event;
++	canaan_crtc->event = NULL;
++	if (event)
++		drm_crtc_send_vblank_event(crtc, event);
++
+ 	if (crtc->state->event && !crtc->state->active) {
+-		spin_lock_irq(&crtc->dev->event_lock);
+ 		drm_crtc_send_vblank_event(crtc, crtc->state->event);
+-		spin_unlock_irq(&crtc->dev->event_lock);
+-
+ 		crtc->state->event = NULL;
+ 	}
++	spin_unlock_irq(&crtc->dev->event_lock);
++
++	if (event)
++		drm_crtc_vblank_put(crtc);
+ }
+ 
+ static void canaan_crtc_atomic_flush(struct drm_crtc *crtc,
+@@ -93,18 +105,43 @@ static void canaan_crtc_atomic_flush(struct drm_crtc *crtc,
+ 	struct canaan_crtc *canaan_crtc = to_canaan_crtc(crtc);
+ 	struct canaan_vo *vo = canaan_crtc->vo;
+ 	struct drm_pending_vblank_event *event = crtc->state->event;
++	bool drop_vblank_ref = false;
++	int vblank_ret = 0;
+ 
+ 	DRM_DEBUG_DRIVER("Flush the configuration\n");
+-	canaan_vo_flush_config(vo);
+-
+-	if (event) {
+-		WARN_ON(drm_crtc_vblank_get(crtc) != 0);
+-
+-		spin_lock_irq(&crtc->dev->event_lock);
+-		drm_crtc_arm_vblank_event(crtc, event);
+-		spin_unlock_irq(&crtc->dev->event_lock);
+-		crtc->state->event = NULL;
+-	}
++	if (!event) {
++		canaan_vo_flush_config(vo);
++		return;
++	}
++
++	/* Keep a vblank reference before making the VO GO write visible. */
++	vblank_ret = drm_crtc_vblank_get(crtc);
++
++	/*
++	 * VO_REG_LOAD_CTL is a "go" register. Keep event_lock across the GO write
++	 * after publishing the event, so the VTTH IRQ cannot release its buffer
++	 * before this atomic update reaches the hardware. This open-codes the
++	 * event delivery instead of drm_crtc_arm_vblank_event().
++	 */
++	spin_lock_irq(&crtc->dev->event_lock);
++	if (vblank_ret == 0) {
++		if (WARN_ON(canaan_crtc->event)) {
++			/* Do not lose the new event or its vblank reference. */
++			drm_crtc_send_vblank_event(crtc, event);
++			drop_vblank_ref = true;
++		} else {
++			canaan_crtc->event = event;
++		}
++	} else {
++		/* The CRTC is no longer able to generate a vblank. */
++		drm_crtc_send_vblank_event(crtc, event);
++	}
++	crtc->state->event = NULL;
++	canaan_vo_flush_config(vo);
++	spin_unlock_irq(&crtc->dev->event_lock);
++
++	if (drop_vblank_ref)
++		drm_crtc_vblank_put(crtc);
+ }
+ 
+ static const struct drm_crtc_funcs canaan_crtc_funcs = {
+diff --git a/drivers/gpu/drm/canaan/canaan_vo.c b/drivers/gpu/drm/canaan/canaan_vo.c
+--- a/drivers/gpu/drm/canaan/canaan_vo.c
++++ b/drivers/gpu/drm/canaan/canaan_vo.c
+@@ -486,12 +486,38 @@ static irqreturn_t canaan_vo_irq_handler(int irq, void *dev_id)
+ {
+ 	struct canaan_vo *vo = dev_id;
+ 	struct canaan_crtc *canaan_crtc = vo->canaan_crtc;
++	struct drm_crtc *crtc = &canaan_crtc->base;
++	struct drm_pending_vblank_event *event;
++	u32 status;
+ 
+-	canaan_vo_write(vo, VO_DISP_IRQ_STATUS, 0xffffffff);
++	status = canaan_vo_read(vo, VO_DISP_IRQ_STATUS);
++	/*
++	 * This is a W1C status register. Write every asserted bit back rather
++	 * than filtering it through a guessed subset: an uncleared source can
++	 * retrigger the shared VO IRQ and starve the flip path.
++	 */
++	if (status == 0)
++		return IRQ_NONE;
+ 
+-	// printk("canaan_vo_irq_handler---------------\n");
+-	if (atomic_read(&vo->vsync_enabled))
+-		drm_crtc_handle_vblank(&canaan_crtc->base);
++	canaan_vo_write(vo, VO_DISP_IRQ_STATUS, status);
++
++	/* IRQ1 is the only VO interrupt used as the vblank source. */
++	if (!(status & VO_DISP_IRQ1_STATUS) ||
++	    !atomic_read(&vo->vsync_enabled))
++		return IRQ_HANDLED;
++
++	drm_crtc_handle_vblank(crtc);
++
++	spin_lock(&crtc->dev->event_lock);
++	event = canaan_crtc->event;
++	if (event) {
++		canaan_crtc->event = NULL;
++		drm_crtc_send_vblank_event(crtc, event);
++	}
++	spin_unlock(&crtc->dev->event_lock);
++
++	if (event)
++		drm_crtc_vblank_put(crtc);
+ 
+ 	return IRQ_HANDLED;
+ }
+@@ -503,7 +526,7 @@ int canaan_vo_enable_vblank(struct canaan_vo *vo)
+ 	atomic_set(&vo->vsync_enabled, 1);
+ 
+ 	val = canaan_vo_read(vo, VO_DISP_IRQ1_CTL);
+-	val |= (1 << 20);
++	val |= VO_DISP_IRQ1_VTTH_ENABLE;
+ 	canaan_vo_write(vo, VO_DISP_IRQ1_CTL, val);
+ 
+ 	return 0;
+@@ -516,7 +539,7 @@ void canaan_vo_disable_vblank(struct canaan_vo *vo)
+ 	atomic_set(&vo->vsync_enabled, 0);
+ 
+ 	val = canaan_vo_read(vo, VO_DISP_IRQ1_CTL);
+-	val &= ~(1 << 20);
++	val &= ~VO_DISP_IRQ1_VTTH_ENABLE;
+ 	canaan_vo_write(vo, VO_DISP_IRQ1_CTL, val);
+ }
+ 
+@@ -645,7 +669,14 @@ static void canaan_vo_set_timing(struct canaan_vo *vo,
+ 	reg = (hact - 1) + ((vact - 1) << 16) + (0x1 << 15);
+ 	canaan_vo_write(vo, 0x780, reg); // enalbe remap  0x77f8437
+ 
+-	reg = 32 - __builtin_clz(vtotal) - 1;
++	if (vo->vth_line >= vtotal) {
++		dev_warn(vo->dev,
++			 "vth_line %u is outside the %u-line mode; using line 0\n",
++			 vo->vth_line, vtotal);
++		reg = 0;
++	} else {
++		reg = vo->vth_line;
++	}
+ 	canaan_vo_write(vo, VO_DISP_IRQ1_CTL, reg);
+ }
+ 
+@@ -812,8 +842,11 @@ static int canaan_vo_bind(struct device *dev, struct device *master, void *data)
+ 	}
+ 
+ 	of_property_read_u32(np, "background", &vo->background);
++	vo->vth_line = 10;
++	of_property_read_u32(np, "vth_line", &vo->vth_line);
+ 
+-	dev_info(vo->dev, "background color is %x\n", vo->background);
++	dev_info(vo->dev, "background color is %x, VTTH line is %u\n",
++		 vo->background, vo->vth_line);
+ 
+ 	atomic_set(&vo->vsync_enabled, 0);
+ 	vo->irq = platform_get_irq(pdev, 0);
+diff --git a/drivers/gpu/drm/canaan/canaan_vo_regs.h b/drivers/gpu/drm/canaan/canaan_vo_regs.h
+--- a/drivers/gpu/drm/canaan/canaan_vo_regs.h
++++ b/drivers/gpu/drm/canaan/canaan_vo_regs.h
+@@ -44,6 +44,10 @@
+ #define VO_DISP_IRQ2_CTL 0x3e8
+ #define VO_DISP_IRQ_STATUS 0x3ec
+ 
++/* IRQ1 is the line-number trigger source used as vblank. */
++#define VO_DISP_IRQ1_VTTH_ENABLE BIT(20)
++#define VO_DISP_IRQ1_STATUS BIT(1)
++
+ #define VO_DISP_CTL 0x114
+ #define VO_DISP_ENABLE 0x118
+ 

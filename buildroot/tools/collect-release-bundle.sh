@@ -6,6 +6,10 @@ if [ "$#" -ne 2 ]; then
 	exit 2
 fi
 
+# Release artifacts are consumed by a different UID in the SDK validator.
+# Keep generated files/directories readable even with a restrictive caller mask.
+umask 022
+
 WORKTREE="$(cd "$1" && pwd)"
 RELEASE_NAME="$2"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,7 +36,13 @@ bash "${SCRIPT_DIR}/assert-public-release.sh" "${WORKTREE}"
 mkdir -p "${RELEASE_DIR}"
 cp "${IMAGES}/sysimage-sdcard.img.gz" "${RELEASE_DIR}/${RELEASE_NAME}.img.gz"
 cp "${IMAGES}/tdvp-image-manifest" "${RELEASE_DIR}/tdvp-image-manifest"
+cp "${IMAGES}/tdvp-cpu1-rtsmart.bin" "${RELEASE_DIR}/tdvp-cpu1-rtsmart.bin"
+cp "${IMAGES}/tdvp-cpu1-rtsmart.manifest" "${RELEASE_DIR}/tdvp-cpu1-rtsmart.manifest"
 cp "${WORKTREE}/.tdvp/sdk-baseline-manifest" "${RELEASE_DIR}/tdvp-sdk-baseline-manifest"
+bash "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/verify-opkg-rootfs.sh" \
+	"${IMAGES}/rootfs.ext2" "${RELEASE_DIR}"
+cp "${WORKTREE}/output/${PROFILE}/build/tdvp-package-info.json" "${RELEASE_DIR}/tdvp-buildroot-packages.json"
+python3 "${SCRIPT_DIR}/export-tdvp-sdk.py" "$WORKTREE" "$RELEASE_DIR" "$RELEASE_NAME"
 cat > "${RELEASE_DIR}/README.txt" <<EOF
 ${RELEASE_NAME}
 
@@ -40,20 +50,57 @@ Write ${RELEASE_NAME}.img.gz to the complete SD-card device with a writer that
 supports compressed images, or stream-decompress it directly to the device.
 Do not first materialize and retain an uncompressed .img on the workstation.
 The image contains the U-Boot payload, PARTUUID-rooted boot and root partitions,
-systemd, NetworkManager, greetd, Labwc, PCManFM, Raspberry Pi wf-panel-pi,
-Foot, nm-connection-editor, standard libcanberra event sounds and the signed
+systemd, NetworkManager, a VGLite greeter and Labwc desktop, PCManFM,
+Raspberry Pi wf-panel-pi, Foot, nm-connection-editor, gtklock,
+standard libcanberra event sounds and the signed
 TDVP opkg feed trust bootstrap. On a larger unpartitioned card the root
 partition expands once at first boot; the image does not create /data.
 
+CPU1 runs the included RT-Smart/OpenSBI image from the SD card raw 10--30 MiB
+slot. Linux remains CPU0-only. CPU1 owns GC2093 capture, vision buffers,
+KPU, AI2D, FFT and AI memory. Linux clients use /dev/tdvp-vision for frames
+and /dev/tdvp-ai for supported asynchronous jobs. The current AI interface
+supports limited AI2D, FFT/IFFT and a fixed KWS reference model.
+General model loading and speech-to-text remain future work.
+The separate basic mailbox tool tdvp-cpu1ctl provides status, ping and crc32.
+
 After login, use the LilyGO Menu key for the categorized application menu and
-Alt+F4 to close a full-screen application. Verify packages with:
-  sudo tdvp-opkg update
-The configured feed requires its embedded release public key; do not disable
-signature verification.
+Alt+F4 to close a full-screen application. The default idle policy displays
+the gtklock password window after 300 seconds and turns the screen off at
+330 seconds. Wake the display and enter the logged-in account's password.
+
+Package installation and upgrades are paused following the 2026-09-09
+CPU0/RVV runtime-library incompatibility found during NetSurf acceptance.
+Validate this image before resuming feed tests. The configured stable feed
+uses the embedded public key; keep signature verification enabled.
+See docs/package-feed-status.md in the matching source revision for evidence
+and the remaining package/boot acceptance requirements.
+
+tdvp-image-base.json records final image file hashes, modes and package owners.
+tdvp-opkg-status and tdvp-opkg-info.tar.gz are exported from the packaged ext4
+filesystem. tdvp-buildroot-packages.json records the selected source versions.
+The image-owned tdvp-image-* packages are held and essential; applications
+must depend on the published image's exact providers and add new files.
+
+${RELEASE_NAME}-cpu0-sdk.tar.gz contains the paired CPU0 compiler and sysroot.
+tdvp-sdk-manifest.json binds its complete inventory and final-image libraries
+to the compressed image and package metadata. See the SDK README for setup.
+CI validates it at two paths in an isolated Ubuntu 24.04 container before upload.
+Image/feed device acceptance is recorded separately. A public software feed
+must use a tagged Release baseline; do not promote a temporary CI artifact.
 EOF
 (
 	cd "${RELEASE_DIR}"
-	sha256sum "${RELEASE_NAME}.img.gz" \
-		tdvp-image-manifest tdvp-sdk-baseline-manifest README.txt > SHA256SUMS
+	release_files=(
+		"${RELEASE_NAME}.img.gz"
+		tdvp-image-manifest tdvp-cpu1-rtsmart.bin tdvp-cpu1-rtsmart.manifest
+		tdvp-sdk-baseline-manifest tdvp-image-base.json tdvp-opkg-status
+		tdvp-opkg-info.tar.gz tdvp-buildroot-packages.json
+		"${RELEASE_NAME}-cpu0-sdk.tar.gz" tdvp-sdk-manifest.json README.txt
+	)
+	# post-image.sh writes gzip through mktemp (0600); cp retains that mode.
+	# Normalize only the explicit public copies, before the cross-UID handoff.
+	chmod 0644 -- "${release_files[@]}"
+	sha256sum "${release_files[@]}" > SHA256SUMS
 )
 printf 'TDVP product release bundle: %s\n' "${RELEASE_DIR}"

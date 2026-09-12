@@ -1,0 +1,38 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] rtsmart: do not auto-initialize Linux-paired media or AI
+
+The paired vision main waits for Linux before explicitly calling MPP.
+GNNE/AI2D registration remains disabled until its separate clock/power and
+error-propagating initialization path is integrated. No implicit KPU access.
+The unselected SDK initialization paths are byte-for-byte unchanged.
+
+diff --git a/board/sdk_kernel_init.c b/board/sdk_kernel_init.c
+--- a/board/sdk_kernel_init.c
++++ b/board/sdk_kernel_init.c
+@@ -12,7 +12,7 @@
+     ipcm_module_init();
+ #endif
+ 
+-#ifdef RT_USING_MPP
++#if defined(RT_USING_MPP) && !defined(RT_USING_TDVP_CPU1_VISION)
+     mpp_init();
+ #endif
+     return RT_EOK;
+diff --git a/drivers/interdrv/gnne/ai_module.c b/drivers/interdrv/gnne/ai_module.c
+--- a/drivers/interdrv/gnne/ai_module.c
++++ b/drivers/interdrv/gnne/ai_module.c
+@@ -25,6 +25,7 @@
+ 
+ #include <rtthread.h>
+ 
++#ifndef RT_USING_TDVP_CPU1_VISION
+ extern int gnne_device_init(void);
+ extern int ai_2d_device_init(void);
+ 
+@@ -35,3 +36,4 @@
+ }
+ 
+-INIT_COMPONENT_EXPORT(ai_module_init);
+\ No newline at end of file
++INIT_COMPONENT_EXPORT(ai_module_init);
++#endif

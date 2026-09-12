@@ -1,0 +1,10 @@
+config BR2_PACKAGE_GTKLOCK
+	bool "gtklock"
+	depends on BR2_USE_MMU
+	depends on BR2_PACKAGE_LINUX_PAM
+	depends on BR2_PACKAGE_LIBGTK3_WAYLAND
+	select BR2_PACKAGE_GTK_SESSION_LOCK
+	help
+	  Window-style Wayland session locker with TDVP's PAM account checks
+	  and authenticated-only unlock. Requires ext-session-lock support.
+	  https://github.com/jovanlanik/gtklock

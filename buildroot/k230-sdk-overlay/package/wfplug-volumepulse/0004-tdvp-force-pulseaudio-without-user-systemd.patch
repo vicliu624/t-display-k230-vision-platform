@@ -1,0 +1,40 @@
+From: TDVP Platform <platform@tdvp.invalid>
+Date: Thu, 3 Sep 2026 15:30:00 +0800
+Subject: [PATCH] tdvp: select PulseAudio without user systemd
+
+The TDVP desktop image starts a per-session PulseAudio daemon directly.  It
+does not run a user systemd manager or ship PipeWire.  Upstream's runtime
+PipeWire probe runs `systemctl --user`, which asks the system D-Bus daemon to
+activate org.freedesktop.systemd1 and produces a misleading startup failure on
+every panel launch.
+
+Use the image's fixed audio contract instead of probing a service manager that
+is intentionally absent.  This leaves the widget's PulseAudio control path and
+the PulseAudio Bluetooth profile names selected by bluetooth.c intact.
+
+The patch is deliberately platform-specific: remove it if TDVP changes its
+audio stack to PipeWire and provides a functioning user systemd session.
+
+Signed-off-by: TDVP Platform <platform@tdvp.invalid>
+---
+ src/volumepulse.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/volumepulse.c b/src/volumepulse.c
+index c9f7594..5ad0c02 100644
+--- a/src/volumepulse.c
++++ b/src/volumepulse.c
+@@ -147,8 +147,11 @@ void hdmi_make_generic (VolumePulsePlugin *vol)
+ gboolean check_pipewire (gpointer data)
+ {
+     VolumePulsePlugin *vol = (VolumePulsePlugin *) data;
+-    if (!system ("systemctl --user -q is-active pipewire-pulse.service")) vol->pipewire = 1;
+-    else vol->pipewire = 0;
++
++    /* TDVP starts PulseAudio itself and intentionally has no user systemd. */
++    vol->pipewire = 0;
++
++    /* Keep the existing log and the PulseAudio Bluetooth profile selection. */
+ 
+     if (vol->pipewire)
+     {

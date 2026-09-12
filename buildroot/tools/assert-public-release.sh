@@ -13,8 +13,11 @@ PROFILE="k230_canmv_t_display_rm69a10_labwc_desktop_defconfig"
 IMAGES="${WORKTREE}/output/${PROFILE}/images"
 
 bash "${SCRIPT_DIR}/assert-k230-sdk-rm69a10-baseline.sh" "${WORKTREE}"
-bash "${SCRIPT_DIR}/assert-tdvp-opkg-feed-release.sh"
-for file in sysimage-sdcard.img sysimage-sdcard.img.gz tdvp-image-manifest; do
+# Image publication establishes the baseline for the next feed. The existing
+# mutable feed has its own signature/metadata gate and cannot certify this
+# image's package compatibility. Keep its validation as a separate operation.
+bash "${PROJECT_DIR}/buildroot/k230-sdk-overlay/board/tdvp/verify-opkg-rootfs.sh" "${IMAGES}/rootfs.ext2"
+for file in sysimage-sdcard.img sysimage-sdcard.img.gz tdvp-image-manifest tdvp-cpu1-rtsmart.bin tdvp-cpu1-rtsmart.manifest; do
 	[ -s "${IMAGES}/${file}" ] || {
 		printf 'TDVP public release gate: missing %s\n' "${IMAGES}/${file}" >&2
 		exit 1
@@ -27,4 +30,6 @@ grep -Fqx 'terminal=foot' "${IMAGES}/tdvp-image-manifest"
 grep -Fqx 'display_manager=greetd' "${IMAGES}/tdvp-image-manifest"
 grep -Fqx 'greeter=gtkgreet' "${IMAGES}/tdvp-image-manifest"
 grep -Fqx 'session=tdvp-labwc-session' "${IMAGES}/tdvp-image-manifest"
+grep -Fqx 'cpu1_execution_model=linux-cpu0+rtsmart-cpu1' "${IMAGES}/tdvp-image-manifest"
+grep -Fqx 'cpu1_mailbox_physical=0x13ff0000' "${IMAGES}/tdvp-image-manifest"
 printf '%s\n' 'TDVP public product release assertion: PASS'

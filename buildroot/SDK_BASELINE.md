@@ -11,11 +11,12 @@ The active configuration is:
 k230_canmv_t_display_rm69a10_labwc_desktop_defconfig
 ```
 
-The profile supplies a systemd root filesystem, the vendor K230 kernel and
-firmware runtime, the RM69A10 board device tree, and a Wayland desktop composed
-from seatd, greetd, Labwc, PCManFM, Raspberry Pi wf-panel-pi, Foot, Cog/WPE
-WebKit and NetworkManager. All build outputs belong below one
-stable worktree path:
+The profile supplies CPU0 Linux/systemd, paired CPU1 RT-Smart/OpenSBI, the
+RM69A10 device tree, seatd, greetd/gtkgreet, Labwc/VGLite, PCManFM, wf-panel-pi,
+Foot, NetworkManager and gtklock. Both greeter and desktop use VGLite;
+PCManFM supplies the background. CPU1 owns camera and AI resources, accessed
+through Linux cross-core devices. The old Linux camera/KPU packages, Swaybg
+and browsers are excluded from the current base image. Build outputs live under:
 
 ```text
 $WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/

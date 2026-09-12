@@ -2,9 +2,13 @@
 
 ## 范围
 
-本文定义 T-Display K230 V1.3 镜像中的离线英文语音转文字基础能力。目标识别器为流式 Zipformer Transducer。音频采集、特征提取、编码器执行、解码和文本输出均在设备本地完成。
+本文定义 T-Display K230 V1.3 的待实现离线语音转文字方案，不代表镜像已具有 ASR。流式 Zipformer Transducer 是英文模型候选，必须独立完成转换、精度、内存与实时性评估；尚未选定可发布模型。
 
-镜像内置的 KPU 验收负载不是语音识别实现。它用于验证同一台物理设备上的 Linux 内核、设备树、GNNE 和 AI2D 字符设备、nncase K230 运行时以及固定 KModel 能够一起执行。Zipformer 模型需要独立完成转换和实时性测量后才能进入镜像。
+2026-09-07 确认的新架构：CPU1/RT-Smart 独占 AI 子系统资源，统一管理 KPU、AI2D、FFT、AI 内存与推理服务。CPU0/Linux 通过异步接口使用 AI，不保留直接调用 GNNE/AI2D 的生产执行路径。音频采集与播放第一阶段仍归 Linux。旧 Linux 直连 KPU 的验收结果不能代替 CPU1 推理验收，更不能证明语音识别已经实现。
+
+截至 2026-09-09，CPU1 已有固定 KWS 模型、有限 AI2D 和 FFT/IFFT 的
+[异步作业与实机记录](cpu1-ai-jobs.zh-CN.md)。这些能力可供后续 ASR 开发复用；
+声学特征、流式模型、解码器和文字事件接口仍待实现。
 
 ## 硬件合同
 
@@ -12,69 +16,55 @@ ASR 服务依赖以下全部条件：
 
 | 能力 | 所需证据 |
 | --- | --- |
-| KPU 内核接口 | 存在 `/dev/k230-gnne` 和 `/dev/k230-ai2d`，且 `vpl-hwctl status` 中 `kpu_kernel_ready=1`。 |
-| KPU 运行时 | 固定的 nncase K230 验收负载存在，且 `kpu_reference_runtime_available=1`。 |
-| KPU 执行 | `tdvp-kpu-acceptance.service` 成功完成，且 `kpu_acceptance_state=passed`。 |
+| AI 所有权 | 匹配的 Linux DT、CPU1 固件和启动交接通过；Linux 不绑定 AI 加速器，CPU1 独占其寄存器、中断及 AI 工作内存。 |
+| KPU 运行时 | CPU1 上的固定 nncase 运行时与 KModel 编译器版本匹配；Linux 客户端收到明确的服务能力与故障状态。 |
+| KPU 执行 | 在 CPU1 实际执行固定模型并验证输出，经跨核接口返回结果；字符设备存在或驱动注册成功不算推理通过。 |
+| FFT | CPU1 完成硬件 FFT/IFFT 与数值参考对比；声学特征还须独立验证 INT16 缩放与误差。 |
 | 音频采集 | ALSA 暴露能够采集 16 kHz、单声道、PCM S16_LE 的设备。 |
 | 麦克风路径 | V1.3 ASoC 图、麦克风供电、时钟和增益路径通过实际采集验证。 |
-| CPU 拓扑 | CPU0 运行 Linux。CPU1 只有在固件生命周期和 CPU0 到 CPU1 传输完成物理验收后才能参与工作；首个 ASR 路径不依赖 CPU1。 |
+| CPU 拓扑 | CPU0 运行 Linux；CPU1 执行前处理、模型 CPU 分区、KPU 调用、解码与后处理。跨核音频和结果接口必须通过物理验收。 |
 
 服务直接报告缺失的前提条件。请求 KPU 会话时不会悄悄替换为 CPU 识别器。
 
 ## 执行架构
 
 ```text
-ALSA PCM 采集（16 kHz、单声道、S16_LE）
+CPU0/Linux ALSA PCM 采集（16 kHz、单声道、S16_LE）
         |
         v
-有界采集环形缓冲区
+有界采集队列 → 跨核 PCM 传输 → CPU1 会话
         |
-        +--> WebRTC VAD 与可选 WebRTC 降噪
+        +--> CPU1 VAD 与可选降噪（实现需验证）
         |
         v
-log-Mel 特征提取
+CPU1 log-Mel 特征提取（FFT 加速需验证）
         |
         v
 Zipformer 编码器分块
         |
         +--> 通过 nncase 调用 KPU KModel 分区
-        +--> CPU0 执行不支持或有状态的算子
+        +--> CPU1 执行未下放 KPU 的算子与有状态计算
         |
         v
-CPU0 RNN-T Joiner 与流式解码器
+CPU1 RNN-T Joiner 与流式解码器
         |
         v
-部分与最终 UTF-8 文本事件
+跨核返回部分与最终 UTF-8 文本事件 → Linux 应用
 ```
 
-解码器拥有 beam 状态和端点检测状态。KPU 输入输出缓冲区由推理工作线程管理。音频回调不加载模型、不进行无界内存分配、不调用解码器，也不等待 KPU 完成。
+CPU1 解码器拥有 beam 状态和端点检测状态。KPU 输入输出缓冲区由 CPU1 推理服务管理。Linux 音频回调不加载模型、不进行无界内存分配、不调用解码器，也不等待 KPU 完成。视觉和语音共用有界的 KPU 调度队列；不得假设任意推理可以抢占，也不能让视觉任务无限阻塞语音分块。
 
 ## 软件边界
 
-ASR 是独立的 C++ 组件：
+以下为待实现方案的逻辑边界，目录与 API 仍需设计：
 
 ```text
-user-space/vicliu-pocket-linux-asr/
-├── include/vpl/asr/
-│   ├── recognizer.hpp
-│   ├── session.hpp
-│   ├── transcript.hpp
-│   └── availability.hpp
-├── src/
-│   ├── audio/alsa_capture.cpp
-│   ├── audio/ring_buffer.cpp
-│   ├── preprocess/noise_suppression.cpp
-│   ├── preprocess/vad.cpp
-│   ├── feature/log_mel.cpp
-│   ├── inference/kmodel_encoder.cpp
-│   ├── inference/nncase_runtime.cpp
-│   ├── decoder/transducer_decoder.cpp
-│   ├── session/recognizer_session.cpp
-│   └── service/asr_daemon.cpp
-└── tests/
+Linux：应用 API、会话权限、ALSA 采集、PCM 队列、跨核客户端、文字事件
+CPU1：前处理、特征、模型、nncase/KPU、解码、端点、任务调度、AI 内存
+共同协议：版本、会话 ID、分块序号、格式、时戳、背压、取消、故障、结果
 ```
 
-`recognizer.hpp` 是面向产品的 API。Robot、Terminal 和其他程序从服务 API 接收文本事件，不直接包含 nncase 头文件或打开 ALSA 设备。服务拥有单一的麦克风采集权，并提供有界的识别会话。
+面向产品的 API 由 Linux 客户端提供。Robot、Terminal 和其他程序从服务 API 接收文本事件，不直接包含 nncase 头文件或打开 ALSA 设备。Linux 服务拥有单一的麦克风采集权；CPU1 AI 服务拥有识别会话的计算资源。下面的 C++ 接口仍是草案：
 
 ```cpp
 namespace vpl::asr {
@@ -105,7 +95,7 @@ public:
 
 ## KPU 分区
 
-K230 SDK 包含 nncase 2.11.0 K230 运行时及一个已验证的工作负载：它构建 AI2D 调度，通过 `nncase::runtime::interpreter` 加载 KModel，再调用入口函数。该负载证明了镜像所用的运行时集成路径。
+CPU1 必须重新固定并验证 RT-Smart 对应的 nncase 运行时、编译器和模型组合。此前 Linux 运行时的版本或工作负载不能直接作为迁移后的证据。测试须包含 AI2D 调度、KModel 加载、真实 KPU 执行和输出对比。
 
 它不能证明 Zipformer 图、每个卷积、线性层、注意力缓存操作或 Transducer Joiner 都能被该编译器版本接受。因此编码器分区必须通过实际证据完成：
 
@@ -115,7 +105,7 @@ K230 SDK 包含 nncase 2.11.0 K230 运行时及一个已验证的工作负载：
 4. 在 K230 上执行确定性的 KModel 输出对比。
 5. 在连续音频下测量分块延迟、峰值驻留内存、KPU 执行时间和 CPU 执行时间。
 
-卷积、矩阵计算、线性层和激活是 KPU 候选。动态 beam search、token 选择、端点状态和变长流控制保留在 CPU，除非模型分区实测证明可以改变。
+卷积、矩阵计算、线性层和激活是 KPU 候选。动态 beam search、token 选择、端点状态和变长流控制保留在 CPU1，除非模型分区实测证明可以改变；不得恢复 CPU0 直连 KPU 路径。
 
 ## 模型转换
 
@@ -153,18 +143,18 @@ K230 输出对比与实时基准
 
 | 指标 | 门槛 |
 | --- | --- |
-| 内存 | 采集、模型和解码器合计驻留内存小于 500 MiB |
+| 内存 | 在经验证的 CPU1 AI/MMZ、RT-Smart 堆和 Linux 音频队列各自预算内；记录与视觉并发时的峰值，不借用 Linux CMA 或未保留内存 |
 | 实时率 | 连续英文语音小于 1.0 |
 | 部分结果延迟 | 音频分块可用后小于 500 ms |
 | 正确性 | 确定性的目标输出对比和版本化英文 WER 集 |
 
-模型仅能编译不能作为发布依据。
+模型仅能编译不能作为发布依据。当前视觉候选 MMZ 为 128 MiB，摄像头缓冲区与其他 AI 作业共用该预算；语音模型可用容量需要单独核算。旧的 500 MiB ASR 上限已不适用，具体模型入选前必须重新计算内存布局，并成对更新 Linux DT、CPU1 固件和镜像校验。
 
 ## 交付顺序
 
-1. 完成 KPU 和麦克风的物理验收。
+1. 完成 CPU1 AI 所有权、KPU/AI2D/FFT 和跨核接口的物理验收，以及 Linux 麦克风采集验收。
 2. 在 PC Linux 上通过 CPU 参考实现验证流式 Zipformer 模型和 WER。
 3. 导出并量化固定流式编码器分块。
-4. 在 K230 上转换并验证 KPU 分区。
+4. 在 K230 CPU1 上转换、执行并验证 KPU 分区与 CPU1 解码。
 5. 将有界 C++ 服务和 API 接入 Robot。
-6. 测量连续 10 秒和长时间语音会话，并与镜像一起发布模型和性能清单。
+6. 测量连续 10 秒和长时间语音会话，以及视觉和 VGLite 桌面并发时的延迟、准确率与内存，再与镜像一起发布模型和性能清单。

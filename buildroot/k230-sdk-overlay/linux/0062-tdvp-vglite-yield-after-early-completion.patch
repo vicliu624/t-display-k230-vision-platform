@@ -1,0 +1,125 @@
+From 9b1f75af1b3a2ab7d8c2a93e1c5df8ea318ae062 Mon Sep 17 00:00:00 2001
+From: TDVP Display Team <display@tdvp.local>
+Date: Sat, 5 Sep 2026 13:40:00 +0800
+Subject: [PATCH] gpu: vglite: yield while a completion waits for idle
+
+The K230 vendor wait path wakes on a matching completion bit, then additionally
+requires the GPU idle register to read its terminal value. The completion
+accumulator remained set until the function returned. When an IRQ arrived in
+the small interval before that idle-register transition, every subsequent
+wait_event predicate was therefore already true: the bounded watchdog in 0059
+would loop without sleeping until the register changed or its deadline elapsed.
+
+Keep an observed completion in the wait-local atomic snapshot and clear the
+shared accumulator immediately. If the GPU is not idle yet, poll that narrow
+transition through usleep_range(1ms, 2ms) rather than re-entering an always-true
+wait predicate. A later IRQ remains in the atomic accumulator and is merged
+into the final snapshot, so 0060's no-lost-completion guarantee is preserved.
+
+The normal completed-and-idle path adds no sleep. The finite deadline and the
+five-second infinite-wait watchdog remain authoritative; expiry still returns
+VG_LITE_TIMEOUT to the existing close/reset/quarantine recovery path.
+---
+ drivers/gpu/vglite/vg_lite_hal.c | 35 ++++++++++++++++++++++++++---------
+ 1 file changed, 26 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/gpu/vglite/vg_lite_hal.c b/drivers/gpu/vglite/vg_lite_hal.c
+--- a/drivers/gpu/vglite/vg_lite_hal.c
++++ b/drivers/gpu/vglite/vg_lite_hal.c
+@@ -87,6 +87,8 @@
+ #define VG_LITE_INFINITE_WAIT_WATCHDOG_DEFAULT_MS 5000U
+ #define VG_LITE_INFINITE_WAIT_WATCHDOG_MIN_MS     1000U
+ #define VG_LITE_INFINITE_WAIT_WATCHDOG_MAX_MS    60000U
++#define VG_LITE_COMPLETION_IDLE_POLL_MIN_US       1000U
++#define VG_LITE_COMPLETION_IDLE_POLL_MAX_US       2000U
+ 
+ static unsigned int vg_lite_infinite_wait_watchdog_ms =
+ 	VG_LITE_INFINITE_WAIT_WATCHDOG_DEFAULT_MS;
+@@ -452,8 +454,9 @@
+ 	unsigned long wait_jiffies;
+ 	long result = 0;
+ 	bool infinite_wait = timeout == VG_LITE_INFINITE;
+-	u32 completed_flags;
++	u32 completed_flags = 0;
+ 	bool timed_out = false;
++	bool completion_observed = false;
+ #define IGNORE_INTERRUPT 1
+ #if IGNORE_INTERRUPT
+ 	unsigned int int_flag;
+@@ -486,15 +489,29 @@
+ 		    wait_jiffies > msecs_to_jiffies(VG_LITE_INFINITE_WAIT_POLL_MS))
+ 			wait_jiffies = msecs_to_jiffies(VG_LITE_INFINITE_WAIT_POLL_MS);
+ 
+-		result = wait_event_interruptible_timeout(
+-			device->int_queue,
+-			atomic_read(&device->int_flags) & mask, wait_jiffies);
+-		if (result < 0) {
+-			dev_warn_ratelimited(device->dev,
+-				"vg_lite: wait interrupted; returning timeout for safe recovery\n");
+-			result = 0;
+-			timed_out = true;
+-			break;
++		if (completion_observed) {
++			/*
++			 * Do not re-enter a wait whose completion predicate is already
++			 * true. The vendor idle register can lag its completion IRQ.
++			 */
++			usleep_range(VG_LITE_COMPLETION_IDLE_POLL_MIN_US,
++				     VG_LITE_COMPLETION_IDLE_POLL_MAX_US);
++			result = 1;
++		} else {
++			result = wait_event_interruptible_timeout(
++				device->int_queue,
++				atomic_read(&device->int_flags) & mask, wait_jiffies);
++			if (result < 0) {
++				dev_warn_ratelimited(device->dev,
++					"vg_lite: wait interrupted; returning timeout for safe recovery\n");
++				result = 0;
++				timed_out = true;
++				break;
++			}
++			if (atomic_read(&device->int_flags) & mask) {
++				completed_flags |= atomic_xchg(&device->int_flags, 0);
++				completion_observed = true;
++			}
+ 		}
+ #if IGNORE_INTERRUPT
+ 		/* Wait until GPU is idle. */
+@@ -502,6 +519,7 @@
+ 		idle = vg_lite_hal_peek(0x04);
+ 		if (int_flag) {
+ 			result = int_flag;
++			completion_observed = true;
+ 			dev_vdbg(device->dev,
+ 				"vg_lite: waiting... idle: 0x%08X, int: 0x%08X, FE: 0x%08X 0x%08X 0x%08X\n",
+ 				idle, int_flag, vg_lite_hal_peek(0x500),
+@@ -509,11 +527,12 @@
+ 			);
+ 		}
+ #endif
+-		if (result != 0 && idle == 0x7fffffff)
++		if (completion_observed && idle == 0x7fffffff)
+ 			break;
+ 
+ 		/* A finite wait without a matching interrupt has reached its deadline. */
+-		if (!infinite_wait && result == 0 && idle == 0x7fffffff) {
++		if (!infinite_wait && !completion_observed &&
++		    result == 0 && idle == 0x7fffffff) {
+ 			timed_out = true;
+ 			break;
+ 		}
+@@ -528,10 +547,10 @@
+ 	}
+ 
+ 	/* Atomically consume the event snapshot reported to this WAIT. */
+-	completed_flags = atomic_xchg(&device->int_flags, 0);
++	completed_flags |= atomic_xchg(&device->int_flags, 0);
+ 	if (value)
+ 		*value = completed_flags & mask;
+-	return (result != 0);
++	return completion_observed && !timed_out;
+ }
+ 
+ enum vg_lite_error vg_lite_hal_operation_cache(void *handle,
+-- 
+2.47.1

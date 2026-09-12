@@ -1,16 +1,114 @@
 #!/bin/sh
 set -eu
 
-state_dir=/run/tdvp/acceptance
+usage() {
+	cat >&2 <<'EOF'
+usage: tdvp-kms-acceptance
+
+Run only from tdvp-kms-maintenance after it has isolated DRM ownership.
+Start the managed transaction with:
+  systemctl start tdvp-kms-maintenance
+EOF
+}
+
+if [ "$#" -eq 1 ] && { [ "$1" = "--help" ] || [ "$1" = "-h" ]; }; then
+	usage
+	exit 0
+fi
+if [ "$#" -ne 0 ]; then
+	usage
+	exit 2
+fi
+
+state_dir="${TDVP_KMS_STATE_DIR:-/run/tdvp/acceptance}"
+display_smoke_program="${TDVP_DISPLAY_SMOKE_PROGRAM:-/usr/bin/tdvp-display-smoke}"
+vblank_observer_program="${TDVP_VBLANK_OBSERVER_PROGRAM:-/usr/bin/tdvp-vblank-observer}"
 mkdir -p "$state_dir"
 
-if /usr/bin/tdvp-display-smoke --device /dev/dri/card0 --format XR24 \
-	--pattern grid --cell 48 --seconds 1 >"$state_dir/kms.log" 2>&1; then
-	echo pass >"$state_dir/kms.status"
-	cat "$state_dir/kms.log"
-	logger -t tdvp-kms-acceptance "KMS atomic XR24 acceptance passed" || true
+# The smoke client becomes DRM master. It may only be called by the wrapper
+# after that wrapper has stopped greetd and verified Labwc/gtkgreet exited.
+if [ "${TDVP_KMS_MAINTENANCE_ACTIVE:-}" != "1" ]; then
+	message='refusing direct KMS acceptance outside tdvp-kms-maintenance'
+	printf '%s\n' "$message" >"$state_dir/kms.log"
+	echo blocked >"$state_dir/kms.status"
+	cat "$state_dir/kms.log" >&2
+	logger -t tdvp-kms-acceptance "$message" || true
+	exit 1
+fi
+
+# tdvp-display-smoke obtains DRM master and commits a complete KMS state.  It
+# is a maintenance test, not a desktop-health probe: starting it while the
+# display manager or any Labwc session owns the card can steal or reset the
+# visible scan-out state.  Keep the refusal in the image, rather than relying
+# only on release documentation.  is-active is false while systemd reports a
+# unit as "deactivating", so inspect the explicit service state and greeter
+# client processes as well.
+greetd_state="$(systemctl show -p ActiveState --value greetd 2>/dev/null || printf unknown)"
+case "$greetd_state" in
+	inactive|failed)
+		;;
+	*)
+		message='refusing direct KMS acceptance while greetd is not fully stopped'
+		printf '%s\n' "$message" >"$state_dir/kms.log"
+		echo blocked >"$state_dir/kms.status"
+		cat "$state_dir/kms.log" >&2
+		logger -t tdvp-kms-acceptance "$message" || true
+		exit 1
+		;;
+esac
+if pgrep -x labwc >/dev/null 2>&1 || pgrep -x gtkgreet >/dev/null 2>&1; then
+	message='refusing direct KMS acceptance while Labwc or gtkgreet is running'
+	printf '%s\n' "$message" >"$state_dir/kms.log"
+	echo blocked >"$state_dir/kms.status"
+	cat "$state_dir/kms.log" >&2
+	logger -t tdvp-kms-acceptance "$message" || true
+	exit 1
+fi
+
+# The image always uses the installed program.  The override exists solely so
+# a staged candidate can be exercised by the managed maintenance transaction
+# before it replaces the immutable target filesystem.  The service itself is
+# root-only and the default remains the image-owned executable.
+if "$display_smoke_program" --device /dev/dri/card0 --format XR24 \
+	--pattern counter --cell 48 --seconds 10 --fps 30 \
+	--page-flip-timeout-ms 1000 >"$state_dir/kms.log" 2>&1; then
+	# A zero exit is not sufficient: before the program releases its dumb
+	# buffers, it must atomically detach the plane, observe the matching event,
+	# and observe a following independent vblank. This keeps an old test FB from
+	# surviving into the next DRM master even if the detach event is early.
+	if ! grep -Fq \
+		'tdvp-display-smoke: PASS test plane detached and guard vblank observed before buffer release' \
+		"$state_dir/kms.log"; then
+		echo fail >"$state_dir/kms.status"
+		cat "$state_dir/kms.log" >&2
+		logger -t tdvp-kms-acceptance \
+			'KMS counter completed without the required plane-detach event' || true
+		exit 1
+	fi
+	# Keep an independent vblank sample in the same maintenance record.  The
+	# counter test proves event-gated two-buffer reuse; this second sample proves
+	# the vblank source continues with a bounded cadence after the direct client
+	# has released DRM master and before greetd is restored.  With all graphical
+	# clients stopped, opening card0 can legitimately make this observer DRM
+	# master.  Opt in explicitly, while the observer itself still refuses master
+	# in every ordinary-desktop invocation.  It does not modeset or page-flip.
+	if "$vblank_observer_program" --device /dev/dri/card0 --frames 120 \
+		--max-interval-ms 250 --allow-maintenance-master \
+		>>"$state_dir/kms.log" 2>&1; then
+		echo pass >"$state_dir/kms.status"
+		cat "$state_dir/kms.log"
+		logger -t tdvp-kms-acceptance \
+			"KMS XR24 page-flip and isolated-maintenance vblank acceptance passed" || true
+	else
+		echo fail >"$state_dir/kms.status"
+		cat "$state_dir/kms.log" >&2
+		logger -t tdvp-kms-acceptance \
+			"KMS isolated-maintenance vblank acceptance failed after page-flip test" || true
+		exit 1
+	fi
 else
 	echo fail >"$state_dir/kms.status"
 	cat "$state_dir/kms.log" >&2
-	logger -t tdvp-kms-acceptance "KMS atomic XR24 acceptance failed" || true
+	logger -t tdvp-kms-acceptance "KMS XR24 page-flip acceptance failed" || true
+	exit 1
 fi

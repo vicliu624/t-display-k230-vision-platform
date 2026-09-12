@@ -1,0 +1,91 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] soc: k230: retain CPU1 AI and shared ISP/display power domains
+
+Opt in with tdvp,cpu1-vision-domains before moving ISP/KPU to CPU1. Keep
+AI and DISP powered without cycling an already active domain; reject
+power-off and propagate initialization errors. Screen blanking remains
+available, but full AMP power management needs a separate quiesce protocol.
+
+diff --git a/drivers/soc/canaan/k230-power-domains.c b/drivers/soc/canaan/k230-power-domains.c
+index 0ecbcd0..c9af6c8 100644
+--- a/drivers/soc/canaan/k230-power-domains.c
++++ b/drivers/soc/canaan/k230-power-domains.c
+@@ -35,6 +35,7 @@ struct k230_pm_domain {
+ 	u16 repair_bit;
+ 	u16 repair_wen_bit;
+ 	bool soft_control_enable;
++	bool tdvp_cpu1_keep_on;
+ };
+ 
+ #define PM_PWR_EN(pd) ((pd)->reg_offset[REG_PM_PWR_EN])
+@@ -108,6 +109,11 @@ static int k230_power_off(struct generic_pm_domain *domain)
+ 	unsigned long loop = 1000;
+ 	u32 val;
+ 
++	/* CPU1 uses AI independently and ISP shares DISP with the Linux screen.
++	 * Reject even a direct power-off call outside generic PM's flag checks.
++	 */
++	if (pd->tdvp_cpu1_keep_on)
++		return -EBUSY;
+ #ifndef K230_PM_DEBUG
+ 	if (false == pd->soft_control_enable) {
+ 		pr_info("[K230_POWER]:skip power off %s\n", domain->name);
+@@ -143,7 +149,8 @@ int k230_pd_probe(struct platform_device *pdev,
+ {
+ 	struct genpd_onecell_data *genpd_data;
+ 	struct resource *res;
+-	int i;
++	int i, result;
++	bool cpu1_vision = of_property_read_bool(pdev->dev.of_node, "tdvp,cpu1-vision-domains");
+ 
+ 	genpd_data = devm_kzalloc(&pdev->dev, sizeof(*genpd_data), GFP_KERNEL);
+ 	if (!genpd_data)
+@@ -163,21 +170,43 @@ int k230_pd_probe(struct platform_device *pdev,
+ 	k230_pm_domains[K230_PM_DOMAIN_DPU]->flags |= GENPD_FLAG_ALWAYS_ON;
+ 
+ 	for (i = 0; i < domain_num; ++i) {
++		struct k230_pm_domain *pd = (struct k230_pm_domain *)k230_pm_domains[i];
++		bool is_off = i == K230_PM_DOMAIN_DISP || i == K230_PM_DOMAIN_VPU || i == K230_PM_DOMAIN_AI;
++
+ 		k230_pm_domains[i]->power_on = k230_power_on;
+ 		k230_pm_domains[i]->power_off = k230_power_off;
+ 
+-		if (i == K230_PM_DOMAIN_DISP || i == K230_PM_DOMAIN_VPU || i == K230_PM_DOMAIN_AI)
+-			pm_genpd_init(k230_pm_domains[i], NULL, true);
+-		else
+-			pm_genpd_init(k230_pm_domains[i], NULL, false);
++		pd->tdvp_cpu1_keep_on = cpu1_vision && (i == K230_PM_DOMAIN_AI || i == K230_PM_DOMAIN_DISP);
++		/* Domain objects are static; restore this policy on a probe retry. */
++		if (i == K230_PM_DOMAIN_AI || i == K230_PM_DOMAIN_DISP)
++			k230_pm_domains[i]->flags &= ~GENPD_FLAG_ALWAYS_ON;
++		if (pd->tdvp_cpu1_keep_on) {
++			/* power_on checks the real status first: never cycle a live
++			 * CPU1 domain merely because Linux has no attached consumer.
++			 */
++			result = k230_power_on(k230_pm_domains[i]);
++			if (result)
++				goto failed;
++			k230_pm_domains[i]->flags |= GENPD_FLAG_ALWAYS_ON;
++			is_off = false;
++		}
++		result = pm_genpd_init(k230_pm_domains[i], NULL, is_off);
++		if (result)
++			goto failed;
+ 	}
+ 
+-	of_genpd_add_provider_onecell(pdev->dev.of_node, genpd_data);
++	result = of_genpd_add_provider_onecell(pdev->dev.of_node, genpd_data);
++	if (result)
++		goto failed;
+ 
+ 
+ 	dev_info(&pdev->dev, "powerdomain init ok\n");
+ 
+ 	return 0;
++failed:
++	while (i-- > 0)
++		pm_genpd_remove(k230_pm_domains[i]);
++	return dev_err_probe(&pdev->dev, result, "powerdomain initialization failed\n");
+ }
+ 
+ static u16 k230_offsets[K230_PM_DOMAIN_MAX][REG_PM_ARRAY_SIZE] = {

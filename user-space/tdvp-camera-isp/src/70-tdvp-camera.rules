@@ -1,0 +1,6 @@
+# Stable identities, not a hardcoded /dev/video0 (which is the MVX codec).
+SUBSYSTEM=="video4linux", ATTR{name}=="vvcam-video.0.0", GROUP="video", MODE="0660", SYMLINK+="tdvp-camera/capture"
+SUBSYSTEM=="video4linux", ATTR{name}=="vvcam-video.0.1", GROUP="video", MODE="0660", SYMLINK+="tdvp-camera/output1"
+SUBSYSTEM=="video4linux", ATTR{name}=="vvcam-video.0.2", GROUP="video", MODE="0660", SYMLINK+="tdvp-camera/output2"
+SUBSYSTEM=="video4linux", ATTR{name}=="vvcam-video.0.3", GROUP="video", MODE="0660", SYMLINK+="tdvp-camera/output3"
+SUBSYSTEM=="video4linux", ATTR{name}=="vvcam-isp-subdev.0", GROUP="video", MODE="0660", SYMLINK+="tdvp-camera/isp-subdev"

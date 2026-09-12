@@ -2,11 +2,13 @@
 #define _GNU_SOURCE
 /*
  * The T-Display K230's dedicated LilyGO key is emitted by the TCA8418 as
- * KEY_MENU. Labwc 0.8.4 receives that evdev event but does not dispatch the
- * Menu keysym through its configured global binding on this board. Keep the
- * board-specific translation at the input boundary and delegate the actual
- * application-menu UI to Raspberry Pi's already-installed wfplug-menu
- * ("smenu") plugin.  This helper has no launcher UI of its own.
+ * KEY_F13. KEY_MENU is deliberately not used: it is a desktop-wide context
+ * menu key, so Labwc/GTK clients can consume it at the same time as this
+ * bridge and produce a competing popup or a full-screen damage flash. F13
+ * has no global action in the TDVP XKB policy; this process is its sole
+ * product-level consumer. The helper delegates the actual application-menu
+ * UI to Raspberry Pi's already-installed wfplug-menu ("smenu") plugin and
+ * implements no launcher UI of its own.
  */
 
 #include <errno.h>
@@ -18,12 +20,48 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #define TDVP_KEYBOARD_NAME "tca8418"
 #define EVENT_SCAN_LIMIT 64
 #define MENU_DEBOUNCE_MS 450
+#define TDVP_LILLYGO_MENU_KEY KEY_F13
+#define TDVP_LILLYGO_SCAN_INDEX 7
+
+/*
+ * DTS owns the release mapping, but changing from a pre-F13 image must not
+ * make the hardware key regress after a routine reboot.  The generic input
+ * keymap API updates only the live device and is a no-op once the release DTB
+ * already provides KEY_F13.
+ */
+static void
+normalize_lilygo_menu_key(const char *event_path)
+{
+	struct input_keymap_entry entry = { 0 };
+	int fd = open(event_path, O_RDWR | O_CLOEXEC);
+
+	if (fd < 0)
+		return;
+
+	entry.flags = INPUT_KEYMAP_BY_INDEX;
+	entry.index = TDVP_LILLYGO_SCAN_INDEX;
+	if (ioctl(fd, EVIOCGKEYCODE_V2, &entry) < 0) {
+		perror("tdvp-key-bridge: read LilyGO keymap");
+		close(fd);
+		return;
+	}
+	if (entry.keycode != KEY_MENU) {
+		close(fd);
+		return;
+	}
+
+	entry.keycode = TDVP_LILLYGO_MENU_KEY;
+	if (ioctl(fd, EVIOCSKEYCODE_V2, &entry) < 0)
+		perror("tdvp-key-bridge: remap LilyGO key");
+	close(fd);
+}
 
 static int
 open_lilygo_keyboard(void)
@@ -51,6 +89,7 @@ open_lilygo_keyboard(void)
 		}
 
 		snprintf(event_path, sizeof(event_path), "/dev/input/event%d", index);
+		normalize_lilygo_menu_key(event_path);
 		return open(event_path, O_RDONLY | O_CLOEXEC);
 	}
 
@@ -109,7 +148,7 @@ main(void)
 			 * reports. The panel-menu command is a toggle, so issuing it twice would
 			 * make a perfectly valid key press appear to do nothing.
 			 */
-			if (event.type == EV_KEY && event.code == KEY_MENU && event.value == 1
+			if (event.type == EV_KEY && event.code == TDVP_LILLYGO_MENU_KEY && event.value == 1
 				&& should_toggle_menu(&last_press)) {
 				toggle_panel_menu();
 			}

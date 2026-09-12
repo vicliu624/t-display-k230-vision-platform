@@ -1,0 +1,107 @@
+#!/bin/sh
+set -eu
+
+usage() {
+	cat >&2 <<'EOF'
+usage: tdvp-kms-maintenance
+
+Run the managed direct-KMS page-flip acceptance transaction. Start it with:
+  systemctl start tdvp-kms-maintenance
+
+This program is deliberately not a direct desktop-control interface.
+EOF
+}
+
+if [ "$#" -eq 1 ] && { [ "$1" = "--help" ] || [ "$1" = "-h" ]; }; then
+	usage
+	exit 0
+fi
+if [ "$#" -ne 0 ]; then
+	usage
+	exit 2
+fi
+if [ "${TDVP_KMS_MAINTENANCE_SERVICE:-}" != "1" ]; then
+	printf '%s\n' \
+		'tdvp-kms-maintenance: refusing direct invocation; use systemctl start tdvp-kms-maintenance' >&2
+	exit 1
+fi
+
+state_dir="${TDVP_KMS_STATE_DIR:-/run/tdvp/acceptance}"
+status_file="$state_dir/kms-maintenance.status"
+log_file="$state_dir/kms-maintenance.log"
+restore_marker="$state_dir/kms-restore-greetd"
+stop_timeout_seconds="${TDVP_KMS_STOP_TIMEOUT_SECONDS:-30}"
+acceptance_program="${TDVP_KMS_ACCEPTANCE_PROGRAM:-/usr/libexec/tdvp/tdvp-kms-acceptance}"
+
+case "$stop_timeout_seconds" in
+	''|*[!0-9]*|0)
+		stop_timeout_seconds=30
+		;;
+esac
+
+mkdir -p "$state_dir"
+: >"$log_file"
+exec >>"$log_file" 2>&1
+
+fail() {
+	printf '%s\n' "$*" >&2
+	printf '%s\n' fail >"$status_file"
+	exit 1
+}
+
+greetd_is_stopped() {
+	greetd_state="$(systemctl show -p ActiveState --value greetd 2>/dev/null || printf unknown)"
+	case "$greetd_state" in
+		inactive|failed)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+printf '%s\n' running >"$status_file"
+printf '%s\n' 'tdvp-kms-maintenance: starting direct-KMS maintenance transaction'
+
+[ "$(id -u)" = 0 ] || fail 'tdvp-kms-maintenance: must run as root'
+
+# Remember only an actually running display manager.  The recovery helper is
+# intentionally a no-op when an administrator starts this service from an
+# already headless maintenance shell.
+greetd_state="$(systemctl show -p ActiveState --value greetd 2>/dev/null || printf unknown)"
+case "$greetd_state" in
+	active|activating|deactivating)
+	: >"$restore_marker"
+	printf '%s\n' 'tdvp-kms-maintenance: requesting asynchronous greetd stop'
+	systemctl stop --no-block greetd ||
+		fail 'tdvp-kms-maintenance: could not request greetd stop'
+	;;
+	inactive|failed)
+		if pgrep -x labwc >/dev/null 2>&1 || pgrep -x gtkgreet >/dev/null 2>&1; then
+			fail 'tdvp-kms-maintenance: a graphical client is running while greetd is inactive'
+		fi
+		;;
+	*)
+		fail "tdvp-kms-maintenance: unexpected greetd state $greetd_state"
+		;;
+esac
+
+deadline=$(( $(date +%s) + stop_timeout_seconds ))
+while ! greetd_is_stopped || pgrep -x labwc >/dev/null 2>&1 || \
+	pgrep -x gtkgreet >/dev/null 2>&1; do
+	if [ "$(date +%s)" -ge "$deadline" ]; then
+		fail 'tdvp-kms-maintenance: timed out waiting for greetd and Labwc to stop'
+	fi
+	sleep 1
+done
+
+printf '%s\n' 'tdvp-kms-maintenance: display ownership released; running acceptance'
+if TDVP_KMS_MAINTENANCE_ACTIVE=1 "$acceptance_program"; then
+	printf '%s\n' pass >"$status_file"
+	printf '%s\n' 'tdvp-kms-maintenance: acceptance passed'
+else
+	printf '%s\n' fail >"$status_file"
+	printf '%s\n' 'tdvp-kms-maintenance: acceptance failed' >&2
+	exit 1
+fi

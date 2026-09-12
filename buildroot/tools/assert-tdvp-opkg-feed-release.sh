@@ -14,7 +14,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-FEED_URL='https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r6/riscv64'
+FEED_URL='https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/stable/riscv64'
 PUBLIC_KEY="${PROJECT_DIR}/buildroot/k230-sdk-overlay/package/tdvp-opkg-trust/src/tdvp-repo-public.asc"
 FINGERPRINT='2B091A2A8E5810954FB9FD64EA9D1CD5EFC81500'
 ABI_VERSION='2025.02.1-k230.6.6.36-glibc2.33-rv64-lp64d-r1'
@@ -78,9 +78,11 @@ gpgv --keyring "${tmpdir}/tdvp-release-keyring.gpg" \
 
 # release.json is intentionally pretty-printed by stage-site.sh.  Accept
 # leading/trailing JSON whitespace while keeping every published value exact.
+grep -Eq '^[[:space:]]*"publication_type":[[:space:]]*"mutable-channel",[[:space:]]*$' "${tmpdir}/release.json"
+grep -Eq '^[[:space:]]*"channel":[[:space:]]*"stable",[[:space:]]*$' "${tmpdir}/release.json"
 grep -Eq '^[[:space:]]*"platform_slug":[[:space:]]*"tdvp-k230-r1",[[:space:]]*$' "${tmpdir}/release.json"
 grep -Eq '^[[:space:]]*"platform_id":[[:space:]]*"tdvp-k230-br2025[.]02[.]1-glibc2[.]33-rv64-lp64d-k6[.]6[.]36-r1",[[:space:]]*$' "${tmpdir}/release.json"
-grep -Eq '^[[:space:]]*"feed_release":[[:space:]]*"r6",[[:space:]]*$' "${tmpdir}/release.json"
+grep -Eq '^[[:space:]]*"feed_release":[[:space:]]*"r[1-9][0-9]*",[[:space:]]*$' "${tmpdir}/release.json"
 grep -Eq '^[[:space:]]*"architecture":[[:space:]]*"riscv64",[[:space:]]*$' "${tmpdir}/release.json"
 grep -Eq '^[[:space:]]*"index":[[:space:]]*"Packages[.]gz",[[:space:]]*$' "${tmpdir}/release.json"
 grep -Eq '^[[:space:]]*"signature":[[:space:]]*"Packages[.]asc"[[:space:]]*$' "${tmpdir}/release.json"
@@ -126,11 +128,11 @@ awk -v expected="${ABI_VERSION}" '
 	exit 1
 }
 
-# r6 is a composable userland release.  It must contain leaf applications and
-# independent GTK, TLS, graphics, media, image, SDL, mGBA, panel-compatibility,
-# and hardware-daemon providers.  A valid signature is insufficient if an
-# application borrows a general-purpose runtime from the base image or bundles
-# it privately.
+# stable is the device-facing view of one composable userland release.  It must
+# contain leaf applications and independent GTK, TLS, graphics, media, image,
+# SDL, mGBA, panel-compatibility, and hardware-daemon providers. A valid
+# signature is insufficient if an application borrows a general-purpose runtime
+# from the base image or bundles it privately.
 for required_package in \
 	tdvp-gba sdl2 sdl2-ttf libmgba \
 	tdvp-netsurf tdvp-mpv \
@@ -138,7 +140,7 @@ for required_package in \
 	glib-networking gtk3-data gdk-pixbuf-loaders pulse-modules \
 	tdvp-gdk-committed-compat tdvp-hardware-runtime tdvp-runtime-libexec; do
 	grep -Eq "^Package: ${required_package}$" "${tmpdir}/Packages" || {
-		printf 'TDVP feed release gate: required r6 package is missing: %s\n' \
+		printf 'TDVP feed release gate: required stable-channel package is missing: %s\n' \
 			"${required_package}" >&2
 		exit 1
 	}

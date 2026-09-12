@@ -33,9 +33,58 @@ ordering constraints and validation gates for this queue.
 | `0048-tdvp-radio-lr2021-spi-transport.patch` | TDVP | Enables SPI0 with an LR2021 spidev transport and adds power/reset control to the radio profile selector. |
 | `0049-tdvp-k230-spi-bound-irq-enumeration.patch` | TDVP | Enumerates only the interrupt resources declared by K230 SPI0. |
 | `0050-tdvp-hwmon-aht20-standard-binding.patch` | TDVP | Adds the dock AHT20 at `0x38` and its standard `aosong,aht20` hwmon binding. |
+| `0051` through `0052` | TDVP | Route the accepted external I2S amplifier through the existing K230 sound card and its managed ALSA switch. |
+| `0053-tdvp-drm-canaan-page-flip-lifecycle.patch` | TDVP | Makes Canaan DRM page-flip/vblank event ownership explicit across CRTC disable and VO IRQ delivery. |
+| `0054` through `0062` | TDVP | VGLite per-client ownership, submission serialization, watchdog, interrupt, single-context and completion-idle lifecycle fixes. |
+| `0063-tdvp-cpu1-rtsmart-mailbox.patch` | TDVP | Reserves CPU1's RT-Smart RAM, exposes only a non-cacheable 64 KiB mailbox at `/dev/tdvp-cpu1`, and deliberately leaves CPU1 outside Linux SMP. |
+| `0064-tdvp-riscv-dts-use-scalar-cpu0.patch` | TDVP | Describes physical CPU0 without RVV, with 128 KiB L2, and reserves UART3 for the CPU1 console. |
 
 The numbering follows the imported display queue. The lexical ordering is a
 build input and is checked by the baseline assertion.
+
+## CPU1 Coprocessor Contract
+
+The ABI v1 payload starts at byte 52 in a non-cacheable device mapping. Linux
+must copy it with volatile byte stores, not ordinary `memcpy`, whose widened
+unaligned stores fault on CPU0. Run `tdvp-cpu1-acceptance` on the real board:
+it checks the known CRC, empty input, 464 length/alignment vectors up to
+4096 bytes, invalid arguments, and request/response sequence agreement.
+
+## nRF52840 UART1 Contract
+
+`0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch` enables UART1 GPIO3 TX / GPIO4
+RX and serial1 after the CPU0/CPU1 ownership patches. The final image guard
+uses host `fdtget` to check enabled status, pinctrl phandle binding and pin
+functions; merely finding a ttyS1 file or strings inside a disabled DT node
+is insufficient. This is the transport for the LilyGO BLE AT firmware, not
+an HCI/BlueZ controller by itself. UART0 stays with Linux and UART3 with CPU1.
+
+## CPU1 Boot Ownership
+
+The K230 Linux device tree intentionally declares only local hart `cpu@0`;
+this name alone does not select a physical core. The pinned SDK normally
+runs U-Boot on physical CPU1. TDVP overrides `CONFIG_LINUX_RUN_CORE_ID=0`
+so resetting CPU1 cannot reset U-Boot itself. `0064`, the kernel fragment
+and scalar `-mcpu=c908` userspace flags match physical CPU0. `0063`
+reserves `0x10000000..0x13ffffff` for the CPU1 OpenSBI/RT-Smart runtime and
+uses the last 64 KiB (`0x13ff0000`) for a versioned shared-memory mailbox.
+Linux maps only that mailbox through `/dev/tdvp-cpu1` with non-cacheable page
+attributes; it neither starts CPU1 nor makes it a schedulable Linux core.
+
+The image post-processing stage compiles the pinned LilyGO RT-Smart source,
+places the firmware in the raw SD-card 10--30 MiB slot, and changes U-Boot to
+launch CPU1 before `blinux`. This slot contains raw `fw_payload.bin`, linked
+at `0x10000000` with RT-Smart at offset `0x20000`, not the vendor K230 wrapper:
+`boot_baremetal` only sets a reset vector. A build-time guard verifies core
+selection, entry, format, size and digest. RT-Smart's allocatable RAM ends
+before the mailbox (`0x03ff0000` bytes), uses UART3, disables shared board
+peripheral drivers and replaces the SD/USB-initializing CanMV `main`.
+Linux retains UART0 and owns SD, WiFi, display and other board peripherals.
+Cold-boot and VGLite hardware gates must be repeated after this core/ISA change.
+The bounded first ABI services are `ping` and
+`crc32`, available through `tdvp-cpu1ctl` and `libtdvp_cpu1.so.1`.  Future
+CPU1 jobs must extend this versioned ABI, keep cache maintenance on both cores,
+and must not expose the remainder of the reserved RAM to Linux userspace.
 
 ## AI Power and Clock Contract
 
@@ -158,6 +207,84 @@ coordinates: controller-native 1060 x 2400
 checks the effective driver source, kernel configuration and final DTB. The
 physical acceptance record contains a touch trace and a Wayland pointer/touch
 interaction on the selected output transform.
+
+## GC2093 camera
+
+`0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch` follows UART1 and adds
+only the physically validated I2C4, CSI2 and split managed MCLK configuration.
+Use it with the dedicated `tdvp-camera-isp` package, not the vendor OV5647/RVV
+runtime. The camera DTB guard checks phandle bindings and clock fields; merely
+finding the string `gc2093` is not evidence of integration or frame capture.
+
+## CPU1 shared GPIO arbitration
+
+`0067-tdvp-gpio-cpu1-shared-port-arbitration.patch` is opt-in through
+`tdvp,cpu1-gpio-mask = <0x00200000>` on GPIO0. It permits only the TDVP
+GPIO0/21 contract, uses the RT-Smart hardware semaphore 0 at `0x911040a0`,
+and replaces bgpio's shadow-based writes with live protected RMW operations.
+Linux cannot request GPIO21. Timeout refuses the write; Linux must not reset,
+gate or suspend the shared controller. System suspend is rejected until an
+AMP-wide quiesce protocol exists; ordinary Wayland screen blanking is unaffected.
+The image ownership cutover must enable this property before CPU1 drives reset.
+The host regression extracts and executes the helper from this patch itself.
+
+## CPU1 vision power-domain retention
+
+`0068-tdvp-power-retain-cpu1-vision-domains.patch` opts in with
+`tdvp,cpu1-vision-domains` on the K230 power-domain provider. AI and DISP
+remain powered, because CPU1 owns KPU/ISP and ISP shares DISP with the Linux
+screen. Already-on domains are not cycled. Direct power-off is rejected and
+probe failures are propagated with initialized domains unwound. Other domains
+and non-opted-in boards retain their existing policy. Wayland blanking is not
+system suspend. The regression executes the actual patched driver with mocked
+Linux/MMIO services, including retry and failure paths; silicon timing still
+requires hardware validation.
+
+## CPU1 I2C4 shared-clock arbitration
+
+`0069-tdvp-clock-cpu1-i2c4-arbitration.patch` is enabled only by
+`tdvp,cpu1-i2c4-clock-sharing` on CMU. Linux UART/I2C/GPIO clock RMW at
+`0x91100024`, `0x9110002c` and `0x91100030` uses hardware semaphore 0, with
+a bounded 10 ms wait and no writes on timeout. CPU1 I2C4 gate/divider providers
+must be disabled; conflicting fields, shared muxes and dual-register dividers
+touching a shared divider word are rejected at registration. PDM's shared gate
+is protected while its Linux-only fractional divider is retained unchanged.
+The shared LS APB parent is not gated or retuned.
+GPU/display and PLL paths are unchanged. The paired RT-Smart early I2C4 setup
+must use the same semaphore **before** `rt_hw_i2c_init` accesses hardware;
+adding clocks only inside MPP is too late. This patch alone is not a camera
+ownership cutover. The regression compiles the actual patched CCF operations
+and runs 100,000 concurrent model iterations per core, plus timeout/refusal,
+retained-parent, malformed-layout and non-AMP/GPU controls.
+
+## CPU1 runtime supplier readiness
+
+`0070-tdvp-cpu1-runtime-supplier-readiness.patch` adds GPL readiness exports
+from the actual GPIO, power and clock drivers. GPIO publishes only after its
+guarded controller, clocks and ports initialize. Power publishes only after
+AI/DISP retention and provider registration succeed. Clock readiness requires
+every enabled composite provider to have registered and every shared LS writer
+to have the hardware-semaphore mapping. DT declarations alone cannot satisfy
+the Linux bridge's gate. GPIO/power hot-unbind attributes are suppressed and
+AMP instances pin their modules for the boot lifetime. This fixed-board
+lifecycle restriction is intentional; dynamic DT removal/forced unload is not
+supported. Existing GPU/display clock operations and renderer patches are
+unchanged. The candidate bridge separately holds PM/CCF resources before OFFER;
+this patch alone does not switch the production image or initialize AI engines.
+
+## Production CPU1 AI/vision ownership device tree
+
+`0071-tdvp-riscv-dts-cpu1-ai-vision-ownership.patch` appends the paired
+ownership include to the production RM69A10 DTS. It reserves CPU1 MMZ and
+transport, disables Linux GC2093/CSI/ISP/GNNE/AI2D and their dedicated clock
+providers, and wires the real shared-supplier holds to the CPU1 bridge.
+The include is checked byte-for-byte against the reviewed board source.
+The DT regression removes only this final include in a temporary baseline,
+then compares all 273 pre-existing nodes with the actual production candidate.
+The profile now selects `tdvp-cpu1-vision`, not Linux ISP/KPU packages.
+Fresh/reused targets and the actual ext4 image reject retired Linux owners.
+This is paired with contract-2 CPU1 firmware; do not deploy just this DTB.
+VGLite runtime patches are unchanged. A cross-build is not hardware acceptance.
 
 ## Required Checks
 

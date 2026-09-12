@@ -1,0 +1,25 @@
+# The pinned vendor script whole-links every .a in the directory. Keep an
+# explicit allowlist: old cached VO/audio/VPU archives must never leak in.
+from building import *
+import os
+
+cwd = GetCurrentDir()
+mpp = os.environ['MPP_SRC_DIR']
+libraries = ['cmpi', 'log', 'mmz', 'sys', 'vb', 'vicap', 'sensor', 'mediafreq']
+for name in libraries:
+    archive = os.path.join(mpp, 'kernel', 'lib', 'lib' + name + '.a')
+    if not os.path.isfile(archive):
+        raise RuntimeError('Missing CPU1 vision library: ' + archive)
+
+flags = ' -Wl,--whole-archive ' + ' '.join('-l' + name for name in libraries)
+flags += ' -Wl,--no-whole-archive'
+group = DefineGroup('Mpp', ['mpp_init.c', 'tdvp_cpu1_vision_pins.c',
+                           'tdvp_cpu1_i2c4_clock.c', 'tdvp_cpu1_camera_clock.c',
+                           'tdvp_vision_owner.c', 'tdvp_cpu1_vision_startup.c',
+                           'tdvp_cpu1_ai_clock.c', 'tdvp_cpu1_ai_init.c',
+                           'tdvp_cpu1_fft.c'],
+                    depend=['RT_USING_MPP'],
+                    CPPPATH=[cwd, os.path.join(mpp, 'include'),
+                             os.path.join(mpp, 'include', 'ioctl')], LINKFLAGS=flags,
+                    LIBPATH=[os.path.join(mpp, 'kernel', 'lib')])
+Return('group')

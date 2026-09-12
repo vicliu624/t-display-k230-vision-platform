@@ -32,8 +32,50 @@
 | `0048-tdvp-radio-lr2021-spi-transport.patch` | TDVP | 启用 SPI0 的 LR2021 spidev 传输路径，并为 radio profile selector 增加电源和复位控制。 |
 | `0049-tdvp-k230-spi-bound-irq-enumeration.patch` | TDVP | 仅枚举 K230 SPI0 在设备树中声明的 interrupt resource。 |
 | `0050-tdvp-hwmon-aht20-standard-binding.patch` | TDVP | 加入扩展坞 `0x38` AHT20 与标准 `aosong,aht20` hwmon binding。 |
+| `0051` 到 `0052` | TDVP | 通过现有 K230 sound card 及其受控 ALSA switch 路由已验收的 external I2S amplifier。 |
+| `0053-tdvp-drm-canaan-page-flip-lifecycle.patch` | TDVP | 明确 Canaan DRM 在 CRTC 禁用和 VO IRQ 交付过程中的 page-flip/vblank 事件所有权。 |
+| `0054` 到 `0062` | TDVP | VGLite 的每客户端资源所有权、提交串行化、看门狗、中断、单上下文和完成空闲生命周期修复。 |
+| `0063-tdvp-cpu1-rtsmart-mailbox.patch` | TDVP | 保留 CPU1 的 RT-Smart RAM，仅将非缓存的 64 KiB mailbox 暴露为 `/dev/tdvp-cpu1`，并明确不把 CPU1 纳入 Linux SMP。 |
+| `0064-tdvp-riscv-dts-use-scalar-cpu0.patch` | TDVP | 将物理 CPU0 描述为无 RVV、128 KiB L2，并将 UART3 留给 CPU1 控制台。 |
 
 编号遵循导入的 display queue。词法顺序是 build input，并由 baseline assertion 检查。
+
+## CPU1 协处理器约定
+
+ABI v1 的 payload 从非缓存映射偏移 52 字节开始。Linux 必须使用 volatile
+逐字节写入；普通 `memcpy` 的未对齐宽写入会在 CPU0 上触发异常。实机运行
+`tdvp-cpu1-acceptance`，验证标准 CRC、空输入、最大 4096 字节的 464 组长度/对齐
+组合、非法参数拒绝和请求/应答序列一致。主机模拟测试不能代替实机验收。
+
+## nRF52840 UART1 约定
+
+`0065-tdvp-riscv-dts-enable-nrf52840-uart1.patch` 在 CPU0/CPU1 ownership 补丁之后
+启用 UART1 GPIO3 TX / GPIO4 RX 和 serial1。最终镜像通过 host `fdtget` 检查节点
+启用状态、pinctrl phandle 绑定和实际 pin function；`ttyS1` 文件或 disabled DT 节点
+中的字符串存在不再视为通过。这是 LilyGO BLE AT 固件的传输通道，本身不是
+HCI/BlueZ 控制器。Linux 保留 UART0，CPU1 保留 UART3。
+
+## CPU1 启动所有权
+
+K230 Linux 设备树只声明本地 hart `cpu@0`，这个名称本身不决定物理核心。
+固定版本的 SDK 默认让 U-Boot 在物理 CPU1 上运行；TDVP 覆盖
+`CONFIG_LINUX_RUN_CORE_ID=0`，避免启动 CPU1 时复位 U-Boot 自己。
+`0064`、kernel fragment 和用户态 `-mcpu=c908` 标量编译选项与物理 CPU0 保持一致。
+`0063` 保留
+`0x10000000..0x13ffffff` 给 CPU1 的 OpenSBI/RT-Smart runtime，其中最后 64 KiB
+（`0x13ff0000`）是带版本的共享 mailbox。Linux 仅通过 `/dev/tdvp-cpu1` 以非缓存
+页属性映射该 mailbox：它既不启动 CPU1，也不把 CPU1 变成可调度的 Linux CPU。
+
+镜像后处理会编译已固定 commit 的 LilyGO RT-Smart 源码，将固件放入 SD 卡原始
+10--30 MiB slot，并让 U-Boot 在 `blinux` 前启动 CPU1。该 slot 必须是入口
+`0x10000000`、RT-Smart 偏移 `0x20000` 的原始 `fw_payload.bin`，不能使用 K230
+容器：`boot_baremetal` 只设置复位入口，不解析容器。构建检查核心选择、入口、格式、
+大小和摘要。RT-Smart 可分配 RAM 为 `0x03ff0000` 字节，不包含末尾 mailbox；
+控制台使用 UART3，并关闭共享外设驱动、替换会初始化 SD/USB 的 CanMV `main`。
+Linux 保留 UART0，管理 SD、WiFi、显示等板级外设。核心/ISA 改动后必须重新进行
+冷启动和 VGLite 实机验收。第一版受限 ABI 提供 `ping`
+和 `crc32`，由 `tdvp-cpu1ctl` 与 `libtdvp_cpu1.so.1` 暴露。后续 CPU1 service 必须
+扩展这个带版本 ABI、维持两侧 cache maintenance，且不得把其余保留 RAM 暴露给 Linux 用户态。
 
 ## AI 电源与时钟约定
 
@@ -142,6 +184,70 @@ coordinates: controller-native 1060 x 2400
 `0041` 将 `0032` 中的 DTS node 绑定到 `tdvp_gt9895`。release assertion 检查实际 driver source、
 kernel configuration 和最终 DTB。物理验收记录包含 touch trace，以及在选定 output transform
 上的 Wayland pointer/touch interaction。
+
+## GC2093 摄像头
+
+`0066-tdvp-riscv-dts-enable-gc2093-managed-clock.patch` 排在 UART1 之后，
+只加入已实测的 I2C4、CSI2 和拆分式内核 MCLK 配置。必须配合专用
+`tdvp-camera-isp` 包，不能继续使用 vendor OV5647/RVV runtime。
+camera DTB guard 检查实际 phandle 绑定和时钟字段；出现 `gc2093` 字符串
+本身不代表驱动已集成或已经能够取帧。
+
+## CPU1 共享 GPIO 保护
+
+`0067-tdvp-gpio-cpu1-shared-port-arbitration.patch` 只在 GPIO0 声明
+`tdvp,cpu1-gpio-mask = <0x00200000>` 时启用，且仅接受 TDVP GPIO0/21 布局。
+它与 RT-Smart 共用 `0x911040a0` 的硬件锁 0，用实时寄存器读改写替换
+bgpio 缓存整组状态的写入，并拒绝 Linux 申请 GPIO21。锁超时拒绝写入；
+Linux 不得复位或关闭共享控制器时钟。实现跨核休眠协调前拒绝整机 suspend，
+普通 Wayland 息屏不受影响。CPU1 开始操作复位脚前必须在镜像所有权切换中
+启用此属性。主机回归直接提取并执行本补丁里的 helper，而非另一份测试实现。
+
+## CPU1 视觉电源域保持
+
+`0068-tdvp-power-retain-cpu1-vision-domains.patch` 由 K230 电源域节点上的
+`tdvp,cpu1-vision-domains` 显式启用。CPU1 使用 KPU/ISP，且 ISP 与 Linux
+屏幕共用 DISP 域，因此启用后保持 AI、DISP 供电，不重启已开启的域，
+并拒绝直接断电调用。探测失败会返回错误并撤销已初始化的域；其他电源域
+及未启用此属性的板型保持既有策略。Wayland 息屏不等于整机 suspend。
+回归测试执行实际打补丁后的驱动，模拟 Linux/MMIO 服务并覆盖重试和失败路径；
+芯片上的供电时序仍需硬件验证。
+
+## CPU1 I2C4 共享时钟仲裁
+
+`0069-tdvp-clock-cpu1-i2c4-arbitration.patch` 仅在 CMU 声明
+`tdvp,cpu1-i2c4-clock-sharing` 时启用。Linux 对 `0x91100024`、
+`0x9110002c`、`0x91100030` 的 UART/I2C/GPIO 时钟读改写使用硬件锁 0，
+等待上限 10 ms，超时不写寄存器。CPU1 的 I2C4 gate/divider provider 必须
+禁用；冲突位域、共享 mux 和涉及共享 divider 寄存器的双寄存器操作在注册阶段拒绝。
+PDM 的共享 gate 受锁保护，其 Linux 独占的小数分频寄存器保留原行为。共享 LS APB
+父时钟不得被关闭或调频。GPU、显示和 PLL 路径保持不变。配对 RT-Smart
+必须在 `rt_hw_i2c_init` 访问硬件前，以同一硬件锁完成 I2C4 时钟准备，
+不能等到 MPP 初始化再做。该补丁本身不代表摄像头完成交接。回归编译实际
+打补丁后的 CCF 操作，每核并发 100,000 次，并覆盖超时拒写、父时钟保持、
+错误布局拒绝及非 AMP/GPU 对照。
+
+## CPU1 运行时资源就绪检查
+
+`0070-tdvp-cpu1-runtime-supplier-readiness.patch` 从真实 GPIO、电源、时钟驱动
+导出 GPL 就绪接口。GPIO 必须完成受保护控制器、时钟和端口初始化；电源必须成功
+保持 AI／DISP 并注册 provider；时钟必须完成所有启用的 composite provider 注册，
+而且所有共享 LS 寄存器写入者均已映射硬件信号量。仅有设备树声明不能让 Linux
+桥接驱动发出授权。GPIO／电源驱动隐藏热解绑入口，AMP 实例固定模块引用至本次
+启动结束；不支持动态删除设备树节点或强制卸载。GPU／显示时钟操作和渲染补丁
+未改写。候选桥接驱动另外在 OFFER 前持有 PM／CCF 资源；该补丁本身不切换
+生产镜像，也不代表 AI 引擎初始化或硬件验收完成。
+
+## 生产镜像的 CPU1 AI／视觉资源归属
+
+`0071-tdvp-riscv-dts-cpu1-ai-vision-ownership.patch` 在生产 RM69A10 DTS
+末尾加入成对的资源归属声明，预留 CPU1 MMZ 与传输区，关闭 Linux 的
+GC2093／CSI／ISP／GNNE／AI2D 及其专属时钟 provider，并为桥接驱动关联
+真实共享资源的保持接口。补丁中的 include 与已审查的 board 源文件逐字节比对。
+DT 回归只在临时基线中移除这条末尾 include，再与实际生产候选比较 273 个既有节点。
+产品配置选择 `tdvp-cpu1-vision`，不再选择 Linux ISP／KPU 包；新旧 target
+和最终 ext4 均检查旧所有者没有残留。它必须与 contract-2 CPU1 固件成对部署，
+不能单独替换 DTB。没有修改 VGLite runtime 补丁；交叉编译通过不代表硬件验收。
 
 ## Required Check
 

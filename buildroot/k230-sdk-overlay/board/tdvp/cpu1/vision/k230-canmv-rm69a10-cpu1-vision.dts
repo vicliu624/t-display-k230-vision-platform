@@ -1,0 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0 OR MIT
+/* Validation wrapper, not selected by the production image profile yet. */
+#include "k230-canmv-rm69a10.dts"
+#include "tdvp-cpu1-vision.dtsi"

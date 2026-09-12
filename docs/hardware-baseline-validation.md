@@ -1,49 +1,68 @@
 # Hardware Baseline Validation
 
-This document defines the release gate for
-`k230_canmv_t_display_rm69a10_labwc_desktop_defconfig`.
+Profile: `k230_canmv_t_display_rm69a10_labwc_desktop_defconfig`.
+Each record must identify the image manifest, source revision, boot ID, attached
+hardware and files replaced during testing.
 
-## Host Gate
+## Host checks
 
 ```sh
-WORKTREE="$HOME/work/tdvp-k230-labwc"
-bash buildroot/tools/assert-k230-sdk-rm69a10-baseline.sh "$WORKTREE"
-bash buildroot/tools/assert-public-release.sh "$WORKTREE"
+SDK_WORKTREE="$HOME/work/tdvp-k230-labwc"
+bash buildroot/tools/assert-k230-sdk-rm69a10-baseline.sh "$SDK_WORKTREE"
+bash buildroot/tools/assert-public-release.sh "$SDK_WORKTREE"
 ```
 
-The image guard validates the boot payload layout, root filesystem, device
-tree payload, K230 desktop session files, recovery networking tools, keyboard
-layout service, touch rule, KPU acceptance utility, and hardware integration
-service.
+The image verifier checks raw boot layout, paired CPU1 firmware, rootfs, device
+tree, login/lock permissions, VGLite policy and hardware interface files.
+The release check also accesses the online feed to verify signatures and index
+metadata. See the [release contract](release-contract.md) for coverage boundaries.
 
-## Device Gate
+## Read-only checks on the new card
 
-Perform the following checks on a flashed device:
+These commands neither switch sessions nor submit AI jobs:
 
 ```sh
 uname -a
-systemctl status sshd NetworkManager seatd tdvp-labwc-desktop
-ip address
-ls -l /dev/dri /dev/input
+cat /proc/sys/kernel/random/boot_id
+systemctl --no-pager status greetd sshd NetworkManager seatd vicliu-pocket-linux-hardware
+nmcli device status
+nmcli connection show --active
+ls -l /dev/dri /dev/input /dev/tdvp-vision /dev/tdvp-ai
 cat /sys/class/drm/card0-DSI-1/status
-tdvp-display-smoke --device /dev/dri/card0 --seconds 5
+cat /proc/bus/input/devices
+cat /sys/class/misc/tdvp-vision/status
+cat /sys/class/misc/tdvp-ai/status
+vpl-hwctl status
+tdvp-renderer-profile status
+arecord -l
+aplay -l
+ls /sys/bus/i2c/devices
 ```
 
-For attached board functions, inspect the relevant standard Linux interface:
+Linux is expected to report only CPU0. Camera and AI use cross-core interfaces.
+The old V4L2/vendor ISP services and Linux KPU acceptance utility are outside the
+current profile. Driver binding and readable status establish interface presence;
+functional tests are still required.
 
-| Function | Validation interface |
-| --- | --- |
-| Wi-Fi | `nmcli device`, `nmcli connection show --active`, `ip address show wlan0` |
-| USB Ethernet | `nmcli device`, `ethtool enu1`, `ip address show enu1` |
-| Keyboard | `cat /proc/bus/input/devices`, `evtest` |
-| Touch | `cat /proc/bus/input/devices`, `evtest` |
-| I2C peripherals | `i2cdetect -y <bus>` |
-| GPIO | `gpioinfo`, `gpiomon` |
-| Audio | `arecord -l`, `aplay -l` |
-| Camera/ISP | vendor ISP service status and V4L2 nodes |
-| KPU | `tdvp-kpu-acceptance` |
+## Functional acceptance
 
-The Wayland desktop is accepted when Labwc, Swaybg, PCManFM, wf-panel-pi, and
-Foot start from `tdvp-labwc-desktop.service`; the panel and desktop menu are
-interactive with keyboard and touch input; and NetworkManager owns the active
-network connection.
+- **CPU1:** Follow the [vision and AI jobs guide (Chinese)](cpu1-ai-jobs.zh-CN.md)
+  for real frames and supported jobs' numerical results. Tests occupy CPU1;
+  first confirm no other application owns the job interface.
+- **VGLite:** Check greeter/desktop configuration, processes, VGLite device
+  handles and error logs, then run the Wayland session tests in
+  [display validation](display-validation.md). Do not run the raw
+  `tdvp-display-smoke` DRM-master/modeset test during a desktop session.
+  Use the dedicated KMS maintenance workflow after saving desktop work.
+- **Input and session:** Test Menu, Fn, touch, workspaces, login, rejection of
+  incorrect passwords, idle lock, screen-off, wake and successful unlock.
+- **Board functions:** Physically test all three keyboard-backlight levels,
+  Wi-Fi and audio capture/playback. Use the actual enumerated USB Ethernet name.
+  Inspect I2C sysfs bindings first; establish bus and resource ownership before
+  active probing.
+- **Open items:** Record nRF52840 Bluetooth integration and LoRa RF tests
+  separately. Device-node presence does not establish transmit/receive acceptance.
+  Package installation and upgrades are paused; see [feed status](package-feed-status.md).
+
+Summarize results with the [V1.3 checklist](hardware-v1.3-acceptance.md).
+Mark skipped or unattached items as untested and give the reason.

@@ -1,0 +1,177 @@
+#!/bin/sh
+#
+# Exercise the VGLite driver's per-file recovery only when no VGLite compositor
+# owns the single K230 hardware context. This wrapper has no DRM implementation
+# of its own: every child is the deliberately off-screen tdvp-vglite-probe,
+# which never becomes DRM master, creates a framebuffer, modesets, submits an
+# atomic state, or page-flips. It is a maintenance test, not a live-desktop gate.
+
+set -eu
+
+PROBE="${TDVP_VGLITE_PROBE:-/usr/bin/tdvp-vglite-probe}"
+PROC_ROOT="${TDVP_PROC_ROOT:-/proc}"
+iterations=30
+frames=4
+timeout_seconds=15
+
+usage() {
+	cat <<EOF
+Usage: $0 [--iterations N] [--frames N] [--timeout-seconds N] [--probe PATH]
+
+Sequentially starts and exits N off-screen VGLite probe processes only after
+confirming that no same-user Labwc process is using WLR_RENDERER=vglite. Each
+probe has a wall-clock deadline. On expiry this wrapper requests that probe's
+whole process group terminate and exits immediately without starting another
+probe.
+
+Run it only as the graphical login user after Labwc has stopped or while Labwc
+deliberately uses Pixman. Preserve stdout/stderr with kernel logs. The obsolete
+--expect-vglite-compositor option is rejected because it used to invite a second
+VGLite client while the desktop owned the device.
+EOF
+}
+
+fail() {
+	printf '%s\n' "tdvp-vglite-client-churn: ERROR: $*" >&2
+	exit 1
+}
+
+require_positive_integer() {
+	case "$2" in
+		''|*[!0-9]*) fail "$1 must be a positive integer" ;;
+	esac
+	[ "$2" -gt 0 ] || fail "$1 must be a positive integer"
+}
+
+refuse_live_vglite_labwc() {
+	# K230's VGLite driver declares one hardware context.  A second VGLite
+	# process is not a benign stress client while the compositor owns that
+	# context: it can corrupt the compositor's output even when every process
+	# returns success.  The graphical user may still run this tool after Labwc
+	# has stopped or while Labwc deliberately uses Pixman.
+	for pid in $(pgrep -u "$(id -u)" -x labwc 2>/dev/null || true); do
+		[ -r "${PROC_ROOT}/${pid}/environ" ] || continue
+		if tr '\000' '\n' < "${PROC_ROOT}/${pid}/environ" |
+			grep -Fx 'WLR_RENDERER=vglite' >/dev/null 2>&1; then
+			fail "K230 VGLite is a single-context driver: refusing churn while Labwc pid ${pid} owns VGLite"
+		fi
+	done
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--expect-vglite-compositor)
+			fail "--expect-vglite-compositor is obsolete: this maintenance test refuses a live VGLite compositor"
+			;;
+		--iterations)
+			[ "$#" -ge 2 ] || fail "--iterations requires a value"
+			iterations="$2"
+			shift
+			;;
+		--frames)
+			[ "$#" -ge 2 ] || fail "--frames requires a value"
+			frames="$2"
+			shift
+			;;
+		--timeout-seconds)
+			[ "$#" -ge 2 ] || fail "--timeout-seconds requires a value"
+			timeout_seconds="$2"
+			shift
+			;;
+		--probe)
+			[ "$#" -ge 2 ] || fail "--probe requires a value"
+			PROBE="$2"
+			shift
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			fail "unknown option: $1"
+			;;
+	esac
+	shift
+done
+
+require_positive_integer iterations "$iterations"
+require_positive_integer frames "$frames"
+require_positive_integer timeout_seconds "$timeout_seconds"
+[ "$(id -u)" -ne 0 ] || fail "run as the graphical login user, not root"
+[ -x "$PROBE" ] || fail "probe is not executable: $PROBE"
+[ -r /dev/vg_lite ] || fail "cannot read /dev/vg_lite"
+[ -w /dev/vg_lite ] || fail "cannot write /dev/vg_lite"
+command -v setsid >/dev/null 2>&1 || fail "setsid is required for bounded probe cleanup"
+refuse_live_vglite_labwc
+
+# An outer wall-clock deadline cannot recover a process sleeping inside the
+# vendor driver's historical VG_LITE_INFINITE wait. Require the kernel-side
+# 0059/0060 watchdog to be present and guaranteed to fire before this wrapper's
+# own child deadline. This constrains a maintenance probe without making it safe
+# to run concurrently with a VGLite compositor.
+watchdog_parameter=''
+watchdog_ms=''
+for candidate in \
+	/sys/module/vglite/parameters/infinite_wait_watchdog_ms \
+	/sys/module/vg_lite/parameters/infinite_wait_watchdog_ms; do
+	[ -r "$candidate" ] || continue
+	watchdog_parameter="$candidate"
+	watchdog_ms="$(cat "$candidate" 2>/dev/null || true)"
+	break
+done
+case "$watchdog_ms" in
+	''|*[!0-9]*|0)
+		fail "refusing client churn without a positive VGLite infinite-wait watchdog; deploy the 0059/0060 kernel candidate first"
+		;;
+esac
+deadline_ms=$((timeout_seconds * 1000))
+[ "$watchdog_ms" -le "$deadline_ms" ] ||
+	fail "VGLite wait watchdog ${watchdog_ms}ms from $watchdog_parameter exceeds the per-probe deadline ${deadline_ms}ms"
+
+printf '%s\n' \
+	"tdvp-vglite-client-churn: start mode=isolated-no-live-vglite-owner iterations=$iterations frames=$frames timeout_seconds=$timeout_seconds watchdog_parameter=$watchdog_parameter watchdog_ms=$watchdog_ms"
+
+run_probe_bounded() {
+	# The probe is normally a single process. Running it in its own session also
+	# lets the timeout path terminate any descendants created by a diagnostic
+	# wrapper, without signalling this runner or the compositor session.
+	setsid "$PROBE" --frames "$frames" --source-width 64 --source-height 64 \
+		--target-format bgrx --blit-api normal &
+	probe_pid=$!
+	deadline=$(( $(date +%s) + timeout_seconds ))
+
+	while kill -0 "$probe_pid" 2>/dev/null; do
+		if [ "$(date +%s)" -ge "$deadline" ]; then
+			printf '%s\n' \
+				"tdvp-vglite-client-churn: TIMEOUT iteration=$iteration/$iterations pid=$probe_pid deadline_seconds=$timeout_seconds process_group_termination_requested=yes" >&2
+			# BusyBox ash accepts a negative PID here as a process-group target.
+			# Do not wait after this request: a driver task in D state cannot be
+			# reaped, and the caller must regain control to preserve the failure
+			# evidence and avoid launching further probes.
+			kill -TERM -"$probe_pid" 2>/dev/null || true
+			return 124
+		fi
+		sleep 1
+	done
+
+	wait "$probe_pid"
+}
+
+iteration=1
+while [ "$iteration" -le "$iterations" ]; do
+	printf '%s\n' "tdvp-vglite-client-churn: iteration=$iteration/$iterations start"
+	if run_probe_bounded; then
+		:
+	else
+		status=$?
+		if [ "$status" -eq 124 ]; then
+			fail "iteration=$iteration/$iterations timed out; no further probes were started"
+		fi
+		fail "iteration=$iteration/$iterations probe failed status=$status"
+	fi
+	printf '%s\n' "tdvp-vglite-client-churn: iteration=$iteration/$iterations pass"
+	iteration=$((iteration + 1))
+done
+
+printf '%s\n' \
+	"tdvp-vglite-client-churn: PASS mode=isolated-no-live-vglite-owner iterations=$iterations frames=$frames"

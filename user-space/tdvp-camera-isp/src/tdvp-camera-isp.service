@@ -1,0 +1,32 @@
+[Unit]
+Description=TDVP GC2093 scalar CPU0 ISP
+Requires=tdvp-camera-modules.service
+After=tdvp-camera-modules.service
+PartOf=tdvp-camera-modules.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+Environment=ISP_MEDIA_SENSOR_DRIVER=/usr/lib/libvvcam.so
+ExecStart=/usr/bin/isp_media_server
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5
+LimitCORE=0
+MemoryMax=256M
+NoNewPrivileges=yes
+DevicePolicy=closed
+DeviceAllow=/dev/vvcam-isp.0 rw
+DeviceAllow=/dev/vvcam-mipi.0 rw
+DeviceAllow=/dev/vvcam-vb rw
+DeviceAllow=/dev/media0 rw
+DeviceAllow=/dev/tdvp-camera/isp-subdev rw
+DeviceAllow=/dev/tdvp-camera/capture rw
+DeviceAllow=/dev/tdvp-camera/output1 rw
+DeviceAllow=/dev/tdvp-camera/output2 rw
+DeviceAllow=/dev/tdvp-camera/output3 rw
+DeviceAllow=/dev/i2c-4 rw
+
+[Install]
+WantedBy=multi-user.target

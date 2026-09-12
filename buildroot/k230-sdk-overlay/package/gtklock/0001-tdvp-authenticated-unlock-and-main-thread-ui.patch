@@ -1,0 +1,338 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] require authenticated unlock and compositor-confirmed readiness
+
+Pair with the TDVP synchronous auth.c replacement installed by the package.
+Keep GTK calls on the main thread, do not retain window pointers across PAM,
+clear copied secrets, and fail closed on unauthenticated application shutdown.
+Show the current user and reduce margins for the board's landscape screen.
+Replace the racy daemon-ready signal with a bounded pipe acknowledgement sent
+only after the compositor confirms the session is locked.
+
+Upstream: Not submitted (TDVP-specific authentication backend integration)
+
+diff --git a/include/gtklock.h b/include/gtklock.h
+index 64c2f72..28e278e 100644
+--- a/include/gtklock.h
++++ b/include/gtklock.h
+@@ -14,6 +14,7 @@ struct GtkLock {
+ 	GtkApplication *app;
+ 	GtkSessionLockLock *lock;
+ 	pid_t parent;
++	int ready_fd;
+ 
+ 	GArray *windows;
+ 	GArray *messages;
+@@ -21,6 +22,8 @@ struct GtkLock {
+ 
+ 	struct Window *focused_window;
+ 	gboolean hidden;
++	/* Only successful PAM authentication may send Wayland unlock. */
++	gboolean authenticated;
+ 	guint idle_timeout;
+ 
+ 	guint draw_time_source;
+diff --git a/res/gtklock.ui b/res/gtklock.ui
+index 4a2ca89..4474d36 100644
+--- a/res/gtklock.ui
++++ b/res/gtklock.ui
+@@ -2,7 +2,7 @@
+ <interface>
+ 	<object class="GtkBox" id="window-box">
+ 		<property name="name">window-box</property>
+-		<property name="margin">100</property>
++		<property name="margin">24</property>
+ 		<property name="halign">center</property>
+ 		<property name="valign">center</property>
+ 		<property name="orientation">vertical</property>
+@@ -13,6 +13,12 @@
+ 				<property name="halign">center</property>
+ 				<property name="orientation">vertical</property>
+ 				<property name="spacing">5</property>
++				<child>
++					<object class="GtkLabel" id="username-label">
++						<property name="name">username-label</property>
++						<property name="halign">center</property>
++					</object>
++				</child>
+ 				<child>
+ 					<object class="GtkBox" id="time-box">
+ 						<property name="name">time-box</property>
+diff --git a/src/gtklock.c b/src/gtklock.c
+index 512b5ca..e8135d3 100644
+--- a/src/gtklock.c
++++ b/src/gtklock.c
+@@ -4,6 +4,8 @@
+ // gtklock application
+ 
+ #include <signal.h>
++#include <errno.h>
++#include <unistd.h>
+ #include <gtk/gtk.h>
+ 
+ #include "util.h"
+@@ -108,7 +110,12 @@ static void exec_command(const gchar *command) {
+ static void locked(GtkSessionLockLock *lock, void *data) {
+ 	struct GtkLock *gtklock = (struct GtkLock *)data;
+ 	module_on_locked(gtklock);
+-	if(gtklock->parent > 0) kill(gtklock->parent, SIGUSR1);
++	if(gtklock->ready_fd >= 0) {
++		ssize_t sent;
++		do { sent = write(gtklock->ready_fd, "L", 1); } while(sent < 0 && errno == EINTR);
++		close(gtklock->ready_fd);
++		gtklock->ready_fd = -1;
++	}
+ 	if(gtklock->lock_command) exec_command(gtklock->lock_command);
+ 	return;
+ }
+@@ -148,6 +155,9 @@ void gtklock_shutdown(struct GtkLock *gtklock) {
+ 		gtklock->idle_hide_source = 0;
+ 	}
+ 
++	/* SIGTERM / UI shutdown must leave the compositor locked. An active
++	 * lock cannot be destroyed without unlocking; let disconnect handle it. */
++	if(!gtklock->authenticated) return;
+ 	gtk_session_lock_lock_unlock_and_destroy(gtklock->lock);
+ 	gdk_display_sync(gdk_display_get_default());
+ 
+diff --git a/src/source.c b/src/source.c
+index cceab5e..3138db6 100644
+--- a/src/source.c
++++ b/src/source.c
+@@ -4,6 +4,10 @@
+ #define _POSIX_C_SOURCE 200809L
+ 
+ #include <signal.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <unistd.h>
+ #include <sys/wait.h>
+ #include <locale.h>
+ #include <glib-unix.h>
+@@ -85,6 +89,7 @@ static GOptionEntry debug_entries[] = {
+ };
+ 
+ static pid_t parent = -2;
++static int ready_fd = -1;
+ 
+ static void monitors_added(GdkDisplay *display, GdkMonitor *monitor, gpointer user_data) {
+ 	struct Window *w = NULL;
+@@ -97,13 +102,15 @@ static void monitors_removed(GdkDisplay *display, GdkMonitor *monitor, gpointer
+ 	struct Window *w = window_by_monitor(monitor);
+ 	if(w != NULL) {
+ 		if(gtklock->focused_window == w) {
+-			struct Window *any_window = g_array_index(gtklock->windows, struct Window*, 0);
+-			if(any_window == w) any_window = g_array_index(gtklock->windows, struct Window*, 1);
+-
+ 			gtklock->focused_window = NULL;
+-			if(any_window) window_swap_focus(any_window, w);
++			for(guint i = 0; i < gtklock->windows->len; ++i) {
++				struct Window *other = g_array_index(gtklock->windows, struct Window*, i);
++				if(other != w) {
++					gtklock_focus_window(gtklock, other);
++					break;
++				}
++			}
+ 		}
+-		gtk_session_lock_unmap_lock_window(GTK_WINDOW(w->window));
+ 		gtk_widget_destroy(w->window);
+ 	}
+ 	module_on_output_change(gtklock);
+@@ -228,29 +235,41 @@ static void attach_custom_style(const gchar *path) {
+ }
+ 
+ static void daemonize(void) {
+-	parent = getpid();
++	/* Report success only after the compositor's locked event. A pipe avoids
++	 * the SIGUSR1-before-sigprocmask race and signaling a recycled parent PID.
++	 * It is created before GTK starts threads; exec'd helpers cannot hold it. */
++	int ready[2];
++	if(pipe(ready) < 0 || fcntl(ready[0], F_SETFD, FD_CLOEXEC) < 0 ||
++			fcntl(ready[1], F_SETFD, FD_CLOEXEC) < 0)
++		report_error_and_exit("Failed to create lock readiness pipe");
+ 	pid_t pid = fork();
+ 	if(pid == -1) report_error_and_exit("Failed to daemonize!\n");
+ 	else if(pid != 0) {
+-		int status;
+-		waitpid(pid, &status, 0);
+-		if(WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS) {
+-			sigset_t set;
+-			sigemptyset(&set);
+-			sigaddset(&set, SIGUSR1);
+-			sigprocmask(SIG_BLOCK, &set, NULL);
+-			int ret = sigtimedwait(&set, NULL, &(struct timespec){ 1, 0 });
+-			if(ret == SIGUSR1)
+-				exit(EXIT_SUCCESS);
+-			exit(EXIT_FAILURE);
++		int status = 0;
++		pid_t waited;
++		close(ready[1]);
++		do { waited = waitpid(pid, &status, 0); } while(waited < 0 && errno == EINTR);
++		if(waited == pid && WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS) {
++			struct pollfd notification = {.fd = ready[0], .events = POLLIN};
++			char state = 0;
++			int available = poll(&notification, 1, 30000);
++			/* EOF, timeout, signal interruption and malformed readiness all fail. */
++			int success = available > 0 && (notification.revents & POLLIN) &&
++				read(ready[0], &state, 1) == 1 && state == 'L';
++			close(ready[0]);
++			exit(success ? EXIT_SUCCESS : EXIT_FAILURE);
+ 		}
+ 		report_error_and_exit("Failed to daemonize!\n");
+ 	}
+ 
+-	if(setsid() == -1) exit(EXIT_FAILURE);
++	close(ready[0]);
++	if(setsid() == -1) _exit(EXIT_FAILURE);
+ 	pid = fork();
+-	if(pid == -1) exit(EXIT_FAILURE);
+-	else if(pid != 0) exit(EXIT_SUCCESS);
++	if(pid == -1) _exit(EXIT_FAILURE);
++	else if(pid != 0) _exit(EXIT_SUCCESS);
++	/* If the invoking process times out/exits, retain the lock UI. */
++	signal(SIGPIPE, SIG_IGN);
++	ready_fd = ready[1];
+ }
+ 
+ static gboolean signal_handler(gpointer data) {
+@@ -336,6 +355,7 @@ int main(int argc, char **argv) {
+ 
+ 	gtklock->app = gtk_application_new(NULL, GTKLOCK_FLAGS);
+ 	gtklock->parent = parent;
++	gtklock->ready_fd = ready_fd;
+ 
+ 	gtklock->windows = g_array_new(FALSE, TRUE, sizeof(struct Window *));
+ 	gtklock->messages = g_array_new(FALSE, TRUE, sizeof(char *));
+diff --git a/src/window.c b/src/window.c
+index b5859cb..4c84d57 100644
+--- a/src/window.c
++++ b/src/window.c
+@@ -117,9 +117,6 @@ static void window_setup_messages(struct Window *ctx) {
+ }
+ 
+ static void window_set_busy(struct Window *ctx, gboolean busy) {
+-	if(busy) g_application_mark_busy(G_APPLICATION(gtklock->app));
+-	else g_application_unmark_busy(G_APPLICATION(gtklock->app));
+-
+ 	GdkCursor *cursor = gdk_cursor_new_from_name(gtk_widget_get_display(ctx->window), busy ? "wait" : "default");
+ 	gdk_window_set_cursor(gtk_widget_get_window(ctx->window), cursor);
+ 	g_object_unref(cursor);
+@@ -128,58 +125,57 @@ static void window_set_busy(struct Window *ctx, gboolean busy) {
+ 	gtk_widget_set_sensitive(ctx->input_field, !busy);
+ }
+ 
+-static gboolean window_pw_failure(gpointer data) {
+-	struct Window *ctx = data;
+-	window_set_busy(ctx, FALSE);
+-	gtk_entry_set_text(GTK_ENTRY(ctx->input_field), "");
+-	gtk_entry_grab_focus_without_selecting(GTK_ENTRY(ctx->input_field));
+-	gtk_label_set_text(GTK_LABEL(ctx->error_label), _("Login failed"));
+-	return G_SOURCE_REMOVE;
+-}
+-
+-static gboolean window_pw_message(gpointer data) {
+-	window_setup_messages((struct Window *)data);
++static gboolean window_pw_result(gpointer data) {
++	/* Runs on the main loop. No pointer to the original window is retained:
++	 * an output can disappear while PAM waits for unix_chkpwd. */
++	g_application_unmark_busy(G_APPLICATION(gtklock->app));
++	if(GPOINTER_TO_INT(data) == PW_SUCCESS) {
++		gtklock->authenticated = TRUE;
++		g_application_quit(G_APPLICATION(gtklock->app));
++		return G_SOURCE_REMOVE;
++	}
++	for(guint i = 0; i < gtklock->windows->len; ++i) {
++		struct Window *ctx = g_array_index(gtklock->windows, struct Window *, i);
++		window_set_busy(ctx, FALSE);
++		gtk_entry_set_text(GTK_ENTRY(ctx->input_field), "");
++		gtk_label_set_text(GTK_LABEL(ctx->error_label), _("Login failed"));
++	}
++	if(gtklock->focused_window)
++		gtk_entry_grab_focus_without_selecting(GTK_ENTRY(gtklock->focused_window->input_field));
+ 	return G_SOURCE_REMOVE;
+ }
+ 
+ static gpointer window_pw_wait(gpointer data) {
+-	struct Window *ctx = data;
+-	const char *password = gtk_entry_get_text((GtkEntry*)ctx->input_field);
+-	while(TRUE) {
+-		enum pwcheck ret = auth_pw_check(password);
+-		switch(ret) {
+-			case PW_FAILURE:
+-				g_main_context_invoke(NULL, window_pw_failure, ctx);
+-				return NULL;
+-			case PW_SUCCESS:
+-				g_application_quit(G_APPLICATION(gtklock->app));
+-				return NULL;
+-			case PW_ERROR:
+-				{
+-					char *err = auth_get_error();
+-					g_array_append_val(gtklock->errors, err);
+-					g_main_context_invoke(NULL, window_pw_message, ctx);
+-				}
+-				break;
+-			case PW_MESSAGE:
+-				{
+-					char *msg = auth_get_message();
+-					g_array_append_val(gtklock->messages, msg);
+-					g_main_context_invoke(NULL, window_pw_message, ctx);
+-				}
+-				break;
+-			case PW_WAIT:
+-				break;
+-		}
+-	}
+-
++	char *password = data;
++	enum pwcheck result = auth_pw_check(password);
++	volatile char *secret = password;
++	for(gsize i = 0, n = strlen(password); i < n; ++i) secret[i] = 0;
++	g_free(password);
++	/* Unlike main_context_invoke, idle_add never executes inline here. */
++	g_idle_add(window_pw_result, GINT_TO_POINTER(result));
++	return NULL;
+ }
+ 
+ void window_pw_check(GtkWidget *widget, gpointer data) {
+ 	struct Window *ctx = data;
+-	window_set_busy(ctx, TRUE);
+-	gtk_label_set_text(GTK_LABEL(ctx->error_label), NULL);
+-	g_thread_new(NULL, window_pw_wait, ctx);
++	if(g_application_get_is_busy(G_APPLICATION(gtklock->app))) return;
++	char *password = g_strdup(gtk_entry_get_text(GTK_ENTRY(ctx->input_field)));
++	g_application_mark_busy(G_APPLICATION(gtklock->app));
++	for(guint i = 0; i < gtklock->windows->len; ++i) {
++		struct Window *win = g_array_index(gtklock->windows, struct Window *, i);
++		window_set_busy(win, TRUE);
++		gtk_entry_set_text(GTK_ENTRY(win->input_field), "");
++		gtk_entry_set_visibility(GTK_ENTRY(win->input_field), FALSE);
++		gtk_label_set_text(GTK_LABEL(win->error_label), NULL);
++	}
++	GThread *worker = g_thread_try_new("pam-unlock", window_pw_wait, password, NULL);
++	if(worker) g_thread_unref(worker);
++	else {
++		volatile char *secret = password;
++		for(gsize i = 0, n = strlen(password); i < n; ++i) secret[i] = 0;
++		g_free(password);
++		window_pw_result(GINT_TO_POINTER(PW_FAILURE));
++	}
+ }
+ 
+ static void window_pw_set_vis(GtkEntry* entry, gboolean visibility) {
+@@ -357,6 +353,8 @@ struct Window *create_window(GdkMonitor *monitor) {
+ 	w->warning_label = GTK_WIDGET(gtk_builder_get_object(builder, "warning-label"));
+ 	
+ 	w->info_box = GTK_WIDGET(gtk_builder_get_object(builder, "info-box"));
++	GtkWidget *username = GTK_WIDGET(gtk_builder_get_object(builder, "username-label"));
++	if(username) gtk_label_set_text(GTK_LABEL(username), g_get_user_name());
+ 	w->time_box = GTK_WIDGET(gtk_builder_get_object(builder, "time-box"));
+ 
+ 	w->clock_label = GTK_WIDGET(gtk_builder_get_object(builder, "clock-label"));
+@@ -368,6 +366,7 @@ struct Window *create_window(GdkMonitor *monitor) {
+ 	if(gtklock->hidden) window_idle_hide(w);
+ 	module_on_window_create(gtklock, w);
+ 	gtk_widget_show_all(w->window);
++	window_set_busy(w, g_application_get_is_busy(G_APPLICATION(gtklock->app)));
+ 
+ 	g_object_unref(builder);
+ 	return w;

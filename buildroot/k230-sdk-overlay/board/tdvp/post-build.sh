@@ -104,12 +104,15 @@ while IFS= read -r -d '' file; do
     fi
 done < <(find "${TARGET_DIR}/etc" -type f -print0)
 
-# Keep the vendor camera/ISP service in the image. Remove only the optional
-# ADB/MTP and plaintext Telnet services from the target service inventory.
+# Vendor rootfs overlay is copied after packages, also on incremental builds.
+# Retire CPU0 ISP/KPU owners after that additive copy, including reused targets.
 rm -f \
+	"${TARGET_DIR}/etc/init.d/S31canaan_isp" \
 	"${TARGET_DIR}/etc/init.d/S40network" \
     "${TARGET_DIR}/etc/init.d/S41adb_mtp" \
     "${TARGET_DIR}/etc/init.d/S50telnet"
+bash "${SCRIPT_DIR}/cpu1/vision/retire-linux-owners.sh" "${TARGET_DIR}" "${HOST_DIR}/sbin/depmod"
+bash "${SCRIPT_DIR}/cpu1/vision/verify-rootfs.sh" "${TARGET_DIR}"
 
 # The product image uses OpenSSH for recovery. The root password comes from
 # BR2_TARGET_GENERIC_ROOT_PASSWD, and the final target writes the matching
@@ -306,9 +309,12 @@ arch noarch 1
 arch riscv64 10
 EOF
 cat > "${TARGET_DIR}/etc/opkg/tdvp-feed.conf" <<'EOF'
-# The sole package source is ABI-fixed for this base image.  Do not add a
-# generic OpenWrt, Debian, or arbitrary riscv64 source.
-src/gz tdvp_apps_r6 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r6/riscv64
+# The sole package source is ABI-fixed for this base image, but it deliberately
+# uses the stable channel rather than a particular immutable rN snapshot.
+# Feed release promotion may advance that signed channel without rebuilding
+# this image.  Do not add a generic OpenWrt, Debian, or arbitrary riscv64
+# source.
+src/gz tdvp_apps https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/stable/riscv64
 EOF
 cat > "${TARGET_DIR}/var/lib/opkg/status" <<'EOF'
 Package: tdvp-platform-abi
@@ -350,3 +356,9 @@ profile: k230_canmv_t_display_rm69a10_labwc_desktop_defconfig
 sdk_commit: 5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7
 linux_commit: 7d4e1f444f461dbe3833bd99a4640e7b6c2cd529
 EOF
+
+# Capture selected package versions from this build, without consulting a
+# feed or guessing versions from old SDK directories. The final file ownership
+# records are generated after mkusers and service finalization in post-fakeroot.
+make --no-print-directory -s -C "${O:?Buildroot output is missing}" show-info \
+	> "${BUILD_DIR:?Buildroot build directory is missing}/tdvp-package-info.json"

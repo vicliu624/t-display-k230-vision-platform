@@ -1,24 +1,31 @@
 # T-Display K230 V1.3 硬件契约
 
-Labwc 桌面 profile 使用固定 K230 Linux SDK 中的 T-Display K230 V1.3 板级配置。
-硬件集成通过标准 Linux 内核子系统和用户态接口暴露。
+当前 profile 使用 CPU0 Linux + CPU1 RT-Smart 的 AMP 分工。
+接口是否存在、驱动是否绑定、实际功能是否通过测试，需要分别记录。
 
-| 板级功能 | Linux 接口 | 镜像组件 |
+| 功能 | 资源归属与接口 | 验收范围 |
 | --- | --- | --- |
-| RM69A10 内置屏幕 | DRM/KMS `DSI-1`、`/dev/dri/card0` | Canaan DRM、Labwc 会话 |
-| GT9895 触摸 | Linux input event、libinput | 内核 touch fragment、`70-tdvp-touch.rules` |
-| 键盘扩展模块 | Linux input event | `tdvp-keyboard-layout.service` |
-| 键盘扩展 I2C 总线 | `/dev/i2c-*` | K230 keyboard/hardware fragment |
-| RTL8189FS Wi-Fi | `wlan0`、NetworkManager / `nmcli` | RTL8189FS 软件包与 NetworkManager |
-| RTL8152 USB 网卡 | `enu1`、NetworkManager / `nmcli` | 内核 r8152 驱动与 NetworkManager |
-| 摄像头与 ISP | V4L2/media 节点和 vendor ISP 服务 | `vvcam` package 和 vendor 服务 |
-| 音频录制/播放 | ALSA 设备 | ALSA 工具 |
-| GPIO 与 I2C 诊断 | GPIO character device、`/dev/i2c-*` | libgpiod 工具和 i2c-tools |
-| KPU 与 AI2D | K230 runtime 设备和 nncase 资源 | `libnncase`、`ai2d-kpu`、验收工具 |
+| RM69A10 屏幕、VGLite | CPU0，DRM/KMS、VGLite、Labwc | 登录页和桌面均使用 VGLite |
+| GT9895 触摸、键盘 | CPU0，Linux input/libinput | 按键、Fn、Menu、触摸与唤醒 |
+| 键盘背光 | CPU0，IO52 / PWM4，板级服务与 Quick Settings | 关闭、低亮、高亮的实物变化 |
+| RTL8189FS Wi-Fi | CPU0，NetworkManager | 扫描、连接、重连 |
+| RTL8152 USB 网卡 | CPU0，r8152、NetworkManager | 接入后按实际接口名检查 |
+| GC2093、VICAP/ISP、视觉缓冲区 | CPU1；Linux `/dev/tdvp-vision` | 真实帧、序号、尺寸、超时与生命周期 |
+| KPU、AI2D、FFT、相关 AI 内存 | CPU1；Linux `/dev/tdvp-ai` | 支持作业的数值与错误恢复 |
+| 音频采集/播放 | CPU0，ALSA/ASoC | 声卡、输入输出和扬声器 |
+| 电源、充电、电量及传感器 | Linux 已绑定驱动、sysfs、板级状态服务 | 结合实际装配检查 |
+| nRF52840 | 独立固件，K230 UART AT 主机工具 | UART 身份与 BLE 功能尚待实机打通 |
+| LoRa | Linux 传输与板级控制 | 枚举/电源状态与 RF 收发分别验收 |
 
-可拆卸键盘扩展模块在同一块物理硬件上提供键盘、背光、BQ25896 充电管理、BQ27220
-电量计，以及可选 nRF9151 LTE-M/GNSS 硬件。它的 I2C 总线使用 IO32 SCL 和 IO33 SDA。
-V1.3 profile 保留 K256-04 和 K256-04-A 两个变体所需的板级连线。K256-04-A 设备不会
-枚举 nRF9151。
+Linux profile 停用直接占有摄像头/ISP、GNNE/KPU 和 AI2D 的旧链路。
+`tdvp-vision` 与 `tdvp-ai` 是跨核接口；Linux 的 CPU 数量预期为 1。
 
-镜像中的板级集成服务设置键盘背光，并通过标准设备文件和服务状态发布硬件状态。
+扬声器 I2S 路由使用 IO32 BCLK、IO33 LRCK、IO35 DATA，GPIO34 由 ASoC 控制。
+键盘背光使用 IO52 的 PWM，默认档位为 0%、33%、100%。查引脚时应以当前板级
+DTS、补丁与硬件版本共同核对，避免把旧版键盘扩展总线描述套用到音频引脚上。
+
+扩展模块的传感器和可选 nRF9151 取决于实物型号。nRF9151 与 nRF52840 分开管理。
+nRF52840 的官方 AT 应用尚未映射成 BlueZ HCI 控制器，顶部栏蓝牙缺项仍是未完成的集成。
+
+操作与证据要求见 [基线验证](hardware-baseline-validation.zh-CN.md) 和
+[V1.3 验收清单](hardware-v1.3-acceptance.zh-CN.md)。

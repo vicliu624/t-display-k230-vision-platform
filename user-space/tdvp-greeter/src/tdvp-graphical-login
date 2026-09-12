@@ -1,0 +1,83 @@
+#!/bin/sh
+# Select the greetd default session.  It deliberately does not restart greetd:
+# callers can inspect the selected mode before interrupting a desktop.
+set -eu
+
+config_file="${TDVP_GREETD_CONFIG_FILE:-/etc/greetd/config.toml}"
+
+usage() {
+	printf '%s\n' "usage: ${0##*/} status | select {autologin|greeter}" >&2
+	exit 2
+}
+
+read_mode() {
+	if grep -qx 'command = "/usr/local/bin/tdvp-labwc-session"' "${config_file}" && \
+		grep -qx 'user = "tdvp"' "${config_file}"; then
+		printf '%s\n' autologin
+	elif grep -qx 'command = "/usr/local/bin/tdvp-greeter-session"' "${config_file}" && \
+		grep -qx 'user = "greeter"' "${config_file}"; then
+		printf '%s\n' greeter
+	else
+		printf '%s\n' unknown
+	fi
+}
+
+require_root() {
+	if [ "$(id -u)" -ne 0 ]; then
+		printf '%s\n' 'tdvp-graphical-login: root is required to change the boot mode' >&2
+		exit 1
+	fi
+}
+
+write_mode() {
+	selected_mode=$1
+	mkdir -p "$(dirname "${config_file}")"
+	temporary_file="${config_file}.tmp.$$"
+	case "${selected_mode}" in
+		autologin)
+			cat > "${temporary_file}" <<'EOF'
+[terminal]
+vt = 1
+
+[default_session]
+command = "/usr/local/bin/tdvp-labwc-session"
+user = "tdvp"
+EOF
+			;;
+		greeter)
+			cat > "${temporary_file}" <<'EOF'
+[terminal]
+vt = 1
+
+[default_session]
+command = "/usr/local/bin/tdvp-greeter-session"
+user = "greeter"
+EOF
+			;;
+	esac
+	chmod 0644 "${temporary_file}"
+	mv -f "${temporary_file}" "${config_file}"
+}
+
+case "${1:-}" in
+	status)
+		[ "$#" -eq 1 ] || usage
+		printf 'configured=%s\nrestart_required=yes\n' "$(read_mode)"
+		;;
+	select)
+		[ "$#" -eq 2 ] || usage
+		require_root
+		case "${2}" in
+			autologin|greeter)
+				write_mode "${2}"
+				printf 'configured=%s\napply_with=systemctl restart greetd\n' "${2}"
+				;;
+			*)
+				usage
+				;;
+		esac
+		;;
+	*)
+		usage
+		;;
+esac

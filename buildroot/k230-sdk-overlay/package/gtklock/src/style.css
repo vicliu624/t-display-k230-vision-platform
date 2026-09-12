@@ -1,0 +1,37 @@
+/* Same visual family as the greeter; bounded for 1232x568 landscape. */
+window {
+  background-color: #e9e4d5;
+  color: #171717;
+  font-family: "DejaVu Sans Mono";
+  font-size: 22px;
+}
+#window-box {
+  background-color: #f4f0e6;
+  border: 2px solid #2a2a2a;
+  box-shadow: 6px 6px #bdb5a4;
+  padding: 22px 32px;
+}
+#username-label { font-weight: bold; font-size: 26px; }
+window.focused:not(.hidden) #clock-label { font-size: 28px; }
+window.focused:not(.hidden) #date-label { font-size: 18px; }
+#input-field {
+  color: #171717;
+  background-color: #f8f4ea;
+  border: 2px solid #2a2a2a;
+  border-radius: 0;
+  min-height: 48px;
+  padding: 6px 14px;
+}
+#input-field:focus { box-shadow: inset 0 -5px #e66a2c; }
+#unlock-button {
+  color: #171717;
+  background-color: #e66a2c;
+  background-image: none;
+  border: 2px solid #2a2a2a;
+  border-radius: 0;
+  min-height: 48px;
+  padding: 6px 24px;
+  font-weight: bold;
+}
+#error-label { color: #a71919; font-size: 18px; }
+#warning-label { color: #794900; font-size: 18px; }
