@@ -43,3 +43,26 @@ ln -sfn ../../../../usr/lib/systemd/system/NetworkManager.service \
 	"${WANTS_DIR}/NetworkManager.service"
 ln -sfn ../../../../usr/lib/systemd/system/tdvp-rootfs-expand.service \
 	"${WANTS_DIR}/tdvp-rootfs-expand.service"
+
+# Emit the image-owned opkg descriptor from the finalized target tree.  The
+# release collector and feed validator consume this descriptor to bind
+# runtime ownership to the exact image that was built.
+SEED_OPKG_IMAGE="$(dirname "$0")/seed-opkg-image.py"
+OUTPUT_ROOT="$(dirname "$TARGET_DIR")"
+BUILD_INFO=""
+BUILD_DIR=""
+SEARCH_ROOT="$OUTPUT_ROOT"
+for _ in 1 2 3 4 5; do
+	if [ -s "$SEARCH_ROOT/build/tdvp-package-info.json" ]; then
+		BUILD_INFO="$SEARCH_ROOT/build/tdvp-package-info.json"
+		BUILD_DIR="$SEARCH_ROOT/build"
+		break
+	fi
+	SEARCH_ROOT="$(dirname "$SEARCH_ROOT")"
+done
+if [ -s "$BUILD_INFO" ]; then
+	python3 "$SEED_OPKG_IMAGE" --target-root "$TARGET_DIR" \
+		--build-info "$BUILD_INFO" --build-dir "$BUILD_DIR"
+else
+	python3 "$SEED_OPKG_IMAGE" --target-root "$TARGET_DIR"
+fi
