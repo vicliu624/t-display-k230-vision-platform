@@ -766,6 +766,12 @@ fi
 # vendor side artifact directory available for every configured build.
 mkdir -p "$OUTPUT_DIR/images/deb"
 
+# Export the Buildroot package ownership records before fakeroot finalization.
+# post-fakeroot.sh consumes this file to seed the production opkg image
+# descriptor with verified preinstalled package metadata.
+mkdir -p "$OUTPUT_DIR/build"
+run_buildroot_target show-info > "$OUTPUT_DIR/build/tdvp-package-info.json"
+
 "${BUILD_ENV[@]}" make -j"${build_jobs}" -C "$OUTPUT_DIR" "$@"
 
 # For kernel-bearing targets, prove the reviewed 0053 patch is still
