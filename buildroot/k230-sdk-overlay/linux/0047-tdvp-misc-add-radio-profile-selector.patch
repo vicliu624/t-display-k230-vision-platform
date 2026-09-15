@@ -69,7 +69,7 @@ diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot
 +	};
 +
  	tdvp_keyboard_backlight_pin: tdvp-keyboard-backlight-pin {
- 		pins = <52>;
+ 		pins = "io52";
  		function = "alt2";
 diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
 --- a/drivers/misc/Kconfig

@@ -1,0 +1,48 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+set -eu
+case "${1:-}" in
+    start)
+        if grep -q '^vvcam_' /proc/modules; then
+            echo 'Refusing to replace pre-existing VVCAM modules' >&2
+            exit 1
+        fi
+        # Check before opening hardware. Stripping/replacing this binary is
+        # forbidden: its scalar code and legacy sensor ABI were validated.
+        printf '%s  %s\n' \
+            5d3e7bd8914cd2a3d9ca9da03a2743e7bd8ab24b9cb090929950b632ffb833ce \
+            /usr/bin/isp_media_server | sha256sum -c -
+        loaded=''
+        cleanup() {
+            for module in $loaded; do modprobe -r "$module" || true; done
+        }
+        trap cleanup EXIT
+        trap 'exit 1' HUP INT TERM
+        modprobe vvcam_mipi
+        loaded="vvcam_mipi $loaded"
+        test -c /dev/vvcam-mipi.0
+        /usr/libexec/tdvp-gc2093-chip-id
+        modprobe vvcam_vb enable_cma=1
+        loaded="vvcam_vb $loaded"
+        modprobe vvcam_isp
+        loaded="vvcam_isp $loaded"
+        modprobe vvcam_isp_subdev devices_mask=1
+        loaded="vvcam_isp_subdev $loaded"
+        modprobe vvcam_video devices_mask=1 mcm_mask=0
+        loaded="vvcam_video $loaded"
+        udevadm settle --timeout=5
+        /usr/libexec/tdvp-camera-device --media0-check
+        /usr/libexec/tdvp-camera-device
+        for node in capture output1 output2 output3 isp-subdev; do
+            test -c "/dev/tdvp-camera/$node"
+        done
+        trap - EXIT HUP INT TERM
+        ;;
+    stop)
+        # systemd orders ISP shutdown before this unit's ExecStop.
+        for module in vvcam_video vvcam_isp_subdev vvcam_isp vvcam_vb vvcam_mipi; do
+            if [ -d "/sys/module/$module" ]; then modprobe -r "$module"; fi
+        done
+        ;;
+    *) echo 'usage: tdvp-camera-modules start|stop' >&2; exit 2 ;;
+esac

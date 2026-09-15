@@ -1,32 +1,37 @@
 # K230 SDK Overlay
 
 This overlay is copied into the pinned K230 Linux SDK worktree before
-configuration. It supplies the board configuration and the local package
-recipes required by the image.
+configuration. Staging also synchronizes local sources from `user-space/*/src`
+and verifies their content against a manifest.
 
-## Active Board Profile
+## Active board profile
 
 ```text
 configs/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig
 ```
 
-## Local Packages
+## Main selected packages
 
 | Package | Responsibility |
 | --- | --- |
-| `gtk-layer-shell` | Layer-shell protocol support for the panel. |
-| `tdvp-labwc-desktop` | Authenticated Labwc session, XKB/touch integration, PCManFM desktop and Raspberry Pi `wf-panel-pi` panel startup. |
-| `nm-connection-editor` | Upstream NetworkManager connection editor used by the panel. |
-| `tdvp-opkg-trust` | Signed ABI-fixed application-feed public-key bootstrap. |
-| `tdvp-display-smoke` | DRM/KMS display acceptance utility. |
-| `tdvp-keyboard-layout` | T-Display K230 keyboard layout service. |
-| `tdvp-wayland-acceptance` | Wayland session acceptance utility. |
-| `tdvp-kpu-acceptance` | KPU runtime acceptance utility. |
-| `vicliu-pocket-linux-hardware` | Board hardware state publisher and integration service. |
+| `gtk-layer-shell`, `wf-panel-pi`, `wfplug-*` | Panel, app menu, network, volume, battery and clock |
+| `tdvp-greetd`, `tdvp-gtkgreet`, `tdvp-greeter` | Selected-account login and VGLite greeter |
+| `tdvp-labwc-desktop` | VGLite desktop, input, PCManFM, panel and session lifecycle |
+| `gtklock`, `gtk-session-lock`, `swayidle`, `wlopm` | Password window, session lock, idle timing and screen-off |
+| `tdvp-quick-settings` | Independent touch control center |
+| `tdvp-cpu1-vision` | Linux vision/AI kernel bridge and public ABI headers |
+| `tdvp-display-smoke` | Maintenance-mode DRM/KMS acceptance |
+| `tdvp-vglite-acceptance`, `tdvp-wayland-acceptance` | VGLite and Wayland acceptance tools |
+| `tdvp-keyboard-layout`, `vicliu-pocket-linux-hardware` | Keyboard configuration, board control/status and nRF AT host utility |
+| `nm-connection-editor` | NetworkManager connection editing |
+| `tdvp-opkg-trust` | Public signing key and on-demand trust initialization |
 
-`board/tdvp/` contains the rootfs hooks, Linux fragments, deterministic image
-configuration, first-boot root expansion and image verification script.
-`linux/` contains the tracked K230 kernel patch sequence.
+The board build produces paired CPU1 RT-Smart firmware and writes it into the
+whole-card raw area. Legacy `tdvp-camera-isp`, `tdvp-camera-isp-runtime` and
+`tdvp-kpu-acceptance` recipes remain in source but are not selected by the
+current profile. The base desktop excludes the Camera demo, Swaybg and browsers.
 
-Package registration is performed by
-`buildroot/tools/register-k230-sdk-tdvp-packages.sh` during worktree staging.
+`board/tdvp/` holds rootfs hooks, Linux fragments, image layout and verification.
+`linux/` holds the controlled kernel patch queue.
+`buildroot/tools/register-k230-sdk-tdvp-packages.sh` registers packages during staging.
+See [feed status](../../docs/package-feed-status.md) for its acceptance boundaries.

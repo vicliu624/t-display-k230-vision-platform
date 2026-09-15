@@ -1,0 +1,39 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] riscv: dts: enable UART1 for the nRF52840 BLE AT bridge
+
+The optional keyboard/base nRF52840 speaks the LilyGO AT protocol on
+GPIO3 TX / GPIO4 RX at 115200 8N1. A static ttyS1 node without an enabled
+UART platform device is not a working transport. Keep UART0 for Linux,
+UART2 for the radio mux, and UART3 reserved for CPU1 RT-Smart.
+
+diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+--- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
++++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+@@ -10,2 +10,3 @@
+ 	aliases {
++		serial1 = &uart1;
+ 		serial2 = &uart2;
+@@ -66,2 +67,23 @@
+ &uart0 { status = "okay"; };
++&uart1 {
++	status = "okay";
++	pinctrl-names = "default";
++	pinctrl-0 = <&tdvp_nrf52840_pins>;
++};
++&iomux {
++	tdvp_nrf52840_pins: tdvp-nrf52840-pins {
++		tx {
++			pins = K230_IO3;
++			function = K230_IO3_UART1_TXD;
++			output-enable;
++			drive-strength = <8>;
++		};
++		rx {
++			pins = K230_IO4;
++			function = K230_IO4_UART1_RXD;
++			input-enable;
++			drive-strength = <8>;
++		};
++	};
++};
+ &uart2 { status = "okay"; };

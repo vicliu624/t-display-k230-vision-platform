@@ -15,6 +15,7 @@ WF_PANEL_PI_DEPENDENCIES = \
 	gtkmm3 \
 	libevdev \
 	libinput \
+	libmenu-cache \
 	libxml2 \
 	wayland-protocols
 $(eval $(meson-package))

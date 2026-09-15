@@ -1,0 +1,7 @@
+# Renderer selection for authenticated Labwc sessions.
+#
+# The product selects the pinned VGLite stack. The image-owned vglite-enabled
+# policy must also be installed. An absent policy or a tripped per-user
+# breaker blocks desktop startup. No software fallback is permitted.
+# Selecting VGLite is not itself a hardware Gate result.
+TDVP_RENDERER_PROFILE=vglite

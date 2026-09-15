@@ -1,0 +1,7 @@
+vvcam_mipi
+vvcam_vb
+vvcam_isp
+vvcam_isp_subdev
+vvcam_video
+k230_gnne
+k230_ai2d

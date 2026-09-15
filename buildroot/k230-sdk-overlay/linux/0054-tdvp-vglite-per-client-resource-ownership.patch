@@ -1,0 +1,188 @@
+From 7d4e1f444f461dbe3833bd99a4640e7b6c2cd529 Mon Sep 17 00:00:00 2001
+From: TDVP Display Team <display@tdvp.local>
+Date: Thu, 4 Sep 2026 03:10:00 +0800
+Subject: [PATCH] gpu: vglite: keep resources scoped to the owning file
+
+The K230 VGLite driver keeps allocation and DMA-BUF mapping lists on the
+global device. Its release path frees both lists, so closing any
+/dev/vg_lite file can invalidate GPU handles still in use by another VGLite
+client such as the compositor. The global active-client pointer used by the
+vendor command path is also unprotected, allowing concurrent ioctls to change
+which client receives new resources.
+
+Move both resource lists into the per-file private data, initialize them on
+open, and free only that file's outstanding entries at release. Serialize
+ioctl execution and release while publishing the active client, which is also
+the correct serialization boundary for the driver's single hardware context.
+
+This intentionally leaves cache policy unchanged. In particular it does not
+claim that VG_LITE_CACHE implements a dirty-range synchronization contract.
+---
+ drivers/gpu/vglite/vg_lite_hal.c | 44 ++++++++++++++++++++++++++++++---------
+ 1 file changed, 34 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/gpu/vglite/vg_lite_hal.c b/drivers/gpu/vglite/vg_lite_hal.c
+index dc4e8fc323e04..6fadd65943f1f 100644
+--- a/drivers/gpu/vglite/vg_lite_hal.c
++++ b/drivers/gpu/vglite/vg_lite_hal.c
+@@ -54,6 +54,7 @@
+ #include <linux/vmalloc.h>
+ #include <linux/mman.h>
+ #include <linux/mm_types.h>
++#include <linux/mutex.h>
+ #include <linux/io.h>
+ #include <linux/of_platform.h>
+ #include <linux/of_gpio.h>
+@@ -131,8 +132,6 @@ struct vg_lite_device {
+ 	struct device *dev;
+ 	struct clk *clk;
+ 	struct reset_control *reset;
+-	struct list_head dma_list_head;
+-	struct list_head mapped_list_head;
+ 	int created;
+ };
+ 
+@@ -140,13 +139,21 @@ struct client_data {
+ 	struct vg_lite_device *device;
+ 	struct vm_area_struct *vm;
+ 	void *contiguous_mapped;
++	/* Allocations and DMA-BUF mappings belong to this /dev/vg_lite file. */
++	struct list_head dma_list_head;
++	struct list_head mapped_list_head;
+ };
+ 
+ /* Data and objects declarations. */
+ static int cached = 1;
+ 
+ static struct vg_lite_device *device;
+-static struct client_data *private_data;
++/*
++ * The vendor command implementation has no file argument. Keep its current
++ * owner explicit, and protect it together with the single hardware context.
++ */
++static struct client_data *active_client;
++static DEFINE_MUTEX(vg_lite_client_lock);
+ 
+ void vg_lite_hal_delay(u32 milliseconds)
+ {
+@@ -188,8 +195,11 @@ enum vg_lite_error vg_lite_hal_allocate_contiguous(unsigned long size,
+ 						void **logical, void **klogical,
+ 						u32 *physical, void **node)
+ {
+-	struct dma_node *n = kmalloc(sizeof(struct dma_node), GFP_KERNEL);
++	struct dma_node *n;
+ 
++	if (unlikely(!active_client))
++		return VG_LITE_NO_CONTEXT;
++	n = kmalloc(sizeof(struct dma_node), GFP_KERNEL);
+ 	if (!n)
+ 		return VG_LITE_OUT_OF_MEMORY;
+ #define MANUAL_ALIGN 1
+@@ -213,7 +223,7 @@ enum vg_lite_error vg_lite_hal_allocate_contiguous(unsigned long size,
+ 		kfree(n);
+ 		return VG_LITE_OUT_OF_RESOURCES;
+ 	}
+-	list_add(&n->list, &device->dma_list_head);
++	list_add(&n->list, &active_client->dma_list_head);
+ #if MANUAL_ALIGN
+ 	*klogical = (u8 *)VG_LITE_PAD((size_t)n->virt_addr, 64);
+ 	*logical = (u8 *)VG_LITE_PAD((size_t)n->map.logical, 64);
+@@ -243,10 +253,13 @@ void vg_lite_hal_free_os_heap(void)
+ 	struct dma_node *dn2;
+ 	struct mapped_memory *mapped, *_mapped;
+ 
+-	list_for_each_entry_safe(dn, dn2, &device->dma_list_head, list) {
++	if (!active_client)
++		return;
++
++	list_for_each_entry_safe(dn, dn2, &active_client->dma_list_head, list) {
+ 		vg_lite_hal_free_contiguous(dn);
+ 	}
+-	list_for_each_entry_safe(mapped, _mapped, &device->mapped_list_head, list) {
++	list_for_each_entry_safe(mapped, _mapped, &active_client->mapped_list_head, list) {
+ 		vg_lite_hal_unmap(mapped);
+ 	}
+ }
+@@ -409,6 +422,8 @@ void *vg_lite_hal_map(uint32_t flags, uint32_t bytes, void *logical,
+ {
+ 	struct mapped_memory *mapped;
+ 
++	if (unlikely(!active_client))
++		return NULL;
+ 	mapped = kmalloc(sizeof(struct mapped_memory), GFP_KERNEL);
+ 	if (mapped == NULL)
+ 		return NULL;
+@@ -445,7 +460,7 @@ void *vg_lite_hal_map(uint32_t flags, uint32_t bytes, void *logical,
+ 		return NULL;
+ 	}
+ 
+-	list_add(&mapped->list, &device->mapped_list_head);
++	list_add(&mapped->list, &active_client->mapped_list_head);
+ 	return mapped;
+ 
+ error:
+@@ -486,6 +501,8 @@ int drv_open(struct inode *inode, struct file *file)
+ 	}
+ 	data->device = device;
+ 	data->contiguous_mapped = NULL;
++	INIT_LIST_HEAD(&data->dma_list_head);
++	INIT_LIST_HEAD(&data->mapped_list_head);
+ 	file->private_data = data;
+ 	return 0;
+ }
+@@ -495,7 +512,11 @@ int drv_release(struct inode *inode, struct file *file)
+ {
+ 	struct client_data *data = (struct client_data *)file->private_data;
+ 
++	mutex_lock(&vg_lite_client_lock);
++	active_client = data;
+ 	vg_lite_hal_free_os_heap();
++	active_client = NULL;
++	mutex_unlock(&vg_lite_client_lock);
+ 	kfree(data);
+ 	file->private_data = NULL;
+ 	vg_lite_hal_close();
+@@ -540,8 +561,9 @@ long drv_ioctl(/*struct inode *inode, */ struct file *file,
+ 	/* inode will be not used */
+ 	//(void)inode;
+ #endif
+-	private_data = (struct client_data *)file->private_data;
+-	if (!private_data)
++	struct client_data *client = (struct client_data *)file->private_data;
++
++	if (!client)
+ 		return -1;
+ 
+ 	if (ioctl_code != VG_LITE_IOCTL)
+@@ -567,7 +589,11 @@ long drv_ioctl(/*struct inode *inode, */ struct file *file,
+ 	} else {
+ 		dev_err(device->dev, "ioctl unknown command\n");
+ 	}
++	mutex_lock(&vg_lite_client_lock);
++	active_client = client;
+ 	arguments.error = vg_lite_kernel(arguments.command, data);
++	active_client = NULL;
++	mutex_unlock(&vg_lite_client_lock);
+ 
+ 	if (copy_to_user(arguments.buffer, data, arguments.bytes) != 0)
+ 		goto error;
+@@ -664,8 +690,6 @@ static int vg_lite_exit(struct platform_device *pdev)
+ 			/* Free the IRQ. */
+ 			free_irq(platform_get_irq(pdev, 0) /*GPU_IRQ*/, device);
+ 
+-		vg_lite_hal_free_os_heap();
+-
+ 		if (device->created)
+ 			/* Destroy the device. */
+ 			device_destroy(device->class, MKDEV(device->major, 0));
+@@ -776,8 +800,6 @@ static int vg_lite_init(struct platform_device *pdev)
+ 	}
+ 	device->created = 1;
+ 
+-	INIT_LIST_HEAD(&device->dma_list_head);
+-	INIT_LIST_HEAD(&device->mapped_list_head);
+ 	if (dma_set_mask_and_coherent(device->dev, DMA_BIT_MASK(32))) {
+ 		dev_err(device->dev, "dma_set_mask_and_coherent error\n");
+ 		vg_lite_exit(pdev);
+-- 
+2.47.1

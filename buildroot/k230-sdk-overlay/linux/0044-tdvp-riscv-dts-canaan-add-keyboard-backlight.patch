@@ -10,7 +10,7 @@ index e37c0d2..a522247 100644
  #include "k230.dtsi"
  #include "display-rm69a10-568x1232.dtsi"
  / {
-@@ -32,6 +33,22 @@
+@@ -32,6 +33,27 @@
  
  &uart0 { status = "okay"; };
  &uart3 { status = "okay"; };
@@ -18,8 +18,13 @@ index e37c0d2..a522247 100644
 +	keyboard_backlight: keyboard-backlight {
 +		compatible = "pwm-backlight";
 +		pwms = <&pwm3_5 1 50000 PWM_POLARITY_INVERTED>;
-+		brightness-levels = <0 8 16 24 40 64 96 128 160 208 255>;
-+		default-brightness-level = <9>;
++		/*
++		 * pwm3_5 only accepts inverted polarity.  Its duty time is therefore
++		 * the low portion of IO52: complement the electrical brightness curve
++		 * so Linux brightness 0 is off and brightness 10 is fully on.
++		 */
++		brightness-levels = <255 247 239 231 215 191 159 127 95 47 0>;
++		default-brightness-level = <10>;
 +		status = "okay";
 +	};
 +};
@@ -33,12 +38,12 @@ index e37c0d2..a522247 100644
  &mmc_sd1 {
  	status = "okay";
  	no-1-8-v;
-@@ -143,6 +160,14 @@
+@@ -143,6 +165,14 @@
  	};
  };
  &iomux {
 +	tdvp_keyboard_backlight_pin: tdvp-keyboard-backlight-pin {
-+		pins = <52>;
++		pins = "io52";
 +		function = "alt2";
 +		bias-disable;
 +		output-enable;

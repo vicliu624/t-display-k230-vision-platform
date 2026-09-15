@@ -1,0 +1,10 @@
+config BR2_PACKAGE_TDVP_CPU1_VISION
+	bool "TDVP CPU1 AI/vision asynchronous bridge"
+	depends on BR2_LINUX_KERNEL
+	depends on BR2_INIT_SYSTEMD
+	help
+	  Load the ownership/transport bridge for the paired CPU1 RT-Smart
+	  firmware. Linux holds shared suppliers but never drives the camera,
+	  ISP, GNNE/KPU, AI2D or FFT. Applications in group video may read
+	  bounded frame records from /dev/tdvp-vision; no physical mmap API.
+	  No Linux camera demo or Linux nncase/KPU runtime is installed.

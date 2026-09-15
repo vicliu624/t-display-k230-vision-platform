@@ -1,0 +1,94 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] VVCAM: do not give the software ISP subdev MMIO ownership
+
+The platform-registered V4L2 subdev uses software events, not these MMIO/IRQ
+resources. Its 0x90000000-0x9000ffff resource becomes a parent of both the
+real ISP and MIPI managed resource claims. Removing the subdev detaches
+that subtree, causing their later devres cleanup to report nonexistent
+resources. Only the actual DT-bound ISP/MIPI drivers should own hardware.
+Do not work around this by removing devm_ioremap_resource protection.
+
+diff --git a/v4l2/isp/vvcam_isp_platform.c b/v4l2/isp/vvcam_isp_platform.c
+--- a/v4l2/isp/vvcam_isp_platform.c
++++ b/v4l2/isp/vvcam_isp_platform.c
+@@ -68,77 +68,20 @@ static void vvcam_isp_pdev_release(struct device *dev)
+ 	return;
+ }
+ 
+-static struct resource vvcam_isp0_resource[] = {
+-    [0] = {
+-        .start = VVCAM_ISP0_BASE,
+-        .end   = VVCAM_ISP0_BASE + VVCAM_ISP_REG_SIZE - 1,
+-        .flags = IORESOURCE_MEM,
+-    },
+-    [1] = {
+-        .start = VVCAM_TPG0,
+-        .end   = VVCAM_TPG0 + VVCAM_TPG_SIZE - 1,
+-        .flags = IORESOURCE_MEM,
+-	},
+-    [2] = {
+-        .start = VVCAM_ISP0_IRQ,
+-        .end   = VVCAM_ISP0_IRQ,
+-        .flags = IORESOURCE_IRQ,
+-	},
+-    [3] = {
+-        .start = VVCAM_ISP0_MI_IRQ,
+-        .end   = VVCAM_ISP0_MI_IRQ,
+-        .flags = IORESOURCE_IRQ,
+-	},
+-    [4] = {
+-        .start = VVCAM_ISP0_FE_IRQ,
+-        .end   = VVCAM_ISP0_FE_IRQ,
+-        .flags = IORESOURCE_IRQ,
+-	},
+-};
+-
++/* Event-only subdevices. Hardware MMIO and IRQs belong to the DT-bound
++ * vvcam-isp and vvcam-mipi drivers, not to this V4L2 software layer.
++ */
+ static struct platform_device vvcam_isp0_pdev = {
+ 	.name          = "vvcam-isp-subdev",
+ 	.id            = 0,
+-	.resource      = vvcam_isp0_resource,
+-    .num_resources = ARRAY_SIZE(vvcam_isp0_resource),
+ 	.dev.release   = vvcam_isp_pdev_release,
+ };
+ 
+ 
+-static struct resource vvcam_isp1_resource[] = {
+-    [0] = {
+-        .start = VVCAM_ISP1_BASE,
+-        .end   = VVCAM_ISP1_BASE + VVCAM_ISP_REG_SIZE - 1,
+-        .flags = IORESOURCE_MEM,
+-    },
+-    [1] = {
+-        .start = VVCAM_TPG1,
+-        .end   = VVCAM_TPG1 + VVCAM_TPG_SIZE - 1,
+-        .flags = IORESOURCE_MEM,
+-	},
+-    [2] = {
+-        .start = VVCAM_ISP1_IRQ,
+-        .end   = VVCAM_ISP1_IRQ,
+-        .flags = IORESOURCE_IRQ,
+-	},
+-    [3] = {
+-        .start = VVCAM_ISP1_MI_IRQ,
+-        .end   = VVCAM_ISP1_MI_IRQ,
+-        .flags = IORESOURCE_IRQ,
+-	},
+-    [4] = {
+-        .start = VVCAM_ISP1_FE_IRQ,
+-        .end   = VVCAM_ISP1_FE_IRQ,
+-        .flags = IORESOURCE_IRQ,
+-	},
+-};
+-
+ static struct platform_device vvcam_isp1_pdev = {
+ 	.name          = "vvcam-isp-subdev",
+ 	.id            = 1,
+-	.resource      = vvcam_isp1_resource,
+-    .num_resources = ARRAY_SIZE(vvcam_isp1_resource),
+ 	.dev.release   = vvcam_isp_pdev_release,
+ };
+ 
+ int vvcam_isp_platform_device_register(void)

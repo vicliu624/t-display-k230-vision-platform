@@ -8,9 +8,10 @@ TDVP_WAYLAND_TOOLS_SITE = $(TOPDIR)/package/tdvp-wayland-tools/src
 TDVP_WAYLAND_TOOLS_SITE_METHOD = local
 TDVP_WAYLAND_TOOLS_LICENSE = MIT
 TDVP_WAYLAND_TOOLS_LICENSE_FILES = LICENSE
-TDVP_WAYLAND_TOOLS_DEPENDENCIES = host-wayland wayland wayland-protocols
+TDVP_WAYLAND_TOOLS_DEPENDENCIES = host-wayland wayland wayland-protocols wlroots
 
-TDVP_WAYLAND_TOOLS_PROTOCOL = $(BUILD_DIR)/wlroots-0.18.2/protocol/wlr-screencopy-unstable-v1.xml
+# The VGLite fork uses an immutable commit as WLROOTS_VERSION, not 0.18.2.
+TDVP_WAYLAND_TOOLS_PROTOCOL = $(BUILD_DIR)/wlroots-$(WLROOTS_VERSION)/protocol/wlr-screencopy-unstable-v1.xml
 
 define TDVP_WAYLAND_TOOLS_BUILD_CMDS
 	$(HOST_DIR)/bin/wayland-scanner client-header \

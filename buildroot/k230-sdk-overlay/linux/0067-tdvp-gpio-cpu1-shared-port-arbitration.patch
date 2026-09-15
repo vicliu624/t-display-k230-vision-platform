@@ -1,0 +1,236 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] gpio: k230: arbitrate CPU1 reset pin with hardlock and live port RMW
+
+Opt in only for the TDVP GPIO0/21 AMP contract. Linux must preserve the
+CPU1-owned reset bit instead of replaying bgpio shadow state. Use the
+same hardware semaphore as RT-Smart, reject Linux GPIO21 requests, and
+refuse controller suspend/reset/clock teardown while the port is shared.
+The board ownership patch enables this property separately.
+
+diff --git a/drivers/gpio/gpio-k230.c b/drivers/gpio/gpio-k230.c
+index f227e23..6409074 100644
+--- a/drivers/gpio/gpio-k230.c
++++ b/drivers/gpio/gpio-k230.c
+@@ -12,6 +12,7 @@
+ #include <linux/init.h>
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
++#include <linux/iopoll.h>
+ #include <linux/ioport.h>
+ #include <linux/irq.h>
+ #include <linux/mod_devicetable.h>
+@@ -119,8 +120,12 @@ struct k230_gpio {
+ 	unsigned int		flags;
+ 	struct reset_control	*rst;
+ 	struct clk_bulk_data	clks[K230_NR_CLOCKS];
++	u32			amp_remote_mask;
++	void __iomem		*amp_lock_reg;
+ };
+ 
++#include "gpio-k230-tdvp-amp.h"
++
+ static inline u32 gpio_reg_v2_convert(unsigned int offset)
+ {
+ 	switch (offset) {
+@@ -161,6 +166,11 @@ static inline void k230_write(struct k230_gpio *gpio, unsigned int offset,
+ 	struct gpio_chip *gc	= &gpio->ports[0].gc;
+ 	void __iomem *reg_base	= gpio->regs;
+ 
++	if (gpio->amp_remote_mask &&
++	    (offset == GPIO_SWPORTA_DR || offset == GPIO_SWPORTA_DDR)) {
++		k230_amp_restore(gpio, offset, val);
++		return;
++	}
+ 	gc->write_reg(reg_base + gpio_reg_convert(gpio, offset), val);
+ }
+ 
+@@ -475,6 +485,8 @@ err_kfree_pirq:
+ 
+ static int k230_gpio_request(struct gpio_chip *gc, unsigned int offset)
+ {
++	if (to_k230_gpio(gc)->amp_remote_mask & BIT(offset))
++		return -EBUSY;
+ 	return 0;
+ }
+ 
+@@ -520,6 +532,13 @@ static int k230_gpio_add_port(struct k230_gpio *gpio,
+ 	// port->gc.free = gpiochip_generic_free;
+ 	port->gc.request = k230_gpio_request;
+ 	port->gc.free = k230_gpio_free;
++	if (gpio->amp_remote_mask) {
++		port->gc.set = k230_amp_set;
++		port->gc.set_multiple = k230_amp_set_multiple;
++		port->gc.direction_input = k230_amp_direction_input;
++		port->gc.direction_output = k230_amp_direction_output;
++		port->gc.get_direction = k230_amp_get_direction;
++	}
+ 
+ 	/* Only port A support debounce */
+ 	if (pp->idx == 0)
+@@ -624,6 +643,9 @@ static int k230_get_reset(struct k230_gpio *gpio)
+ {
+ 	int err;
+ 
++	/* The shared GPIO controller is already running for CPU1. */
++	if (gpio->amp_remote_mask)
++		return 0;
+ 	gpio->rst = devm_reset_control_get_optional_shared(gpio->dev, NULL);
+ 	if (IS_ERR(gpio->rst))
+ 		return dev_err_probe(gpio->dev, PTR_ERR(gpio->rst),
+@@ -642,6 +664,9 @@ static void k230_disable_clks(void *data)
+ {
+ 	struct k230_gpio *gpio = data;
+ 
++	/* Unbinding Linux must not gate a live CPU1 GPIO port. */
++	if (gpio->amp_remote_mask)
++		return;
+ 	clk_bulk_disable_unprepare(K230_NR_CLOCKS, gpio->clks);
+ }
+ 
+@@ -692,6 +717,21 @@ static int k230_gpio_probe(struct platform_device *pdev)
+ 	gpio->dev = &pdev->dev;
+ 	gpio->nr_ports = pdata->nports;
+ 
++	if (device_property_present(dev, "tdvp,cpu1-gpio-mask")) {
++		struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++
++		err = device_property_read_u32(dev, "tdvp,cpu1-gpio-mask", &gpio->amp_remote_mask);
++		if (err || gpio->amp_remote_mask != BIT(21) || !res ||
++		    res->start != 0x9140b000 || pdata->nports != 1 || pdata->properties[0].idx != 0)
++			return dev_err_probe(dev, -EINVAL, "Invalid TDVP CPU1 GPIO21 ownership contract\n");
++		/* Same semaphore as pinned RT-Smart HARDLOCK_GPIO == 0. Map only
++		 * that register, not unrelated mailbox/hardware-lock registers.
++		 */
++		gpio->amp_lock_reg = devm_ioremap(dev, 0x911040a0, sizeof(u32));
++		if (!gpio->amp_lock_reg)
++			return -ENOMEM;
++	}
++
+ 	err = k230_get_reset(gpio);
+ 	if (err)
+ 		return err;
+@@ -730,6 +770,11 @@ static int k230_gpio_suspend(struct device *dev)
+ 	unsigned long flags;
+ 	int i;
+ 
++	/* Screen blanking is unaffected. System suspend requires an AMP-wide
++	 * quiesce protocol before GPIO clocks/context can be suspended safely.
++	 */
++	if (gpio->amp_remote_mask)
++		return -EBUSY;
+ 	raw_spin_lock_irqsave(&gc->bgpio_lock, flags);
+ 	for (i = 0; i < gpio->nr_ports; i++) {
+ 		unsigned int offset;
+diff --git a/drivers/gpio/gpio-k230-tdvp-amp.h b/drivers/gpio/gpio-k230-tdvp-amp.h
+new file mode 100644
+--- /dev/null
++++ b/drivers/gpio/gpio-k230-tdvp-amp.h
+@@ -0,0 +1,108 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Included after struct k230_gpio. Enabled only by the TDVP GPIO21 AMP DT
++ * contract. Lock order: local bgpio_lock (IRQs off), then hardware lock 0.
++ * Never use bgpio's shadow data/direction for a cross-core port RMW.
++ */
++#ifndef GPIO_K230_TDVP_AMP_H
++#define GPIO_K230_TDVP_AMP_H
++
++static int k230_amp_lock(struct k230_gpio *gpio)
++{
++	u32 value;
++	int result;
++
++	/* K230 hardlock reads acquire when they return zero; write zero releases.
++	 * Bound this atomic wait: a crashed CPU1 must not hang the Linux CPU.
++	 */
++	result = readl_poll_timeout_atomic(gpio->amp_lock_reg, value, !value, 1, 10000);
++	if (result)
++		dev_err_ratelimited(gpio->dev, "CPU1 GPIO hardlock timeout; write refused\n");
++	else
++		mb();
++	return result;
++}
++
++static void k230_amp_unlock(struct k230_gpio *gpio)
++{
++	mb();
++	writel(0, gpio->amp_lock_reg);
++}
++
++static void k230_amp_update(struct k230_gpio *gpio, unsigned int reg, u32 mask, u32 bits)
++{
++	u32 value = readl(gpio->regs + reg);
++
++	mask &= ~gpio->amp_remote_mask;
++	writel((value & ~mask) | (bits & mask), gpio->regs + reg);
++}
++
++static void k230_amp_set_multiple(struct gpio_chip *gc, unsigned long *mask, unsigned long *bits)
++{
++	struct k230_gpio *gpio = to_k230_gpio(gc);
++	unsigned long flags;
++
++	raw_spin_lock_irqsave(&gc->bgpio_lock, flags);
++	if (!k230_amp_lock(gpio)) {
++		k230_amp_update(gpio, GPIO_SWPORTA_DR, (u32)*mask, (u32)*bits);
++		k230_amp_unlock(gpio);
++	}
++	raw_spin_unlock_irqrestore(&gc->bgpio_lock, flags);
++}
++
++static void k230_amp_set(struct gpio_chip *gc, unsigned int offset, int value)
++{
++	unsigned long mask = BIT(offset), bits = value ? mask : 0;
++
++	k230_amp_set_multiple(gc, &mask, &bits);
++}
++
++static int k230_amp_direction(struct gpio_chip *gc, unsigned int offset, bool output, int value)
++{
++	struct k230_gpio *gpio = to_k230_gpio(gc);
++	unsigned long flags;
++	int result;
++
++	if (BIT(offset) & gpio->amp_remote_mask)
++		return -EBUSY;
++	raw_spin_lock_irqsave(&gc->bgpio_lock, flags);
++	result = k230_amp_lock(gpio);
++	if (!result) {
++		/* Set level before enabling output, under the same hardware lock. */
++		if (output)
++			k230_amp_update(gpio, GPIO_SWPORTA_DR, BIT(offset), value ? BIT(offset) : 0);
++		k230_amp_update(gpio, GPIO_SWPORTA_DDR, BIT(offset), output ? BIT(offset) : 0);
++		k230_amp_unlock(gpio);
++	}
++	raw_spin_unlock_irqrestore(&gc->bgpio_lock, flags);
++	return result;
++}
++
++static int k230_amp_direction_input(struct gpio_chip *gc, unsigned int offset)
++{
++	return k230_amp_direction(gc, offset, false, 0);
++}
++
++static int k230_amp_direction_output(struct gpio_chip *gc, unsigned int offset, int value)
++{
++	return k230_amp_direction(gc, offset, true, value);
++}
++
++static int k230_amp_get_direction(struct gpio_chip *gc, unsigned int offset)
++{
++	struct k230_gpio *gpio = to_k230_gpio(gc);
++
++	return !(readl(gpio->regs + GPIO_SWPORTA_DDR) & BIT(offset));
++}
++
++/* Caller already holds bgpio_lock. Also preserve the remote pin when a
++ * platform path writes a saved port value instead of an individual GPIO.
++ */
++static void k230_amp_restore(struct k230_gpio *gpio, unsigned int offset, u32 value)
++{
++	if (!k230_amp_lock(gpio)) {
++		k230_amp_update(gpio, offset, ~gpio->amp_remote_mask, value);
++		k230_amp_unlock(gpio);
++	}
++}
++
++#endif

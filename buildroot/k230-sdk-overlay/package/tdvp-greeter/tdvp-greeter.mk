@@ -15,12 +15,16 @@ TDVP_GREETER_DEPENDENCIES = \
 	tdvp-greetd \
 	tdvp-gtkgreet \
 	wlr-randr
-
+# The image starts the authenticated greeter. Explicit maintenance autologin
+# remains available through tdvp-graphical-login, but is not the shipped
+# default. Both paths share the board DRM and output-transform contract.
 define TDVP_GREETER_USERS
-	greeter -1 greeter -1 = /var/lib/greetd /bin/sh seat
+	greeter -1 greeter -1 = /var/lib/greetd /bin/sh seat,video,render
 endef
 
 define TDVP_GREETER_INSTALL_TARGET_CMDS
+	$(INSTALL) -D -m 0755 $(@D)/tdvp-graphical-login \
+		$(TARGET_DIR)/usr/local/sbin/tdvp-graphical-login
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-greeter-session \
 		$(TARGET_DIR)/usr/local/bin/tdvp-greeter-session
 	$(INSTALL) -D -m 0755 $(@D)/tdvp-greeter-labwc \

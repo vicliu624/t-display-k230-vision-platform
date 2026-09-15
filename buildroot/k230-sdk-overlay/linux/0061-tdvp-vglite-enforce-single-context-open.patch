@@ -1,0 +1,124 @@
+From 7d4e1f444f461dbe3833bd99a4640e7b6c2cd529 Mon Sep 17 00:00:00 2001
+From: TDVP Display Team <display@tdvp.local>
+Date: Fri, 4 Sep 2026 23:25:00 +0800
+Subject: [PATCH] gpu: vglite: reject a second live hardware context
+
+The K230 VGLite Kconfig explicitly documents the driver as a single-context
+implementation. The earlier per-file resource ownership and submit-to-WAIT
+lease fixes make a second file safer than the vendor baseline, but they do not
+implement a hardware context switch: each userspace VGLite process still owns
+its own command and tessellation context. Running an off-screen VGLite client
+while Labwc owns the VGLite compositor context can therefore leave corrupted
+compositor output even when both processes return success.
+
+Enforce the stated hardware capability at the /dev/vg_lite boundary. One live
+file owns the sole hardware context; a second open receives -EBUSY before it
+can reset, initialize, map memory, or submit. Keep the ownership marker under
+the existing open/PM lock. In release, retain the owner until cleanup and the
+final runtime-PM put complete, so a new open cannot race old resource teardown.
+
+This is intentionally a safety contract, not a multi-client scheduler. A
+future driver that implements save/restore and fence-qualified context
+switching can replace this guard with a real scheduler. Until then, a failed
+second open is correct and preserves the running compositor.
+---
+ drivers/gpu/vglite/vg_lite_hal.c | 30 ++++++++++++++++++++----------
+ 1 file changed, 20 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/gpu/vglite/vg_lite_hal.c b/drivers/gpu/vglite/vg_lite_hal.c
+--- a/drivers/gpu/vglite/vg_lite_hal.c
++++ b/drivers/gpu/vglite/vg_lite_hal.c
+@@ -195,6 +195,7 @@ static DEFINE_SEMAPHORE(vg_lite_submit_lock, 1);
+  */
+ static DEFINE_MUTEX(vg_lite_open_lock);
+ static unsigned int vg_lite_open_count;
++static struct client_data *vg_lite_context_owner;
+ 
+ void vg_lite_hal_delay(u32 milliseconds)
+ {
+@@ -213,7 +214,7 @@ void vg_lite_hal_barrier(void)
+ void vg_lite_hal_initialize(void){};
+ void vg_lite_hal_deinitialize(void){};
+ 
+-static int vg_lite_hal_open(void)
++static int vg_lite_hal_open(struct client_data *client)
+ {
+ 	int ret;
+ 
+@@ -223,6 +224,16 @@ static int vg_lite_hal_open(void)
+ 		goto out_unlock;
+ 	}
+ 
++	/*
++	 * K230 exposes one VGLite hardware context. A mutex around ioctls can
++	 * serialize registers, but cannot save and restore the vendor context
++	 * structures allocated by a second userspace process.
++	 */
++	if (vg_lite_context_owner != NULL) {
++		ret = -EBUSY;
++		goto out_unlock;
++	}
++
+ 	// Power-on
+ 	ret = pm_runtime_get_sync(device->dev);
+ 	if (ret < 0) {
+@@ -240,6 +251,7 @@ static int vg_lite_hal_open(void)
+ 	}
+ 
+ 	vg_lite_open_count++;
++	vg_lite_context_owner = client;
+ 	ret = 0;
+ 
+ out_unlock:
+@@ -247,13 +259,15 @@ out_unlock:
+ 	return ret;
+ }
+ 
+-static void vg_lite_hal_close(void)
++static void vg_lite_hal_close(struct client_data *client)
+ {
+ 	mutex_lock(&vg_lite_open_lock);
+-	if (WARN_ON_ONCE(vg_lite_open_count == 0))
++	if (WARN_ON_ONCE(vg_lite_open_count != 1 ||
++			 vg_lite_context_owner != client))
+ 		goto out_unlock;
+ 
+ 	vg_lite_open_count--;
++	vg_lite_context_owner = NULL;
+ 	// Power-off
+ 	pm_runtime_put_sync(device->dev);
+ 
+@@ -672,16 +686,16 @@ int drv_open(struct inode *inode, struct file *file)
+ 		return -ENOMEM;
+ 	}
+ 
+-	ret = vg_lite_hal_open();
+-	if (ret < 0) {
+-		kfree(data);
+-		return ret;
+-	}
+ 	data->device = device;
+ 	data->contiguous_mapped = NULL;
+ 	INIT_LIST_HEAD(&data->dma_list_head);
+ 	INIT_LIST_HEAD(&data->mapped_list_head);
+ 	mutex_init(&data->ioctl_lock);
++	ret = vg_lite_hal_open(data);
++	if (ret < 0) {
++		kfree(data);
++		return ret;
++	}
+ 	file->private_data = data;
+ 	return 0;
+ }
+@@ -728,7 +742,7 @@ int drv_release(struct inode *inode, struct file *file)
+ 
+-	kfree(data);
+ 	file->private_data = NULL;
+-	vg_lite_hal_close();
++	vg_lite_hal_close(data);
++	kfree(data);
+ 
+ 	return 0;
+ }
+-- 
+2.47.1

@@ -10,7 +10,17 @@ config BR2_PACKAGE_TDVP_VGLITE_ACCEPTANCE
 	  off-screen DRM dumb buffer, exports it as DMA-BUF, and renders into it
 	  through VGLite. It never obtains DRM master, creates a framebuffer,
 	  changes a mode, commits an atomic state, or flips a page. Run it as the
-	  graphical login user before enabling VGLite inside wlroots.
+	  graphical login user before enabling VGLite inside wlroots. The package
+	  also installs tdvp-vglite-client-churn: a bounded, opt-in wrapper which
+	  repeatedly starts and exits this same off-screen probe while a VGLite
+	  Labwc session is already active, testing the per-file kernel resource
+	  ownership boundary without altering KMS state. The companion
+	  tdvp-vglite-session-gate verifies the actual Labwc process environment
+	  and renderer policy before running the fixed-panel wl_shm benchmark and
+	  that churn workload; it never enables VGLite or changes the session.
+	  tdvp-vglite-inflight-close-gate is a separate, opt-in fault-injection
+	  command: it submits one off-screen command, exits without WAIT, then
+	  proves that a new VGLite client can run normally after kernel recovery.
 
 comment "tdvp-vglite-acceptance needs a toolchain w/ threads"
 	depends on !BR2_TOOLCHAIN_HAS_THREADS

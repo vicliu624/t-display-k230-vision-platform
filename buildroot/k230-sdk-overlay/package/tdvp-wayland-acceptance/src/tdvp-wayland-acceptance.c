@@ -11,7 +11,10 @@ struct tdvp_registry {
 	bool compositor;
 	bool shm;
 	bool xdg_wm_base;
+	bool layer_shell;
 	bool seat;
+	bool pointer;
+	bool touch;
 	bool keyboard;
 	bool wayland_keymap;
 	bool output;
@@ -149,6 +152,9 @@ static void tdvp_seat_capabilities(void *data, struct wl_seat *seat,
 {
 	struct tdvp_registry *state = data;
 
+	state->pointer = (capabilities & WL_SEAT_CAPABILITY_POINTER) != 0;
+	state->touch = (capabilities & WL_SEAT_CAPABILITY_TOUCH) != 0;
+
 	if (!(capabilities & WL_SEAT_CAPABILITY_KEYBOARD) ||
 	    state->keyboard_proxy)
 		return;
@@ -266,6 +272,8 @@ static void tdvp_registry_global(void *data, struct wl_registry *registry,
 		state->shm = true;
 	else if (strcmp(interface, "xdg_wm_base") == 0)
 		state->xdg_wm_base = true;
+	else if (strcmp(interface, "zwlr_layer_shell_v1") == 0)
+		state->layer_shell = true;
 	else if (strcmp(interface, "wl_seat") == 0) {
 		uint32_t bind_version = version < 5 ? version : 5;
 
@@ -340,11 +348,13 @@ int main(void)
 
 	xkb_ok = tdvp_check_xkb() == 0;
 	wayland_ok = state.compositor && state.shm && state.xdg_wm_base &&
-		state.seat && state.keyboard && state.wayland_keymap &&
+		state.layer_shell &&
+		state.seat && state.pointer && state.keyboard && state.wayland_keymap &&
 		state.output && state.output_mode;
-	printf("tdvp-wayland-acceptance: socket=%s wl_compositor=%s wl_shm=%s xdg_wm_base=%s wl_seat=%s wl_keyboard=%s keymap=%s wl_output=%s\n",
+	printf("tdvp-wayland-acceptance: socket=%s wl_compositor=%s wl_shm=%s xdg_wm_base=%s zwlr_layer_shell_v1=%s wl_seat=%s wl_pointer=%s wl_touch=%s wl_keyboard=%s keymap=%s wl_output=%s\n",
 	       socket, state.compositor ? "yes" : "no", state.shm ? "yes" : "no",
-	       state.xdg_wm_base ? "yes" : "no", state.seat ? "yes" : "no",
+	       state.xdg_wm_base ? "yes" : "no", state.layer_shell ? "yes" : "no", state.seat ? "yes" : "no",
+	       state.pointer ? "yes" : "no", state.touch ? "yes" : "no",
 	       state.keyboard ? "yes" : "no", state.wayland_keymap ? "yes" : "no",
 	       state.output && state.output_mode ? "yes" : "no");
 	if (state.output_mode) {

@@ -1,0 +1,59 @@
+From: TDVP maintainers
+Subject: [PATCH] clocktime: guard the optional hardware RTC operations
+
+CPU1 retains POSIX software clocks but leaves the hardware RTC to Linux.
+Keep the existing no-RTC behavior (zero initial wall time; settime updates
+the software offset but reports that no hardware RTC was available).
+
+diff --git a/canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/components/libc/time/clock_time.c b/canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/components/libc/time/clock_time.c
+--- a/canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/components/libc/time/clock_time.c
++++ b/canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/components/libc/time/clock_time.c
+@@ -19,9 +19,12 @@
+ {
+     time_t time;
+     rt_tick_t tick;
++#ifdef RT_USING_RTC
+     rt_device_t device;
++#endif
+ 
+     time = 0;
++#ifdef RT_USING_RTC
+     device = rt_device_find("rtc");
+     if (device != RT_NULL)
+     {
+@@ -29,6 +32,7 @@
+         rt_device_control(device, RT_DEVICE_CTRL_RTC_GET_TIME, &time);
+     }
+ 
++#endif
+     /* get tick */
+     tick = rt_tick_get();
+ 
+@@ -167,7 +171,9 @@
+ {
+     int second;
+     rt_tick_t tick;
++#ifdef RT_USING_RTC
+     rt_device_t device;
++#endif
+ 
+     if ((clockid != CLOCK_REALTIME) || (tp == RT_NULL))
+     {
+@@ -184,6 +190,7 @@
+     _timevalue.tv_usec = MICROSECOND_PER_SECOND - (tick % RT_TICK_PER_SECOND) * MICROSECOND_PER_TICK;
+     _timevalue.tv_sec = second - tick/RT_TICK_PER_SECOND - 1;
+ 
++#ifdef RT_USING_RTC
+     /* update for RTC device */
+     device = rt_device_find("rtc");
+     if (device != RT_NULL)
+@@ -195,6 +202,9 @@
+     else
+         return -RT_ERROR;
+ 
++#else
++    return -RT_ERROR;
++#endif
+     return 0;
+ }
+ RTM_EXPORT(clock_settime);

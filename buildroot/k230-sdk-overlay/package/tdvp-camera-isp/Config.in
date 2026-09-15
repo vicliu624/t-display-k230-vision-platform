@@ -1,0 +1,12 @@
+config BR2_PACKAGE_TDVP_CAMERA_ISP
+	bool "TDVP CPU0 GC2093 camera"
+	depends on BR2_INIT_SYSTEMD
+	depends on BR2_LINUX_KERNEL
+	depends on BR2_RISCV_64
+	depends on !BR2_RISCV_ISA_RVV
+	depends on BR2_TOOLCHAIN_USES_GLIBC
+	select BR2_PACKAGE_TDVP_CAMERA_ISP_RUNTIME
+	help
+	  Board-specific GC2093 VVCAM modules, scalar-ISP ABI adapter and
+	  supervised services. Requires the TDVP I2C4/managed-MCLK device tree.
+	  Do not enable the vendor VVCAM package alongside this replacement.

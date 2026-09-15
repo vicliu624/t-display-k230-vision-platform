@@ -23,6 +23,8 @@ jobs:
       contents: write
     env:
       TDVP_CACHE_ROOT: ${{ github.workspace }}/.ci-cache
+      TDVP_CPU1_CACHE_ROOT: ${{ github.workspace }}/.ci-cache/cpu1
+      TDVP_CPU1_TOOLCHAIN_DIR: ${{ github.workspace }}/.ci-cache/cpu1/toolchain
       TDVP_K230_RELEASE_NAME: tdvp-k230-labwc-desktop-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
     steps:
       - name: Check out platform sources
@@ -40,6 +42,7 @@ jobs:
           path: |
             .ci-cache/dl
             .ci-cache/toolchain
+            .ci-cache/cpu1
           key: tdvp-k230-sdk-${{ runner.os }}-${{ hashFiles('buildroot/sdk-sources.lock') }}
           restore-keys: |
             tdvp-k230-sdk-${{ runner.os }}-
@@ -48,6 +51,57 @@ jobs:
         run: |
           chmod +x buildroot/tools/*.sh
           bash buildroot/tools/ci-prepare-host.sh
+
+      - name: Validate patch queue and CPU boot contracts
+        run: |
+          bash buildroot/tools/validate-k230-sdk-linux-patches.sh buildroot/k230-sdk-overlay/linux
+          bash buildroot/tools/test-reconcile-k230-sdk-linux-patches.sh
+          bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
+          sudo bash buildroot/tools/test-tdvp-renderer-profile.sh
+          sudo bash buildroot/tools/test-tdvp-labwc-session-recovery.sh
+          bash buildroot/tools/test-tdvp-cpu1-boot-contract.sh
+          bash buildroot/tools/test-tdvp-boot-decompressor.sh
+          bash buildroot/tools/test-tdvp-cpu1-build-env.sh
+          bash buildroot/tools/test-tdvp-cpu1-mailbox.sh
+          bash buildroot/tools/test-tdvp-cpu1-vision-init.sh
+          bash buildroot/tools/test-tdvp-cpu1-vision-pins.sh
+          bash buildroot/tools/test-tdvp-cpu1-transport.sh
+          bash buildroot/tools/test-tdvp-cpu1-shared-map.sh
+          bash buildroot/tools/test-tdvp-cpu1-calibration.sh
+          bash buildroot/tools/test-tdvp-cpu1-frame-probe.sh
+          bash buildroot/tools/test-tdvp-cpu1-vision-status.sh
+          bash buildroot/tools/test-tdvp-cpu1-gpio-amp.sh
+          bash buildroot/tools/test-tdvp-lora-status.sh
+          bash buildroot/tools/test-tdvp-nrf52840-at.sh
+          bash buildroot/tools/test-tdvp-keyboard-backlight.sh
+          bash buildroot/tools/test-tdvp-vglite-diagnostics-report.sh
+          bash buildroot/tools/test-tdvp-vglite-session-gate.sh
+          bash buildroot/tools/test-tdvp-camera-legacy-abi.sh
+          bash buildroot/tools/test-tdvp-camera-i2c.sh
+          bash buildroot/tools/test-tdvp-camera-package.sh
+          python3 buildroot/tools/test-tdvp-application-menu.py
+          sh buildroot/tools/test-tdvp-application-menu.sh
+          bash buildroot/tools/test-tdvp-profile-config.sh
+          bash buildroot/tools/test-tdvp-cpu0-dts-queue.sh
+          bash buildroot/tools/test-tdvp-session-idle-contract.sh
+          bash buildroot/tools/test-tdvp-auth-image.sh
+          bash buildroot/tools/test-tdvp-image-source-contract.sh
+          python3 buildroot/tools/test-tdvp-opkg-image-seed.py
+          python3 buildroot/tools/test-tdvp-sdk.py
+          sudo python3 buildroot/tools/test-tdvp-release-permissions.py
+          bash buildroot/tools/test-verify-sdcard-image-volumepulse-guard.sh
+          bash buildroot/tools/test-tdvp-display-smoke-cleanup.sh
+          bash buildroot/tools/test-tdvp-vblank-observer-maintenance-master.sh
+          bash buildroot/tools/test-tdvp-kms-maintenance.sh
+
+      - name: Prepare isolated SDK validation host
+        run: |
+          docker build -t tdvp-sdk-validation:ubuntu24.04 \
+            -f buildroot/tools/sdk/Dockerfile.validation buildroot/tools/sdk
+
+      - name: Build and regress CPU1 firmware before the Linux image
+        run: |
+          bash buildroot/tools/test-tdvp-cpu1-rtsmart-build.sh "${RUNNER_TEMP}/tdvp-cpu1-preflight"
 
       - name: Stage pinned SDK worktree
         run: |
@@ -61,17 +115,43 @@ jobs:
         run: |
           bash buildroot/tools/build-k230-sdk-rm69a10.sh "$TDVP_WORKTREE" linux-patch
           bash buildroot/tools/assert-k230-sdk-rm69a10-baseline.sh --patch-only "$TDVP_WORKTREE"
+          kernel_commit="$(python3 -c 'import configparser; c = configparser.ConfigParser(); c.read("buildroot/sdk-sources.lock"); print(c["linux_kernel"]["commit"])')"
+          [[ "$kernel_commit" =~ ^[0-9a-f]{40}$ ]]
+          kernel_source="$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/build/linux-$kernel_commit"
+          bash buildroot/tools/test-tdvp-cpu1-power-amp.sh "$kernel_source" --patched
+          bash buildroot/tools/test-tdvp-cpu1-clock-amp.sh "$kernel_source" --patched
+          bash buildroot/tools/test-tdvp-cpu1-vision-dtb.sh "$kernel_source" "${RUNNER_TEMP}/tdvp-cpu1-preflight/manifest"
+
+      - name: Verify opkg parser and package protections before image build
+        run: |
+          bash buildroot/tools/build-k230-sdk-rm69a10.sh "$TDVP_WORKTREE" opkg-extract
+          bash buildroot/tools/test-tdvp-opkg-image-native.sh \
+            "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/build/opkg-0.7.0"
 
       - name: Build the bootable SD image
         run: bash buildroot/tools/build-k230-sdk-rm69a10.sh "$TDVP_WORKTREE"
 
       - name: Verify image and collect the release bundle
         run: |
+          bash buildroot/tools/test-tdvp-cpu1-linux-package.sh \
+            "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/target/lib/modules/6.6.36/updates/tdvp_cpu1_vision.ko" \
+            "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/host/sbin/depmod"
+          bash buildroot/tools/test-tdvp-uart1-dtb.sh \
+            "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/images/k230-canmv-rm69a10.dtb" \
+            "$TDVP_WORKTREE/output/k230_canmv_t_display_rm69a10_labwc_desktop_defconfig/host/bin"
           bash buildroot/tools/assert-k230-sdk-rm69a10-baseline.sh "$TDVP_WORKTREE"
           bash buildroot/tools/assert-public-release.sh "$TDVP_WORKTREE"
           bash buildroot/tools/collect-release-bundle.sh \
             "$TDVP_WORKTREE" \
             "$TDVP_K230_RELEASE_NAME"
+
+      - name: Validate the paired SDK in isolated Ubuntu 24.04
+        run: |
+          set -euo pipefail
+          bash buildroot/tools/test-tdvp-sdk-relocation.sh \
+            "output/${TDVP_K230_RELEASE_NAME}/${TDVP_K230_RELEASE_NAME}-cpu0-sdk.tar.gz" \
+            "output/${TDVP_K230_RELEASE_NAME}" 2>&1 | tee "output/${TDVP_K230_RELEASE_NAME}/tdvp-sdk-validation.log"
+          (cd "output/${TDVP_K230_RELEASE_NAME}" && sha256sum tdvp-sdk-validation.log >> SHA256SUMS)
 
       - name: Upload candidate image
         uses: actions/upload-artifact@v4

@@ -1,0 +1,110 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] riscv: dts: enable TDVP GC2093 with guarded kernel MCLK
+
+Preserve CPU0/CPU1 ownership and all existing display/radio buses. The
+matching TDVP VVCAM package validates 23.76 MHz before releasing reset.
+
+diff --git a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+--- a/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
++++ b/arch/riscv/boot/dts/canaan/k230-canmv-rm69a10.dts
+@@ -360,3 +360,5 @@
+ 	keep-power-in-suspend;
+ 	wakeup-source;
+ };
++
++#include "k230-tdvp-gc2093.dtsi"
+diff --git a/arch/riscv/boot/dts/canaan/k230-tdvp-gc2093.dtsi b/arch/riscv/boot/dts/canaan/k230-tdvp-gc2093.dtsi
+new file mode 100644
+--- /dev/null
++++ b/arch/riscv/boot/dts/canaan/k230-tdvp-gc2093.dtsi
+@@ -0,0 +1,90 @@
++// SPDX-License-Identifier: GPL-2.0 OR MIT
++/* TDVP GC2093: include after the CPU0, CPU1 mailbox and UART1 board changes. */
++/ {
++	aliases {
++		/* Preserve the currently deployed touch and dock adapter numbers. */
++		i2c0 = &i2c3;
++		i2c1 = &i2c_gpio_keyboard;
++		i2c4 = &i2c4;
++	};
++};
++
++&iomux {
++	tdvp_camera_i2c4_pins: tdvp-camera-i2c4-pins {
++		pins = K230_IO7, K230_IO8;
++		function = K230_IO7_I2C4_SCL;
++		bias-pull-up;
++		input-enable;
++		drive-strength = <8>;
++	};
++	tdvp_camera_mclk1_pin: tdvp-camera-mclk1-pin {
++		pins = K230_IO13;
++		function = K230_IO13_M_CLK1;
++		output-enable;
++		drive-strength = <8>;
++	};
++};
++
++&i2c4 {
++	status = "okay";
++	pinctrl-names = "default";
++	pinctrl-0 = <&tdvp_camera_i2c4_pins>;
++	gc2093@37 {
++		compatible = "galaxycore,gc2093";
++		reg = <0x37>;
++	};
++};
++
++&sysctl_clock {
++	/* The pinned composite driver uses a mux-only determine_rate callback
++	 * when mux and divider coexist. Split them so the divider's round_rate
++	 * is used, while both nodes still share the provider's register lock.
++	 */
++	tdvp_sensor_mclk1_mux: tdvp_sensor_mclk1_mux {
++		#clock-cells = <0>;
++		compatible = "canaan,k230-clk-composite";
++		clocks = <&pll1_div3>, <&pll1_div4>, <&pll0_div4>;
++		status = "okay";
++		read-only = <0>;
++		clk-parent-reg-offset = <0x6c>;
++		clk-parent-reg-value-shift = <3>;
++		clk-parent-reg-value-mask = <3>;
++		clk-gate-reg-offset = <0x6c>;
++		clk-gate-reg-bit-enable = <0>;
++		clk-gate-reg-bit-reverse = <0>;
++	};
++	tdvp_sensor_mclk1: tdvp_sensor_mclk1 {
++		#clock-cells = <0>;
++		compatible = "canaan,k230-clk-composite";
++		clocks = <&tdvp_sensor_mclk1_mux>;
++		status = "okay";
++		read-only = <0>;
++		clk-rate-conf-mul-min = <1>;
++		clk-rate-conf-mul-max = <1>;
++		clk-rate-conf-div-min = <1>;
++		clk-rate-conf-div-max = <32>;
++		clk-rate-calc-method = <1>;
++		clk-rate-reg-offset = <0x6c>;
++		clk-rate-reg-mul-value-shift = <0>;
++		clk-rate-reg-mul-value-mask = <0>;
++		clk-rate-reg-div-value-shift = <5>;
++		clk-rate-reg-div-value-mask = <0x1f>;
++		clk-rate-reg-write-enable-bit = <31>;
++	};
++};
++
++/* One physical CSI owner. The vendor driver exposes logical vvcam-mipi.0. */
++&mipi0 { status = "disabled"; };
++&mipi1 { status = "disabled"; };
++&mipi2 {
++	status = "okay";
++	reset-gpios = <&gpio0_ports 21 GPIO_ACTIVE_HIGH>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&tdvp_camera_mclk1_pin>;
++	clocks = <&tdvp_sensor_mclk1>;
++	clock-names = "sensor";
++	assigned-clocks = <&tdvp_sensor_mclk1>, <&tdvp_sensor_mclk1_mux>;
++	assigned-clock-parents = <0>, <&pll1_div4>;
++	/* Match the official parent / 25: deployed PLL1_DIV4 is 594 MHz. */
++	assigned-clock-rates = <23760000>, <0>;
++};

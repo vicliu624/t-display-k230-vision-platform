@@ -1,0 +1,121 @@
+From 7d4e1f444f461dbe3833bd99a4640e7b6c2cd529 Mon Sep 17 00:00:00 2001
+From: TDVP Display Team <display@tdvp.local>
+Date: Thu, 4 Sep 2026 11:42:00 +0800
+Subject: [PATCH] gpu: vglite: do not reset a device owned by another file
+
+The vendor driver's drv_open() calls reset_control_reset() for every
+/dev/vg_lite open. VGLite has one hardware command engine shared by all
+files, so opening a second client while the compositor has an in-flight
+command resets that command without completing its interrupt. The compositor
+then waits forever in vg_lite_hal_wait_interrupt(), while the new client's
+close blocks in drv_release() behind the command serialization mutex.
+
+Only reset the device on the transition from zero to one open VGLite files.
+Every file still acquires and releases its own runtime-PM reference, so the
+device remains powered while any client is open. Allocate the file-private
+state before acquiring that reference and unwind it on an open failure.
+
+This is deliberately independent of the per-file allocation ownership in
+0054: it fixes the shared hardware lifecycle before any client can submit,
+whereas 0054 scopes the resources created after a client has opened.
+---
+ drivers/gpu/vglite/vg_lite_hal.c | 48 ++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 42 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/vglite/vg_lite_hal.c b/drivers/gpu/vglite/vg_lite_hal.c
+index 6fadd65943f1f..c1d8a4549718b 100644
+--- a/drivers/gpu/vglite/vg_lite_hal.c
++++ b/drivers/gpu/vglite/vg_lite_hal.c
+@@ -155,6 +155,14 @@
+ static struct client_data *active_client;
+ static DEFINE_MUTEX(vg_lite_client_lock);
+ 
++/*
++ * reset_control_reset() resets the one command engine, not an individual
++ * /dev/vg_lite file. Hold this lock across the PM reference and reset so a
++ * second client can never reset a command currently owned by the first.
++ */
++static DEFINE_MUTEX(vg_lite_open_lock);
++static unsigned int vg_lite_open_count;
++
+ void vg_lite_hal_delay(u32 milliseconds)
+ {
+ 	/* Delay the requested amount. */
+@@ -172,19 +180,47 @@
+ void vg_lite_hal_initialize(void){};
+ void vg_lite_hal_deinitialize(void){};
+ 
+-void vg_lite_hal_open(void)
++static int vg_lite_hal_open(void)
+ {
++	int ret;
++
++	mutex_lock(&vg_lite_open_lock);
+ 	// Power-on
+-	pm_runtime_get_sync(device->dev);
+-	// Reset
+-	if (!IS_ERR(device->reset))
+-		reset_control_reset(device->reset);
++	ret = pm_runtime_get_sync(device->dev);
++	if (ret < 0) {
++		pm_runtime_put_noidle(device->dev);
++		goto out_unlock;
++	}
++
++	/* Only the first live file may reset the shared command engine. */
++	if (vg_lite_open_count == 0 && !IS_ERR(device->reset)) {
++		ret = reset_control_reset(device->reset);
++		if (ret < 0) {
++			pm_runtime_put_sync(device->dev);
++			goto out_unlock;
++		}
++	}
++
++	vg_lite_open_count++;
++	ret = 0;
++
++out_unlock:
++	mutex_unlock(&vg_lite_open_lock);
++	return ret;
+ }
+ 
+-void vg_lite_hal_close(void)
++static void vg_lite_hal_close(void)
+ {
++	mutex_lock(&vg_lite_open_lock);
++	if (WARN_ON_ONCE(vg_lite_open_count == 0))
++		goto out_unlock;
++
++	vg_lite_open_count--;
+ 	// Power-off
+ 	pm_runtime_put_sync(device->dev);
++
++out_unlock:
++	mutex_unlock(&vg_lite_open_lock);
+ }
+ 
+ #define VG_LITE_PAD(number, align_bytes) \
+@@ -492,12 +528,18 @@
+ int drv_open(struct inode *inode, struct file *file)
+ {
+ 	struct client_data *data;
++	int ret;
+ 
+-	vg_lite_hal_open();
+-	data = kmalloc(sizeof(*data), GFP_KERNEL);
++	data = kzalloc(sizeof(*data), GFP_KERNEL);
+ 	if (!data) {
+ 		dev_err(device->dev, "kmalloc error\n");
+-		return -1;
++		return -ENOMEM;
++	}
++
++	ret = vg_lite_hal_open();
++	if (ret < 0) {
++		kfree(data);
++		return ret;
+ 	}
+ 	data->device = device;
+ 	data->contiguous_mapped = NULL;
+-- 
+2.47.1

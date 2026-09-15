@@ -1,0 +1,328 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] clk: k230: arbitrate shared LS registers with CPU1 I2C4
+
+Opt in only on the paired CPU1-vision device tree. Serialize Linux low-speed
+clock RMW with the same hardware semaphore used by CPU1 and GPIO, retain
+the shared APB parent, and reject Linux providers for CPU1-owned fields.
+No PLL, GPU or display clock policy changes. Timeout refuses writes.
+The matching RT-Smart early I2C4 clock setup is required before activation.
+
+diff --git a/drivers/clk/clk-k230.c b/drivers/clk/clk-k230.c
+index 6ca4fc5..24aadcd 100644
+--- a/drivers/clk/clk-k230.c
++++ b/drivers/clk/clk-k230.c
+@@ -30,7 +30,8 @@
+ #include <linux/spinlock.h>
+ #include <linux/platform_device.h>
+ #include <linux/kernel.h>
+-#include <linux/module.h>
++#include <linux/module.h>
++#include <linux/iopoll.h>
+ 
+ #define CLK_IS_BASIC BIT(5)
+ #define K230_CLK_DEBUG
+@@ -59,7 +60,8 @@ struct k230_clk_composite {
+ 	struct clk_hw hw;
+ 	struct clk_lookup *cl;
+ 	const struct clk_ops *ops;
+-	void __iomem *base_reg;
++	void __iomem *base_reg;
++	void __iomem *amp_lock_reg;
+ 
+ 	/* gate */
+ 	void __iomem *gate_reg;
+@@ -110,8 +112,10 @@ struct k230_clk_composite {
+ #endif
+ };
+ 
+-#define to_k230_clk_composite(_hw) \
+-	container_of(_hw, struct k230_clk_composite, hw)
++#define to_k230_clk_composite(_hw) \
++	container_of(_hw, struct k230_clk_composite, hw)
++
++#include "clk-k230-tdvp-amp.h"
+ 
+ //calculate the frequency division factor:
+ // 0: 1/12, 2/12, 3/12, .......
+@@ -319,15 +323,16 @@ static int k230_clk_find_approximate(struct k230_clk_composite *k230_composite,
+ }
+ 
+ /* calc round rate and set */
+-static int k230_clk_composite_set_rate(struct clk_hw *hw, unsigned long rate,
++static int k230_clk_composite_set_rate(struct clk_hw *hw, unsigned long rate,
+ 					   unsigned long parent_rate)
+ {
+ 	struct k230_clk_composite *k230_composite = to_k230_clk_composite(hw);
+ 	uint32_t mul = 0;
+ 	uint32_t div = 0;
+ 	uint32_t reg = 0;
+-	uint32_t reg_1 = 0;
+-	unsigned long flags;
++	uint32_t reg_1 = 0;
++	unsigned long flags;
++	int ret;
+ 
+ 	if (k230_composite->rate_reg == NULL)
+ 		return -1;
+@@ -335,8 +340,11 @@ static int k230_clk_composite_set_rate(struct clk_hw *hw, unsigned long rate,
+ 	if ((rate > parent_rate) || (rate == 0) || (parent_rate == 0))
+ 		return -1;
+ 
+-	if (k230_composite->composite_read_only == 1)
+-		return -1;
++	if (k230_composite->composite_read_only == 1)
++		return -1;
++	/* The LS APB parent is shared with CPU1. Retain its boot divider. */
++	if (k230_clk_amp_fixed_rate(k230_composite))
++		return -EBUSY;
+ 
+ 	if (k230_clk_find_approximate(
+ 			k230_composite, k230_composite->rate_mul_min,
+@@ -349,9 +357,14 @@ static int k230_clk_composite_set_rate(struct clk_hw *hw, unsigned long rate,
+ 		return -1;
+ 	}
+ 
+-	if ((k230_composite->rate_reg_1) == NULL) {
+-		spin_lock_irqsave(k230_composite->composite_spinlock, flags);
+-		reg = readl(k230_composite->rate_reg);
++	if ((k230_composite->rate_reg_1) == NULL) {
++		spin_lock_irqsave(k230_composite->composite_spinlock, flags);
++		ret = k230_clk_amp_lock(k230_composite, k230_composite->rate_reg);
++		if (ret) {
++			spin_unlock_irqrestore(k230_composite->composite_spinlock, flags);
++			return ret;
++		}
++		reg = readl(k230_composite->rate_reg);
+ 		reg &= ~((k230_composite->rate_div_mask)
+ 			 << (k230_composite->rate_div_shift));
+ 		if (k230_composite->rate_calc_method == 2) {
+@@ -373,8 +386,9 @@ static int k230_clk_composite_set_rate(struct clk_hw *hw, unsigned long rate,
+ 				   << (k230_composite->rate_div_shift);
+ 		}
+ 
+-		writel(reg, k230_composite->rate_reg);
+-		spin_unlock_irqrestore(k230_composite->composite_spinlock,
++		writel(reg, k230_composite->rate_reg);
++		k230_clk_amp_unlock(k230_composite, k230_composite->rate_reg);
++		spin_unlock_irqrestore(k230_composite->composite_spinlock,
+ 					   flags);
+ 	} else {
+ 		spin_lock_irqsave(k230_composite->composite_spinlock, flags);
+@@ -426,23 +440,30 @@ static int k230_clk_composite_is_enable(struct clk_hw *hw)
+ 	return 0;
+ }
+ 
+-static int k230_clk_composite_enable(struct clk_hw *hw)
++static int k230_clk_composite_enable(struct clk_hw *hw)
+ {
+ 	struct k230_clk_composite *k230_composite = to_k230_clk_composite(hw);
+-	uint32_t composite_gate_value;
+-	unsigned long flags;
++	uint32_t composite_gate_value;
++	unsigned long flags;
++	int ret;
+ 
+ 	if (k230_composite->composite_read_only == 1)
+ 		return -1;
+ 
+-	spin_lock_irqsave(k230_composite->composite_spinlock, flags);
+-	composite_gate_value = readl(k230_composite->gate_reg);
++	spin_lock_irqsave(k230_composite->composite_spinlock, flags);
++	ret = k230_clk_amp_lock(k230_composite, k230_composite->gate_reg);
++	if (ret) {
++		spin_unlock_irqrestore(k230_composite->composite_spinlock, flags);
++		return ret;
++	}
++	composite_gate_value = readl(k230_composite->gate_reg);
+ 	if (k230_composite->gate_bit_reverse == 0)
+ 		composite_gate_value |= (1 << k230_composite->gate_bit);
+ 	else
+ 		composite_gate_value &= ~(1 << k230_composite->gate_bit);
+-	writel(composite_gate_value, k230_composite->gate_reg);
+-	spin_unlock_irqrestore(k230_composite->composite_spinlock, flags);
++	writel(composite_gate_value, k230_composite->gate_reg);
++	k230_clk_amp_unlock(k230_composite, k230_composite->gate_reg);
++	spin_unlock_irqrestore(k230_composite->composite_spinlock, flags);
+ 
+ #ifdef K230_CLK_DEBUG
+ 	spin_lock_irqsave(k230_composite->composite_spinlock, flags);
+@@ -455,26 +476,34 @@ static int k230_clk_composite_enable(struct clk_hw *hw)
+ 	return 0;
+ }
+ 
+-static void k230_clk_composite_disable(struct clk_hw *hw)
++static void k230_clk_composite_disable(struct clk_hw *hw)
+ {
+ 	struct k230_clk_composite *k230_composite = to_k230_clk_composite(hw);
+ 	uint32_t composite_gate_value;
+-	unsigned long flags;
+-
+-	if (k230_composite->composite_read_only == 1) {
++	unsigned long flags;
++
++	/* CCF's unused-clock pass must not gate CPU1's shared LS APB parent. */
++	if (k230_clk_amp_retained_gate(k230_composite))
++		return;
++	if (k230_composite->composite_read_only == 1) {
+ 		pr_err("[canaan_clk_err]:clk %s is read-only!\n",
+ 			   clk_hw_get_name(hw));
+ 		return;
+ 	}
+ 
+-	spin_lock_irqsave(k230_composite->composite_spinlock, flags);
+-	composite_gate_value = readl(k230_composite->gate_reg);
++	spin_lock_irqsave(k230_composite->composite_spinlock, flags);
++	if (k230_clk_amp_lock(k230_composite, k230_composite->gate_reg)) {
++		spin_unlock_irqrestore(k230_composite->composite_spinlock, flags);
++		return;
++	}
++	composite_gate_value = readl(k230_composite->gate_reg);
+ 	if (k230_composite->gate_bit_reverse == 1)
+ 		composite_gate_value |= (1 << k230_composite->gate_bit);
+ 	else
+ 		composite_gate_value &= ~(1 << k230_composite->gate_bit);
+-	writel(composite_gate_value, k230_composite->gate_reg);
+-	spin_unlock_irqrestore(k230_composite->composite_spinlock, flags);
++	writel(composite_gate_value, k230_composite->gate_reg);
++	k230_clk_amp_unlock(k230_composite, k230_composite->gate_reg);
++	spin_unlock_irqrestore(k230_composite->composite_spinlock, flags);
+ 
+ #ifdef K230_CLK_DEBUG
+ 	spin_lock_irqsave(k230_composite->composite_spinlock, flags);
+@@ -734,7 +763,11 @@ static struct clk *_of_cannan_k230_clk_composite_setup(struct device_node *node)
+ 		goto free_k230_clk_composite;
+ 	}
+ 
+-	p_clk_ops = kzalloc(sizeof(struct clk_ops), GFP_KERNEL);
++	if (k230_clk_amp_setup(k230_clk_composite, parent_sys_clk)) {
++		pr_err("[canaan_clk_err]:refusing invalid CPU1 clock sharing for %s\n", node->name);
++		goto free_k230_clk_composite;
++	}
++	p_clk_ops = kzalloc(sizeof(struct clk_ops), GFP_KERNEL);
+ 
+ 	if (true == mux) {
+ 		p_clk_ops->set_parent = k230_clk_composite_set_parent;
+@@ -791,8 +824,10 @@ static struct clk *_of_cannan_k230_clk_composite_setup(struct device_node *node)
+ 	clk_unregister(hw->clk);
+ free_parent_names:
+ 	kfree(parent_name);
+-free_k230_clk_composite:
+-	kfree(k230_clk_composite);
++free_k230_clk_composite:
++	if (k230_clk_composite->amp_lock_reg)
++		iounmap(k230_clk_composite->amp_lock_reg);
++	kfree(k230_clk_composite);
+ out_unmap:
+ 	iounmap(base_reg);
+ 
+diff --git a/drivers/clk/clk-k230-tdvp-amp.h b/drivers/clk/clk-k230-tdvp-amp.h
+new file mode 100644
+--- /dev/null
++++ b/drivers/clk/clk-k230-tdvp-amp.h
+@@ -0,0 +1,106 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Included after struct k230_clk_composite. Opt-in CMU/I2C4 ownership only.
++ * Lock order: Linux clock spinlock (IRQs off), then HARDLOCK_GPIO == 0.
++ * The paired RT-Smart early-I2C setup must take this same hardware lock.
++ * Neither side may nest a GPIO operation while holding the hardware lock.
++ */
++#ifndef CLK_K230_TDVP_AMP_H
++#define CLK_K230_TDVP_AMP_H
++
++#define TDVP_CMU_LS_GATE 0x24
++#define TDVP_CMU_UART_I2C_DIV 0x2c
++#define TDVP_CMU_LS_DIV 0x30
++#define TDVP_CMU_I2C4_GATES (BIT(10) | BIT(25))
++#define TDVP_CMU_I2C4_DIV (0x7U << 27)
++
++static bool k230_clk_amp_shared_reg(struct k230_clk_composite *clk, void __iomem *reg)
++{
++	return reg && (reg == clk->base_reg + TDVP_CMU_LS_GATE ||
++		reg == clk->base_reg + TDVP_CMU_UART_I2C_DIV ||
++		reg == clk->base_reg + TDVP_CMU_LS_DIV);
++}
++
++static bool k230_clk_amp_retained_gate(struct k230_clk_composite *clk)
++{
++	return clk->amp_lock_reg && clk->gate_reg == clk->base_reg + TDVP_CMU_LS_GATE &&
++		clk->gate_bit == 0;
++}
++
++static bool k230_clk_amp_fixed_rate(struct k230_clk_composite *clk)
++{
++	return clk->amp_lock_reg && clk->rate_reg == clk->base_reg + TDVP_CMU_LS_DIV &&
++		((clk->rate_div_mask << clk->rate_div_shift) & 0x7U);
++}
++
++static int k230_clk_amp_lock(struct k230_clk_composite *clk, void __iomem *reg)
++{
++	u32 value;
++	int ret;
++
++	if (!clk->amp_lock_reg || !k230_clk_amp_shared_reg(clk, reg))
++		return 0;
++	/* K230 read zero acquires, write zero releases. Never wait forever if
++	 * CPU1 crashed: a timed-out Linux operation must leave CMU untouched.
++	 */
++	ret = readl_poll_timeout_atomic(clk->amp_lock_reg, value, !value, 1, 10000);
++	if (ret)
++		pr_err_ratelimited("K230 CPU1 clock hardlock timeout; write refused\n");
++	else
++		mb();
++	return ret;
++}
++
++static void k230_clk_amp_unlock(struct k230_clk_composite *clk, void __iomem *reg)
++{
++	if (clk->amp_lock_reg && k230_clk_amp_shared_reg(clk, reg)) {
++		mb();
++		writel(0, clk->amp_lock_reg);
++	}
++}
++
++static int k230_clk_amp_setup(struct k230_clk_composite *clk, struct device_node *parent)
++{
++	struct resource res;
++	u32 mask;
++
++	if (!of_property_read_bool(parent, "tdvp,cpu1-i2c4-clock-sharing"))
++		return 0;
++	if (of_address_to_resource(parent, 0, &res) || res.start != 0x91100000 ||
++		resource_size(&res) < 0x34)
++		return -EINVAL;
++	if (!k230_clk_amp_shared_reg(clk, clk->gate_reg) &&
++		!k230_clk_amp_shared_reg(clk, clk->rate_reg) &&
++		!k230_clk_amp_shared_reg(clk, clk->rate_reg_1) &&
++		!k230_clk_amp_shared_reg(clk, clk->mux_reg))
++		return 0;
++	/* Shared divider fields must use one register and no mux. PDM shares
++	 * the gate word but its two divider registers are private to Linux.
++	 */
++	if (k230_clk_amp_shared_reg(clk, clk->mux_reg) ||
++		k230_clk_amp_shared_reg(clk, clk->rate_reg_1) ||
++		(k230_clk_amp_shared_reg(clk, clk->rate_reg) && clk->rate_reg_1))
++		return -EINVAL;
++	if (k230_clk_amp_shared_reg(clk, clk->gate_reg)) {
++		if (clk->gate_reg != clk->base_reg + TDVP_CMU_LS_GATE ||
++			clk->gate_bit >= 32 || clk->gate_bit_reverse ||
++			(BIT(clk->gate_bit) & TDVP_CMU_I2C4_GATES))
++			return -EINVAL;
++	}
++	if (k230_clk_amp_shared_reg(clk, clk->rate_reg)) {
++		if (clk->rate_calc_method != 1 || clk->rate_div_shift >= 32 ||
++			clk->rate_div_mask > (U32_MAX >> clk->rate_div_shift) ||
++			clk->rate_write_enable_bit != 31 || clk->rate_mul_mask)
++			return -EINVAL;
++		mask = clk->rate_div_mask << clk->rate_div_shift;
++		if (clk->rate_reg == clk->base_reg + TDVP_CMU_LS_GATE ||
++			(mask & BIT(31)) ||
++			(clk->rate_reg == clk->base_reg + TDVP_CMU_UART_I2C_DIV &&
++			 (mask & TDVP_CMU_I2C4_DIV)))
++			return -EINVAL;
++	}
++	/* Reuse the GPIO semaphore: no uncoordinated allocation of a new slot. */
++	clk->amp_lock_reg = ioremap(0x911040a0, sizeof(u32));
++	return clk->amp_lock_reg ? 0 : -ENOMEM;
++}
++
++#endif

@@ -2,8 +2,7 @@
 
 ## 范围与所有权
 
-本镜像的虚拟工作区由 Labwc 合成器管理。它不是独立 daemon、X11
-EWMH 兼容层，也不会通过伪造键盘或鼠标事件来切换窗口。
+本镜像的虚拟工作区由 Labwc 合成器管理，直接使用其工作区、焦点和触摸输入机制。
 
 ```text
 Goodix GT9895 touch
@@ -33,10 +32,9 @@ Workspace 1 ←→ Workspace 2 ←→ Workspace 3 ←→ Workspace 4
 - 新窗口、对话框、popup 和焦点关系继续由 Labwc 管理。
 - 工作区不会从第一个循环到最后一个，反之亦然。
 - Labwc 的 550 ms workspace OSD 显示当前工作区；该 OSD 由 compositor
-  生成而非独立的 Wayland client。
+  生成。
 - PCManFM 桌面背景、wf-panel-pi、TDVP Quick Settings、屏幕键盘和其他
-  layer-shell 系统界面保持全局可见。它们不是可被移动到工作区的普通
-  xdg_toplevel 窗口。
+  layer-shell 系统界面保持全局可见；工作区移动操作只作用于普通 xdg_toplevel 窗口。
 
 物理键盘提供以下等价操作：
 
@@ -85,14 +83,13 @@ Workspace 1 ←→ Workspace 2 ←→ Workspace 3 ←→ Workspace 4
 
 ## 合成和性能
 
-当前镜像使用 wlroots Pixman 软件渲染器。首版在手势释放后执行原生
-workspace 切换并显示 Labwc OSD；它不承诺 GNOME 风格的每帧跟手桌面
-位移动画。
+当前镜像使用 wlroots VGLite 渲染器。手势释放后执行原生 workspace 切换，
+并显示 Labwc OSD。每帧跟手的桌面位移动画尚未实现。
 
 实时动画需要同一帧同时渲染当前与相邻 workspace 的 scene tree。只有在
 真机对连续滑动的帧时间、CPU 使用率、输入延迟和 Quick Settings/全屏
-应用并存情况完成测量后，才能作为后续的 compositor patch 启用。虚拟
-工作区本身与将来的 VGLite renderer 演进解耦。
+应用并存情况完成测量后，才能作为后续的 compositor patch 启用。
+工作区策略和 VGLite 渲染后端分别维护。
 
 ## 维护与验收
 

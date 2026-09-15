@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+printf 'renderer=%s direct_scanout=%s failure_recovery=%s diagnostics=%s\n' \
+	"${WLR_RENDERER:-unset}" "${WLR_SCENE_DISABLE_DIRECT_SCANOUT:-unset}" \
+	"${TDVP_LABWC_VGLITE_FAILURE_RECOVERY:-unset}" "${TDVP_VGLITE_DIAGNOSTICS:-unset}" >> "${TDVP_TEST_LOG:?}"
+exit "${TDVP_TEST_EXIT:?}"

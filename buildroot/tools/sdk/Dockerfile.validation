@@ -1,0 +1,5 @@
+ARG SDK_VALIDATION_BASE=ubuntu:24.04
+FROM ${SDK_VALIDATION_BASE}
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential cmake python3 binutils zlib1g ca-certificates qemu-user \
+    && rm -rf /var/lib/apt/lists/*

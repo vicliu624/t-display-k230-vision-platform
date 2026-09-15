@@ -1,0 +1,63 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] VVCAM: publish monotonic completion timestamps and sequences
+
+The vendor ISP completion path returns buffers with zero timestamps and
+zero V4L2 frame sequences. FFmpeg consequently treats successive frames as
+duplicates. Stamp receipt of the ISP completion notification (not sensor
+exposure time) and count frames per pad/stream. Keep the vendor buffer-index
+field distinct from the public V4L2 frame sequence; it is the ISP ABI key.
+The existing queue spinlock serializes sequence assignment and reset.
+
+diff --git a/v4l2/isp/vvcam_isp_driver.h b/v4l2/isp/vvcam_isp_driver.h
+--- a/v4l2/isp/vvcam_isp_driver.h
++++ b/v4l2/isp/vvcam_isp_driver.h
+@@ -97,6 +97,7 @@ struct vvcam_isp_pad_data {
+ 	struct list_head queue;
+ 	spinlock_t qlock;
+ 	uint32_t stream;
++	u32 frame_sequence;
+ };
+ 
+ struct vvcam_isp_event_shm {
+diff --git a/v4l2/isp/vvcam_isp_driver.c b/v4l2/isp/vvcam_isp_driver.c
+--- a/v4l2/isp/vvcam_isp_driver.c
++++ b/v4l2/isp/vvcam_isp_driver.c
+@@ -53,6 +53,7 @@
+ #include <linux/module.h>
+ #include <linux/version.h>
+ #include <linux/platform_device.h>
++#include <linux/ktime.h>
+ #include <linux/of_reserved_mem.h>
+ #include <linux/of_graph.h>
+ #include <linux/vmalloc.h>
+@@ -208,13 +209,19 @@ static int vvcam_isp_pad_s_stream(struct v4l2_subdev *sd, void *arg)
+     struct vvcam_pad_stream_status *pad_stream = (struct vvcam_pad_stream_status *)arg;
+     struct vvcam_isp_dev *isp_dev = v4l2_get_subdevdata(sd);
++    struct vvcam_isp_pad_data *cur_pad = &isp_dev->pad_data[pad_stream->pad];
++    unsigned long flags;
+     int ret;
+ 
+-    isp_dev->pad_data[pad_stream->pad].stream = pad_stream->status;
++    spin_lock_irqsave(&cur_pad->qlock, flags);
++    if (pad_stream->status && !cur_pad->stream)
++        cur_pad->frame_sequence = 0;
++    cur_pad->stream = pad_stream->status;
+ 
+     if (pad_stream->status == 0 ) {
+-        INIT_LIST_HEAD(&isp_dev->pad_data[pad_stream->pad].queue);
++        INIT_LIST_HEAD(&cur_pad->queue);
+     }
++    spin_unlock_irqrestore(&cur_pad->qlock, flags);
+     ret = vvcam_isp_s_stream_event(isp_dev, pad_stream->pad, pad_stream->status);
+ 
+     return ret;
+ }
+@@ -244,6 +251,8 @@ static int vvcam_isp_buf_done(struct v4l2_subdev *sd, void *arg)
+     list_for_each_entry_safe(pos, next, &cur_pad->queue, list) {
+         if (pos && (pos->sequence == ubuf.index)) {
+            buf = pos;
++           buf->vb.vb2_buf.timestamp = ktime_get_ns();
++           buf->vb.sequence = cur_pad->frame_sequence++;
+            list_del(&pos->list);
+            break;
+         }

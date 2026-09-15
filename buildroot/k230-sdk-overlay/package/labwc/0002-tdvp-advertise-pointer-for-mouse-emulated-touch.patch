@@ -57,7 +57,7 @@ index 74d40f5..b892764 100644
  static void
  seat_update_capabilities(struct seat *seat)
  {
-@@ -380,4 +395,12 @@ seat_update_capabilities(struct seat *seat)
+@@ -414,6 +429,14 @@ seat_update_capabilities(struct seat *seat)
  			break;
  		case WLR_INPUT_DEVICE_TOUCH:
  			caps |= WL_SEAT_CAPABILITY_TOUCH;

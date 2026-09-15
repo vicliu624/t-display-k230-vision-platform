@@ -2,11 +2,16 @@
 WLR_BACKENDS=drm,libinput
 WLR_DRM_DEVICES=/dev/dri/card0
 # K230's vendor DRM driver is not backed by a Mesa DRI driver in this image.
-# Use wlroots' native pixman renderer so the compositor never falls back
-# through the unavailable canaan-drm EGL path.
-WLR_RENDERER=pixman
+# Use the pinned native VGLite renderer, not the unavailable Mesa/EGL path.
+# Both tdvp-labwc-session and tdvp-greeter-session require VGLite;
+# neither compositor may fall back to software rendering.
+WLR_RENDERER=vglite
 WLR_DRM_NO_MODIFIERS=1
-WLR_RENDERER_ALLOW_SOFTWARE=1
+# This image uses a private session D-Bus launched by dbus-run-session, not a
+# systemd --user manager.  Labwc otherwise tries to import/unset its activation
+# environment through systemctl --user on every compositor start/stop; that
+# activation is guaranteed to fail here and can be mistaken for a failed login.
+LABWC_UPDATE_ACTIVATION_ENV=0
 LIBSEAT_BACKEND=seatd
 XDG_SEAT=seat0
 # Image-owned administration wrappers live in /usr/local/sbin.  Expose that

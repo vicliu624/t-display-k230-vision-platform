@@ -16,7 +16,10 @@ bash buildroot/tools/build-k230-sdk-rm69a10.sh "$HOME/work/tdvp-k230-labwc"
 bash buildroot/tools/assert-k230-sdk-rm69a10-baseline.sh "$HOME/work/tdvp-k230-labwc"
 ```
 
-Run these commands from WSL on an ext4 worktree. The project checkout may live
+Run these commands on a Linux/ext4 worktree (native Linux, a container, or WSL).
+For CI parity, use Ubuntu 24.04 x86_64 and the host preparation script used by
+`.github/workflows/ci.yml`; a successful build on an older WSL distribution is
+not equivalent to verification in the CI userspace. The project checkout may live
 on the Windows filesystem, but `$HOME/work/tdvp-k230-labwc` is the only
 disposable build input. Do not invoke `make` inside the vendor SDK or use an
 `output/<profile>` directory as the worktree argument.
@@ -64,6 +67,44 @@ For a fast, non-compiling decision about the next build, use:
 TDVP_STAGE_DRY_RUN=1 \
   bash buildroot/tools/prepare-k230-sdk-worktree.sh "$HOME/work/tdvp-k230-labwc"
 ```
+
+### Check delivery rules before compiling
+
+```sh
+bash buildroot/tools/test-tdvp-image-source-contract.sh
+bash buildroot/tools/test-tdvp-session-idle-contract.sh
+bash buildroot/tools/test-tdvp-renderer-stack-lock.sh
+bash buildroot/tools/test-tdvp-cpu1-vision-status.sh
+```
+
+The source-contract test derives installation paths from the greeter and desktop
+package recipes, copies the real source files into a temporary ext4 filesystem,
+and runs the corresponding assertions and extraction helpers from the production
+image verifier. It reports all mismatches and rejects deliberately broken login
+commands, users, and session launchers. It needs Bash, Python 3, and e2fsprogs,
+but no compiler, mount, root privileges, or existing SDK output.
+
+It also executes the literal metadata statements from the real post-image
+manifest writer and checks the release baseline's literal requirements. The
+wlroots/Labwc revisions and renderer policy fields are independently compared
+with their package recipes and delivered environment, catching omitted or
+incorrect manifest fields before the full build.
+
+This fast check covers directly installed desktop policy files, not compiled
+executables, generated system configuration, variable-valued manifest fields
+and artifact hashes, complete partition contents, or
+hardware behavior. Keep the independent CPU1 firmware preflight and the final
+full-image/release guards. Record these as separate validation results; passing
+one does not imply that the later stages have passed.
+
+The CPU1 status regression also calls `test-tdvp-cpu1-hwctl-image-contract.sh`.
+It compiles the production status object with C++17 and `-O0`, places it in a
+temporary ext4 filesystem, runs the image verifier's actual `vpl-hwctl` content
+assertions, and creates a negative control for every rule. This step requires a
+C++17 compiler and checks the interface identifiers in the compiled payload.
+Pass an existing cross-compiled `vpl-hwctl` as that script's sole argument to
+check a real target ELF. It does not execute RISC-V code or replace full-image
+and hardware acceptance.
 
 ## Persistent Inputs
 

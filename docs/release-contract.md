@@ -1,95 +1,104 @@
 # Release Contract
 
-Each release produces one flashable T-Display K230 SD-card image and a Windows-
-visible release bundle. It is the maintained baseline for low-performance,
-keyboard-first Linux handhelds; it is not an experimental launcher image.
+This document defines T-Display K230 deliverables and acceptance scope.
+Record code integration, CI builds and hardware acceptance separately.
+A successful build establishes only the properties checked in that run.
 
 ## Delivered files
 
+`collect-release-bundle.sh` produces these files under a caller-selected release name:
+
 ```text
-vicliu-pocket-linux-k230-<revision>.img
-vicliu-pocket-linux-k230-<revision>.img.gz
+<release-name>.img.gz
 tdvp-image-manifest
+tdvp-cpu1-rtsmart.bin
+tdvp-cpu1-rtsmart.manifest
 tdvp-sdk-baseline-manifest
+tdvp-image-base.json
+tdvp-opkg-status
+tdvp-opkg-info.tar.gz
+tdvp-buildroot-packages.json
+<release-name>-cpu0-sdk.tar.gz
+tdvp-sdk-manifest.json
 README.txt
 SHA256SUMS
 ```
 
-The final bundle must be copied to this repository's Windows `output/`
-directory. A WSL-only build artifact is not a release deliverable.
+The bundle lives in the repository's `output/<release-name>/`. Local WSL builds
+must collect into the user-visible repository directory; CI uploads that directory.
+The bundle delivers only the compressed image. CPU1 firmware is also embedded
+in the whole-card image; its separate copy supports pairing and checksum inspection.
+CI also adds `tdvp-sdk-validation.log` and its SHA-256 after the isolated SDK test.
+The application SDK contains the paired compiler, development sysroot and image
+package records; see [CPU0 application SDK](cpu0-application-sdk.md).
 
-The image contains the K230 boot payload, kernel and RM69A10 DTB, systemd,
-OpenSSH recovery, NetworkManager, seatd, greetd/gtkgreet, Labwc, PCManFM,
-Raspberry Pi `wf-panel-pi` plugins, Foot, Cog/WPE WebKit,
-`nm-connection-editor`, `opkg`, the signed-feed bootstrap and board packages.
+The image includes CPU0 Linux, CPU1 RT-Smart/OpenSBI, systemd, OpenSSH,
+NetworkManager, seatd, greetd/gtkgreet, Labwc/VGLite, PCManFM, wf-panel-pi,
+Foot, nm-connection-editor, gtklock, board services and opkg trust material.
+Browsers and the Linux Camera demo have been removed from the base desktop.
 
-## Required image invariants
+## Image invariants
 
-- U-Boot uses the deterministic root `PARTUUID`, never a hard-coded
-  `/dev/mmcblkN` number.
-- GPT has only boot partition 1 and root partition 2. First boot can expand the
-  root filesystem safely; no `/data` provisioner or third data partition exists.
-- A greeter-selected account receives its own home and runtime directory.
-- LilyGO/Menu opens the upstream application menu; Fn produces printed yellow
-  symbols; blank-desktop long press produces the ordinary right-click menu.
-- PCManFM provides the wallpaper/Desktop/Files behavior. The only panel is
-  upstream `wf-panel-pi`, with one NetworkManager item and one output-volume
-  item.
-- Cog has GIO TLS support and touchable Labwc title-bar controls.
-- `libcanberra` and the Freedesktop theme provide output-volume event feedback.
-- NetworkManager is the exclusive network owner and launches upstream
-  `nm-connection-editor`; no direct legacy wpa_supplicant configuration UI is
-  shipped.
-- The configured application feed is ABI-pinned and its release public key is
-  checked before signature-verified `opkg` use.
+- U-Boot locates the root filesystem through a fixed root `PARTUUID`.
+- GPT contains boot partition 1 and root partition 2. Boot firmware also occupies
+  raw areas, including the CPU1 slot at 10–30 MiB. First boot can expand root,
+  preserves later partitions, and creates no `/data`.
+- Linux runs on CPU0 using its supported scalar ISA. CPU1 exclusively owns
+  GC2093, capture/ISP, KPU, AI2D, FFT and related AI memory. Linux uses
+  `/dev/tdvp-vision` and `/dev/tdvp-ai` asynchronously.
+- Both greeter and desktop use VGLite. Renderer failures end the session and
+  leave diagnostic state; switching to Pixman is prohibited.
+- The greeter authenticates the selected account and uses its home/runtime.
+  gtklock authenticates the current session account. Defaults are 300 idle
+  seconds to lock and 330 seconds to screen-off, with a password window on wake.
+- PCManFM supplies wallpaper, desktop and Files; wf-panel-pi supplies the panel.
+  Test Menu, Fn, touch and keyboard backlight on physical hardware.
+- NetworkManager manages connections; nm-connection-editor edits them.
+- Feed signature verification stays enabled. Valid signatures and ABI metadata
+  also require ISA, file ownership, dependency closure and cold-boot validation
+  before package installation can be accepted as safe.
 
-## Release gates
+## Checks and acceptance
 
-1. Stage the pinned SDK and replay every SDK, Linux, Buildroot and package
-   patch with the patch-only assertion.
-2. Build the complete bootable image from the release defconfig.
-3. Run the post-image SD-card verifier. It inspects partition identity,
-   rootfs files, systemd links, desktop configuration, TLS, event sounds and
-   signed-feed material rather than trusting a build exit status alone.
-4. Run hardware-build preflight and retain the generated evidence report.
-5. Boot a device and verify the greeter/session, menu key, keyboard, touch,
-   Files, panel, Wi-Fi editor and volume event feedback. Then install the
-   signed feed browser (`tdvp-netsurf`) and verify HTTPS browsing.
-6. Download the configured public feed's `Packages.gz`, `Packages.gz.asc`, and
-   `release.json` over HTTPS; verify the detached signature with the embedded
-   public key and require every published package to depend on the exact image
-   ABI.
-7. Collect the image, compressed image, manifests and checksums in `output/`.
+| Stage | Checks | Scope of the conclusion |
+| --- | --- | --- |
+| Pre-build | Pinned SDK, patch structure/replay, source contracts, hardware preflight | Checked inputs and configuration |
+| Full build | Release defconfig, paired CPU1 firmware, post-image verifier | Asserted image layout, rootfs files and configuration |
+| SDK handoff | File hashes, image binding, two isolated paths, C/C++/GTK/CMake and ELF attributes | Application compiler and checked dependencies work without the original build tree |
+| Static feed gate | HTTPS, index signatures, release metadata, package ABI dependencies, required names | Published index and trust material |
+| Fresh-card hardware | Boot/reboot, CPU1 data and numerical results, VGLite, login/lock, input, network, audio | That image on that hardware |
+| On-device packages | Dependency installation, app startup, removal/upgrade boundaries, reboot | End-to-end package-manager and feed usability |
 
-`tdvp-image-manifest` records source revisions, build inputs, filesystem/GPT
-identities and image hashes. `tdvp-sdk-baseline-manifest` records the staged SDK
-inputs. `SHA256SUMS` covers every delivered file.
+See [hardware baseline validation](hardware-baseline-validation.md).
+Historical hot-deployment results must identify the base image and replaced
+files. Each candidate whole-card image still requires its own acceptance.
 
-## Signed distribution-feed policy
+`tdvp-image-manifest` records source/build inputs, partition identities and image
+hashes. The CPU1 manifest describes paired firmware; `tdvp-sdk-baseline-manifest`
+records staged inputs. `tdvp-sdk-manifest.json` binds the application SDK to the
+image and package inventory. `SHA256SUMS` covers the other delivered files.
 
-The standard image configures only:
+## Feed status and remaining requirements
 
-```text
-https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r6/riscv64
-```
+The image configures the mutable `stable` channel. See [feed status](package-feed-status.md)
+for its full URL and public key. The trailing `r1` in the platform identifier is
+part of the ABI label; the observed feed revision on 2026-09-09 was `r6`.
 
-The key fingerprint is `2B091A2A8E5810954FB9FD64EA9D1CD5EFC81500`.
-The image includes its public key only. The image itself is a small
-hardware/desktop seed; this ABI-matched feed is the expandable distribution
-catalogue for userland libraries, tools, desktop programs, and device
-applications. Publishing must produce ABI-matched packages,
-`Packages`/`Packages.gz`, and their detached signature using the offline
-private key. Neither devices nor this repository contain the private signing
-material, and release instructions must never disable signature checks.
+**End-to-end package acceptance has failed; installs and upgrades are paused.**
+Runtime libraries installed with NetSurf contained RVV instructions unsupported
+by CPU0, and the device subsequently failed to boot. Image publication now
+checks final ext4 ownership and the preinstalled package database and exports
+those records. The online feed signature/metadata gate is a separate operation.
+Per-IPK compatibility and end-to-end acceptance remain required. Matching
+SDK/sysroot publication is still needed before establishing a public feed's
+build baseline.
 
-The feed is composable by contract. For every software component in this
-distribution, each non-ABI dynamic runtime library, plugin, and runtime helper
-has exactly one independently installable IPK owner in the same feed revision.
-Applications are leaves and can consume those providers only through exact
-versioned dependencies. They must not statically absorb common libraries or
-silently rely on a library merely because it happens to be present in the base
-image.
+Before resuming package delivery, require:
 
-The bundle collector enforces this policy against the live Pages endpoint; it
-does not treat an image containing a URL and public key as proof that updates
-will work in the field.
+- CPU0-compatible executables and runtime libraries throughout the Linux feed.
+- Explicit, verifiable versions and package ownership for libraries shared by
+  the base image and feed.
+- One provider for each runtime library, plugin and helper, with a complete dependency closure.
+- Continued signature verification, with private keys kept at the publisher
+  and only public keys present on the device.
+- NetSurf installation, HTTPS browsing and reboot acceptance on the paired candidate image.

@@ -7,7 +7,8 @@ config BR2_PACKAGE_TDVP_DISPLAY_SMOKE
 
 	  This validation-only target tool opens DRM/KMS directly and performs
 	  deterministic static patterns or bounded double-buffer atomic updates.
-	  This is a manual KMS diagnostic utility.
+	  This is a manual maintenance diagnostic only: it must not run while
+	  greetd or a Labwc desktop owns /dev/dri/card0.
 
 comment "tdvp-display-smoke needs a toolchain w/ threads"
 	depends on !BR2_TOOLCHAIN_HAS_THREADS

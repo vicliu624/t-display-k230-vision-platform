@@ -1,0 +1,191 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] k230: expose actual CPU1 supplier readiness
+
+Require successful protected provider registration, not merely DT opt-in.
+The fixed SoC GPIO/power providers no longer expose hot-unbind attributes;
+AMP GPIO/power instances are pinned for the boot lifetime. Clocks register
+permanently. No AI grant is issued by these providers themselves.
+
+diff --git a/drivers/clk/clk-k230.c b/drivers/clk/clk-k230.c
+index 6f3cdf7..76b29e7 100644
+--- a/drivers/clk/clk-k230.c
++++ b/drivers/clk/clk-k230.c
+@@ -31,6 +31,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/iopoll.h>
+ 
+ #define CLK_IS_BASIC BIT(5)
+@@ -42,6 +43,8 @@
+ 
+ #undef K230_CLK_DEBUG
+ static DEFINE_SPINLOCK(k230_clk_spinlock);
++static LIST_HEAD(tdvp_registered_clocks);
++static DEFINE_MUTEX(tdvp_registered_clocks_lock);
+ /*********************************************************
+  * K230 composite clk register
+  *
+@@ -57,6 +60,8 @@ static DEFINE_SPINLOCK(k230_clk_spinlock);
+  *	rate_mul_mask = mul, rate_div_mask = div
+  ******************************************************************************/
+ struct k230_clk_composite {
++	struct list_head owner_entry;
++	struct device_node *owner_node;
+ 	struct clk_hw hw;
+ 	struct clk_lookup *cl;
+ 	const struct clk_ops *ops;
+@@ -117,6 +122,53 @@ struct k230_clk_composite {
+ 
+ #include "clk-k230-tdvp-amp.h"
+ 
++/* All enabled composite providers must really have registered. In particular
++ * every writer of a shared LS word must use the 0069 semaphore implementation.
++ * Registration is permanent (early OF clocks have no remove path).
++ */
++bool k230_tdvp_clock_ready(struct device_node *parent);
++bool k230_tdvp_clock_ready(struct device_node *parent)
++{
++	struct device_node *node;
++	struct k230_clk_composite *clk;
++	unsigned int protected = 0;
++	bool ready = false, found;
++
++	if (!parent || !of_property_read_bool(parent, "tdvp,cpu1-i2c4-clock-sharing"))
++		return false;
++	mutex_lock(&tdvp_registered_clocks_lock);
++	for_each_available_child_of_node(parent, node) {
++		if (!of_device_is_compatible(node, "canaan,k230-clk-composite"))
++			continue;
++		found = false;
++		list_for_each_entry(clk, &tdvp_registered_clocks, owner_entry) {
++			if (clk->owner_node != node)
++				continue;
++			found = true;
++			if (k230_clk_amp_shared_reg(clk, clk->gate_reg) ||
++			    k230_clk_amp_shared_reg(clk, clk->rate_reg) ||
++			    k230_clk_amp_shared_reg(clk, clk->rate_reg_1) ||
++			    k230_clk_amp_shared_reg(clk, clk->mux_reg)) {
++				if (!clk->amp_lock_reg) {
++					of_node_put(node);
++					goto out;
++				}
++				++protected;
++			}
++			break;
++		}
++		if (!found) {
++			of_node_put(node);
++			goto out;
++		}
++	}
++	ready = protected >= 20;
++out:
++	mutex_unlock(&tdvp_registered_clocks_lock);
++	return ready;
++}
++EXPORT_SYMBOL_GPL(k230_tdvp_clock_ready);
++
+ //calculate the frequency division factor:
+ // 0: 1/12, 2/12, 3/12, .......
+ // 1: 1/1, 1/2, 1/3, .......
+@@ -813,6 +865,10 @@ static struct clk *_of_cannan_k230_clk_composite_setup(struct device_node *node)
+ 	k230_clk_composite->cl = clkdev_create(hw->clk, node->name, NULL);
+ 	if (k230_clk_composite->cl == NULL)
+ 		goto unregister_provider;
++	k230_clk_composite->owner_node = of_node_get(node);
++	mutex_lock(&tdvp_registered_clocks_lock);
++	list_add_tail(&k230_clk_composite->owner_entry, &tdvp_registered_clocks);
++	mutex_unlock(&tdvp_registered_clocks_lock);
+ 
+ #ifdef CONFIG_DEBUG_FS
+ 	k230_debugfs_clk_composite_init(hw);
+diff --git a/drivers/gpio/gpio-k230.c b/drivers/gpio/gpio-k230.c
+index 6409074..79de3ac 100644
+--- a/drivers/gpio/gpio-k230.c
++++ b/drivers/gpio/gpio-k230.c
+@@ -698,6 +698,17 @@ static const struct of_device_id k230_of_match[] = {
+ };
+ MODULE_DEVICE_TABLE(of, k230_of_match);
+ 
++/* The AMP board is not hot-removable. Publish only after the real guarded
++ * controller and its clocks/ports are initialized, never from a DT flag alone.
++ */
++static struct device_node *tdvp_gpio_owner;
++bool k230_tdvp_gpio_ready(struct device_node *node);
++bool k230_tdvp_gpio_ready(struct device_node *node)
++{
++	return node && smp_load_acquire(&tdvp_gpio_owner) == node;
++}
++EXPORT_SYMBOL_GPL(k230_tdvp_gpio_ready);
++
+ static int k230_gpio_probe(struct platform_device *pdev)
+ {
+ 	unsigned int i;
+@@ -758,6 +769,11 @@ static int k230_gpio_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	platform_set_drvdata(pdev, gpio);
++	if (gpio->amp_remote_mask && gpio->amp_lock_reg) {
++		/* No unload after CPU1 can start using this shared controller. */
++		__module_get(THIS_MODULE);
++		smp_store_release(&tdvp_gpio_owner, of_node_get(dev->of_node));
++	}
+ 
+ 	return 0;
+ }
+@@ -861,6 +877,7 @@ static SIMPLE_DEV_PM_OPS(k230_gpio_pm_ops, k230_gpio_suspend,
+ static struct platform_driver k230_gpio_driver = {
+ 	.driver		= {
+ 		.name	= K230_DRIVER_NAME,
++		.suppress_bind_attrs = true,
+ 		.pm	= &k230_gpio_pm_ops,
+ 		.of_match_table = k230_of_match,
+ 	},
+diff --git a/drivers/soc/canaan/k230-power-domains.c b/drivers/soc/canaan/k230-power-domains.c
+index 6032b72..e15d41e 100644
+--- a/drivers/soc/canaan/k230-power-domains.c
++++ b/drivers/soc/canaan/k230-power-domains.c
+@@ -10,6 +10,7 @@
+ #include <linux/of.h>
+ #include <linux/pm_domain.h>
+ #include <linux/platform_device.h>
++#include <linux/module.h>
+ 
+ #include <dt-bindings/soc/canaan,k230_pm_domains.h>
+ 
+@@ -292,10 +293,23 @@ static struct generic_pm_domain *k230_pm_domains[] = {
+ 	[K230_PM_DOMAIN_DPU] = &dpu_domain.dm,
+ };
+ 
++static struct device_node *tdvp_power_owner;
++bool k230_tdvp_power_ready(struct device_node *node);
++bool k230_tdvp_power_ready(struct device_node *node)
++{
++	return node && smp_load_acquire(&tdvp_power_owner) == node;
++}
++EXPORT_SYMBOL_GPL(k230_tdvp_power_ready);
++
+ static int k230_power_domain_probe(struct platform_device *pdev)
+ {
+-	return k230_pd_probe(pdev, k230_pm_domains,
+-				 ARRAY_SIZE(k230_pm_domains));
++	int ret = k230_pd_probe(pdev, k230_pm_domains, ARRAY_SIZE(k230_pm_domains));
++
++	if (!ret && ai_domain.tdvp_cpu1_keep_on && disp_domain.tdvp_cpu1_keep_on) {
++		__module_get(THIS_MODULE);
++		smp_store_release(&tdvp_power_owner, of_node_get(pdev->dev.of_node));
++	}
++	return ret;
+ }
+ 
+ static const struct of_device_id k230_pm_domain_matches[] = {
+@@ -308,6 +322,7 @@ static const struct of_device_id k230_pm_domain_matches[] = {
+ static struct platform_driver k230_power_domain_driver = {
+ 	.driver = {
+ 		.name = "k230-powerdomain",
++		.suppress_bind_attrs = true,
+ 		.of_match_table = k230_pm_domain_matches,
+ 	},
+ 	.probe = k230_power_domain_probe,

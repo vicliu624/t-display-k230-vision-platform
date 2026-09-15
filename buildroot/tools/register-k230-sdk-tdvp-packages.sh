@@ -46,12 +46,17 @@ register_package() {
 }
 
 register_package tdvp-dejavu-fonts
+register_package tdvp-camera-isp-runtime
+register_package tdvp-camera-isp 1
+register_package tdvp-cpu1-vision
 register_package vg_lite
 # The vendor SDK carries labwc's recipe but omits it from its synchronized
 # top-level package menu. Register it here so the profile's explicit Labwc
 # selection reaches Kconfig.
 register_package labwc
 register_package swaylock 1
+register_package gtklock 1
+register_package gtk-session-lock
 register_package swayidle
 register_package wlopm
 register_package tdvp-quick-settings
@@ -83,6 +88,7 @@ register_package vicliu-pocket-linux-hardware 1
 register_package tdvp-display-smoke 1
 register_package tdvp-keyboard-layout 1
 register_package tdvp-wayland-acceptance 1
+register_package tdvp-wayland-tools 1
 register_package tdvp-vglite-acceptance 1
 
 # The vendor SDK sync target may replace package/Config.in with the upstream

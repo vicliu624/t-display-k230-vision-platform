@@ -1,0 +1,199 @@
+From 2e39ba79b2b18c6eaa550001f6b6f5bc7cfd0059 Mon Sep 17 00:00:00 2001
+From: TDVP <tdvp@localhost>
+Date: Fri, 4 Sep 2026 18:30:00 +0800
+Subject: [PATCH] tdvp: vglite: bound infinite waits so recovery can run
+
+The vendor userspace implements vg_lite_finish() as SUBMIT followed by a
+VG_LITE_WAIT whose timeout is VG_LITE_INFINITE. The vendor HAL implements
+that value as repeated one-second sleeps and retries forever while the GPU
+is not idle. Consequently a lost completion can leave the client in WAIT
+forever: the 0058 in-flight-close recovery cannot run because userspace
+never gets control back to close its file.
+
+Give an infinite wait a conservative, configurable five-second watchdog.
+On expiry return false from vg_lite_hal_wait_interrupt(), so do_wait()
+returns VG_LITE_TIMEOUT. The submit-to-wait lease deliberately remains
+owned by that client; when userspace closes the file, 0058 masks and
+synchronizes its IRQ, resets the engine, and only then releases the file's
+resources. A failed reset still quarantines the device.
+
+Finite waits retain their requested total deadline, including the vendor
+idle-register check. The old loop could retry a finite wait indefinitely
+when an interrupt was seen but the idle register never reached its expected
+value. Interrupted waits are returned as a timeout instead of treating a
+negative wait_event result as successful completion.
+
+The parameter is intentionally bounded to 1..60 seconds:
+
+  /sys/module/vg_lite/parameters/infinite_wait_watchdog_ms
+
+It defaults to 5000 ms, well above the measured desktop compositor frame
+times but finite enough to preserve the existing recovery path.
+
+---
+ drivers/gpu/vglite/vg_lite_hal.c | 85 ++++++++++++++++++++++++++++++--------
+ 1 file changed, 71 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/gpu/vglite/vg_lite_hal.c b/drivers/gpu/vglite/vg_lite_hal.c
+index c226967c989af..e0b64b7a00259 100644
+--- a/drivers/gpu/vglite/vg_lite_hal.c
++++ b/drivers/gpu/vglite/vg_lite_hal.c
+@@ -78,3 +78,20 @@
+ #define VM_FLAGS (VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP)
+-
++
++/*
++ * vg_lite_finish() submits then asks this HAL to wait forever. Keep the
++ * default comfortably above normal desktop work, but never leave a lost GPU
++ * completion outside the driver's in-flight-close recovery path forever.
++ */
++#define VG_LITE_INFINITE_WAIT_POLL_MS             1000U
++#define VG_LITE_INFINITE_WAIT_WATCHDOG_DEFAULT_MS 5000U
++#define VG_LITE_INFINITE_WAIT_WATCHDOG_MIN_MS     1000U
++#define VG_LITE_INFINITE_WAIT_WATCHDOG_MAX_MS    60000U
++
++static unsigned int vg_lite_infinite_wait_watchdog_ms =
++	VG_LITE_INFINITE_WAIT_WATCHDOG_DEFAULT_MS;
++module_param_named(infinite_wait_watchdog_ms,
++	vg_lite_infinite_wait_watchdog_ms, uint, 0644);
++MODULE_PARM_DESC(infinite_wait_watchdog_ms,
++	"Maximum VG_LITE_INFINITE wait before returning VG_LITE_TIMEOUT (1..60000 ms)");
++
+ #define current_mm_mmap_sem current->mm->mmap_lock
+@@ -417,48 +434,88 @@
+-int vg_lite_hal_wait_interrupt(u32 timeout, u32 mask, u32 *value)
+-{
+-	// FIXME: struct timeval tv;
+-	unsigned long jiffies;
+-	unsigned long result;
+-#define IGNORE_INTERRUPT 1
+-#if IGNORE_INTERRUPT
+-	unsigned int int_flag;
+-	u32 idle = 0x7fffffff;
+-#endif
+-
+-	/* Convert timeval to jiffies. */
+-	if (timeout == VG_LITE_INFINITE) {
+-		/* Set 1 second timeout. */
+-		jiffies = msecs_to_jiffies(1000);
+-	} else {
+-		/* Convert timeout in ms to timeval. */
+-		jiffies = msecs_to_jiffies(timeout);
+-	}
+-
+-	/* Wait for interrupt, ignoring timeout. */
+-	do {
+-		result = wait_event_interruptible_timeout(
+-			device->int_queue, device->int_flags & mask, jiffies);
+-#if IGNORE_INTERRUPT
+-		/* Wait until GPU is idle */
+-		int_flag = vg_lite_hal_peek(0x10);
+-		idle = vg_lite_hal_peek(0x04);
+-		if (int_flag) {
+-			result = int_flag;
+-			dev_vdbg(device->dev,
+-				"vg_lite: waiting... idle: 0x%08X, int: 0x%08X, FE: 0x%08X 0x%08X 0x%08X\n",
+-				idle, int_flag, vg_lite_hal_peek(0x500),
+-				vg_lite_hal_peek(0x504), vg_lite_hal_peek(0x508)
+-			);
+-		}
+-#endif
+-	} while ((timeout == VG_LITE_INFINITE && result == 0) || (idle != 0x7fffffff));
+-
+-	/* Report the event(s) got. */
+-	if (value)
+-		*value = device->int_flags & mask;
+-
+-	device->int_flags = 0;
+-	return (result != 0);
+-}
++int vg_lite_hal_wait_interrupt(u32 timeout, u32 mask, u32 *value)
++{
++	unsigned long deadline;
++	unsigned long wait_jiffies;
++	long result = 0;
++	bool infinite_wait = timeout == VG_LITE_INFINITE;
++	bool timed_out = false;
++#define IGNORE_INTERRUPT 1
++#if IGNORE_INTERRUPT
++	unsigned int int_flag;
++	u32 idle = 0x7fffffff;
++#endif
++
++	if (infinite_wait) {
++		unsigned int watchdog_ms = vg_lite_infinite_wait_watchdog_ms;
++
++		if (watchdog_ms < VG_LITE_INFINITE_WAIT_WATCHDOG_MIN_MS)
++			watchdog_ms = VG_LITE_INFINITE_WAIT_WATCHDOG_MIN_MS;
++		if (watchdog_ms > VG_LITE_INFINITE_WAIT_WATCHDOG_MAX_MS)
++			watchdog_ms = VG_LITE_INFINITE_WAIT_WATCHDOG_MAX_MS;
++		wait_jiffies = msecs_to_jiffies(watchdog_ms);
++	} else {
++		wait_jiffies = msecs_to_jiffies(timeout);
++	}
++	if (!wait_jiffies)
++		wait_jiffies = 1;
++	deadline = jiffies + wait_jiffies;
++
++	for (;;) {
++		if (time_after_eq(jiffies, deadline)) {
++			timed_out = true;
++			break;
++		}
++
++		wait_jiffies = deadline - jiffies;
++		if (infinite_wait &&
++		    wait_jiffies > msecs_to_jiffies(VG_LITE_INFINITE_WAIT_POLL_MS))
++			wait_jiffies = msecs_to_jiffies(VG_LITE_INFINITE_WAIT_POLL_MS);
++
++		result = wait_event_interruptible_timeout(
++			device->int_queue, device->int_flags & mask, wait_jiffies);
++		if (result < 0) {
++			dev_warn_ratelimited(device->dev,
++				"vg_lite: wait interrupted; returning timeout for safe recovery\n");
++			result = 0;
++			timed_out = true;
++			break;
++		}
++#if IGNORE_INTERRUPT
++		/* Wait until GPU is idle. */
++		int_flag = vg_lite_hal_peek(0x10);
++		idle = vg_lite_hal_peek(0x04);
++		if (int_flag) {
++			result = int_flag;
++			dev_vdbg(device->dev,
++				"vg_lite: waiting... idle: 0x%08X, int: 0x%08X, FE: 0x%08X 0x%08X 0x%08X\n",
++				idle, int_flag, vg_lite_hal_peek(0x500),
++				vg_lite_hal_peek(0x504), vg_lite_hal_peek(0x508)
++			);
++		}
++#endif
++		if (result != 0 && idle == 0x7fffffff)
++			break;
++
++		/* A finite wait without a matching interrupt has reached its deadline. */
++		if (!infinite_wait && result == 0 && idle == 0x7fffffff) {
++			timed_out = true;
++			break;
++		}
++	}
++
++	if (timed_out) {
++		dev_err_ratelimited(device->dev,
++			"vg_lite: wait timed out after %u ms (mask=0x%08x idle=0x%08x int=0x%08x)\n",
++			infinite_wait ?
++			vg_lite_infinite_wait_watchdog_ms : timeout,
++			mask, idle, device->int_flags);
++	}
++
++	/* Report the event(s) got. */
++	if (value)
++		*value = device->int_flags & mask;
++
++	device->int_flags = 0;
++	return (result != 0);
++}
+ 
+ enum vg_lite_error vg_lite_hal_operation_cache(void *handle,
+-- 
+2.43.0

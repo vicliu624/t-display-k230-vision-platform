@@ -7,6 +7,13 @@ set -a
 . /etc/tdvp/labwc/environment
 set +a
 
+# Both login and authenticated compositors must use the image-owned VGLite
+# renderer. GPU failure is an error, never permission for a software fallback.
+unset LD_LIBRARY_PATH LD_PRELOAD WLR_RENDERER_ALLOW_SOFTWARE TDVP_LABWC_FORCE_PIXMAN
+export WLR_RENDERER=vglite
+export WLR_SCENE_DISABLE_DIRECT_SCANOUT=1
+unset TDVP_LABWC_VGLITE_FAILURE_RECOVERY TDVP_VGLITE_DIAGNOSTICS
+
 export HOME="${HOME:-/var/lib/greetd}"
 export XDG_CONFIG_HOME=/etc/tdvp/greetd
 export XDG_CONFIG_DIRS=/etc/xdg

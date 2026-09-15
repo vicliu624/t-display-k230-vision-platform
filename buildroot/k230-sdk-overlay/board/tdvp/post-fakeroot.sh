@@ -43,3 +43,10 @@ ln -sfn ../../../../usr/lib/systemd/system/NetworkManager.service \
 	"${WANTS_DIR}/NetworkManager.service"
 ln -sfn ../../../../usr/lib/systemd/system/tdvp-rootfs-expand.service \
 	"${WANTS_DIR}/tdvp-rootfs-expand.service"
+
+# This is the final content boundary: mkusers, permissions and service links
+# above have completed, and the following filesystem step only normalizes
+# timestamps. Generate the package database from the files going into rootfs.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "${SCRIPT_DIR}/seed-opkg-image.py" --target-root "${TARGET_DIR}" \
+	--build-info "${BUILD_DIR:?}/tdvp-package-info.json" --build-dir "${BUILD_DIR}"

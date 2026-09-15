@@ -1,0 +1,4 @@
+# Image-owned policy: permit the pinned TDVP VGLite desktop by default.
+# This is not an acceptance report. Gate 1 and lock/wake validation must run
+# on the built image; no measured result or hardware pass is asserted here.
+tdvp_vglite_policy_version=1

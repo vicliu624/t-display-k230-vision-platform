@@ -1,0 +1,32 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] GC2093: leave MCLK ownership with the guarded MIPI driver
+
+The pinned scalar ISP's cb_IsiOpenIss programs and enables all three MCLK
+outputs through /dev/mem when mode.clk is nonzero. Its zero-clk branch skips
+those writes. Use that branch with the TDVP device tree and managed-clock
+MIPI patch; do not change the sensor register tables or the ISP executable.
+This board-specific patch is not suitable without kernel-managed MCLK.
+
+diff --git a/src/gc2093.c b/src/gc2093.c
+--- a/src/gc2093.c
++++ b/src/gc2093.c
+@@ -514,7 +514,8 @@ static struct gc2093_mode modes[] = {
+     {
+         .mode = {
+-            .clk = 24000000,
++            /* MCLK is supplied and checked by the TDVP MIPI driver. */
++            .clk = 0,
+             .width = 1920,
+             .height = 1080,
+             .lanes = VVCAM_SENSOR_2LANE,
+             .freq = VVCAM_SENSOR_1200M,
+@@ -560,7 +561,8 @@ static struct gc2093_mode modes[] = {
+     {
+         .mode = {
+-            .clk = 24000000,
++            /* Zero prevents the legacy ISP from changing every MCLK. */
++            .clk = 0,
+             .width = 1920,
+             .height = 1080,
+             .lanes = VVCAM_SENSOR_2LANE,
+             .freq = VVCAM_SENSOR_1200M,

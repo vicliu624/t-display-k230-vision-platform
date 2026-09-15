@@ -1,0 +1,168 @@
+From 7d4e1f444f461dbe3833bd99a4640e7b6c2cd529 Mon Sep 17 00:00:00 2001
+From: TDVP Display Team <display@tdvp.local>
+Date: Fri, 4 Sep 2026 15:18:00 +0800
+Subject: [PATCH] gpu: vglite: serialize a submission through its completion
+
+The VGLite hardware has one command register bank and one global interrupt
+status word. 0054 protects the vendor driver's `active_client` dispatch
+context for a single ioctl, but the userspace ABI submits work and later
+waits for completion in two separate ioctls. A second file can therefore
+submit between a first file's VG_LITE_SUBMIT and VG_LITE_WAIT, overwriting
+the command registers; its completion may then be consumed by the first
+file's wait, which clears the shared interrupt flags.
+
+This was observable under Labwc plus an independent VGLite probe: the probe
+could report a successful finish yet read the prior frame, without a kernel
+error, after a compositor frame interleaved with the probe command.
+
+Give the file that performs the first submit a global command-engine lease
+and retain it until its matching wait completes successfully, it terminates,
+or the submit itself fails. A timed-out wait retains the lease, so its owner
+can retry the wait or terminate the unfinished command rather than exposing
+the hardware to another file. A per-file mutex makes the lease state safe
+when a file is used by more than one userspace thread. The semaphore is
+intentional: unlike a mutex, it may be acquired in SUBMIT and released from
+a later WAIT syscall executed by a different task for the same file.
+
+Clear a stale interrupt status when acquiring a new submission lease and
+reject waits from files that have not submitted, so no client can consume a
+completion belonging to another file.
+---
+ drivers/gpu/vglite/vg_lite_hal.c | 62 +++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 61 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/vglite/vg_lite_hal.c b/drivers/gpu/vglite/vg_lite_hal.c
+index c1d8a4549718b..c226967c989af 100644
+--- a/drivers/gpu/vglite/vg_lite_hal.c
++++ b/drivers/gpu/vglite/vg_lite_hal.c
+@@ -55,6 +55,7 @@
+ #include <linux/mman.h>
+ #include <linux/mm_types.h>
+ #include <linux/mutex.h>
++#include <linux/semaphore.h>
+ #include <linux/io.h>
+ #include <linux/of_platform.h>
+ #include <linux/of_gpio.h>
+@@ -142,6 +143,9 @@ struct client_data {
+ 	/* Allocations and DMA-BUF mappings belong to this /dev/vg_lite file. */
+ 	struct list_head dma_list_head;
+ 	struct list_head mapped_list_head;
++	/* Serialize ioctl state for this file and record a submit-to-wait lease. */
++	struct mutex ioctl_lock;
++	bool submission_active;
+ };
+ 
+ /* Data and objects declarations. */
+@@ -155,6 +159,14 @@ static struct vg_lite_device *device;
+ static struct client_data *active_client;
+ static DEFINE_MUTEX(vg_lite_client_lock);
+ 
++/*
++ * VGLite has one command register bank and one interrupt status word. A
++ * submission must retain this token until its matching VG_LITE_WAIT has
++ * observed completion; locking each ioctl independently lets another file
++ * replace the registers and consume the shared interrupt in between.
++ */
++static DEFINE_SEMAPHORE(vg_lite_submit_lock, 1);
++
+ /*
+  * reset_control_reset() resets the one command engine, not an individual
+  * /dev/vg_lite file. Hold this lock across the PM reference and reset so a
+@@ -525,6 +537,15 @@ void vg_lite_hal_unmap(void *handle)
+ 	kfree(mapped);
+ }
+ 
++static void vg_lite_release_submission_lease(struct client_data *client)
++{
++	if (!client->submission_active)
++		return;
++
++	client->submission_active = false;
++	up(&vg_lite_submit_lock);
++}
++
+ int drv_open(struct inode *inode, struct file *file)
+ {
+ 	struct client_data *data;
+@@ -545,6 +566,7 @@ int drv_open(struct inode *inode, struct file *file)
+ 	data->contiguous_mapped = NULL;
+ 	INIT_LIST_HEAD(&data->dma_list_head);
+ 	INIT_LIST_HEAD(&data->mapped_list_head);
++	mutex_init(&data->ioctl_lock);
+ 	file->private_data = data;
+ 	return 0;
+ }
+@@ -554,11 +576,14 @@ int drv_release(struct inode *inode, struct file *file)
+ {
+ 	struct client_data *data = (struct client_data *)file->private_data;
+ 
++	mutex_lock(&data->ioctl_lock);
+ 	mutex_lock(&vg_lite_client_lock);
+ 	active_client = data;
+ 	vg_lite_hal_free_os_heap();
+ 	active_client = NULL;
+ 	mutex_unlock(&vg_lite_client_lock);
++	vg_lite_release_submission_lease(data);
++	mutex_unlock(&data->ioctl_lock);
+ 	kfree(data);
+ 	file->private_data = NULL;
+ 	vg_lite_hal_close();
+@@ -597,7 +622,9 @@ long drv_ioctl(/*struct inode *inode, */ struct file *file,
+ #endif
+ {
+ 	struct ioctl_data arguments;
++	enum vg_lite_error error;
+ 	void *data;
++	bool submission_lease_acquired = false;
+ 
+ #ifndef HAVE_UNLOCKED_IOCTL
+ 	/* inode will be not used */
+@@ -631,12 +658,45 @@ long drv_ioctl(/*struct inode *inode, */ struct file *file,
+ 	} else {
+ 		dev_err(device->dev, "ioctl unknown command\n");
+ 	}
++
++	mutex_lock(&client->ioctl_lock);
++	if (arguments.command == VG_LITE_SUBMIT && !client->submission_active) {
++		if (down_interruptible(&vg_lite_submit_lock) != 0) {
++			arguments.error = VG_LITE_TIMEOUT;
++			goto out_unlock_client;
++		}
++		client->submission_active = true;
++		submission_lease_acquired = true;
++	}
++	if (arguments.command == VG_LITE_WAIT && !client->submission_active) {
++		arguments.error = VG_LITE_NO_CONTEXT;
++		goto out_unlock_client;
++	}
++
+ 	mutex_lock(&vg_lite_client_lock);
+ 	active_client = client;
+-	arguments.error = vg_lite_kernel(arguments.command, data);
++	/* A completed prior transaction cannot satisfy this submission's wait. */
++	if (arguments.command == VG_LITE_SUBMIT && submission_lease_acquired)
++		device->int_flags = 0;
++	error = vg_lite_kernel(arguments.command, data);
++	arguments.error = error;
+ 	active_client = NULL;
+ 	mutex_unlock(&vg_lite_client_lock);
+ 
++	/*
++	 * A timeout means the submitted command may still own the hardware. Keep
++	 * its lease so the same file can retry WAIT or terminate it; releasing
++	 * here would again let a different file replace the command registers.
++	 */
++	if ((arguments.command == VG_LITE_WAIT && error == VG_LITE_SUCCESS) ||
++			(arguments.command == VG_LITE_TERMINATE && client->submission_active) ||
++			(arguments.command == VG_LITE_SUBMIT &&
++			 submission_lease_acquired && error != VG_LITE_SUCCESS))
++		vg_lite_release_submission_lease(client);
++
++out_unlock_client:
++	mutex_unlock(&client->ioctl_lock);
++
+ 	if (copy_to_user(arguments.buffer, data, arguments.bytes) != 0)
+ 		goto error;
+ 
+-- 
+2.43.0

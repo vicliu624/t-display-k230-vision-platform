@@ -17,6 +17,11 @@ SDK 0001..0024
   -> TDVP 0047：LR2021/nRF9151 互斥 pin 与 power profile
   -> TDVP 0048..0049：LR2021 SPI0 传输、复位时序与有边界的 IRQ 枚举
   -> TDVP 0050：AHT20 hwmon binding
+  -> TDVP 0051..0052：受控 external I2S amplifier route
+  -> TDVP 0053：DRM page-flip 生命周期
+  -> TDVP 0054..0062：VGLite resource、submit、watchdog 与恢复约定
+  -> TDVP 0063..0064：CPU1 mailbox 与 CPU0 scalar Linux/串口归属
+  -> TDVP 0065：nRF52840 UART1 GPIO3/4 传输通道
 ```
 
 Buildroot `linux/` package 目录是唯一的补丁输入。Buildroot 按文件名字典序应用其中的
@@ -41,6 +46,7 @@ Buildroot `linux/` package 目录是唯一的补丁输入。Buildroot 按文件�
 | 扩展坞 GPIO 与电量计 | TDVP `0045`、`0046`；已有 `i2c_gpio_keyboard` node | `0x20` 的 XL9555 是标准 `pca953x` GPIO provider。`0x55` 的 BQ27220 使用其自身 standard-command register profile：瞬时电流是 `0x0c`，剩余容量是 `0x10`，不存在 data-memory programming path。静态 node 与已验收 keyboard I2C bus 共用总线，不改变 TCA8418 transport。 | 在已安装扩展坞上验证完整 keyboard regression、`gpioinfo` 可见 XL9555 chip，并在充放电时核对 BQ27220 `/sys/class/power_supply` 值与独立 I2C 读取一致。 |
 | 扩展坞环境传感器 | TDVP `0050`；已有 `i2c_gpio_keyboard` node | `0x38` AHT20 使用内核的 `aosong,aht20` hwmon binding。driver 校验 AHT20 CRC，并发布标准温湿度属性。 | 在两个环境条件下，将 `temp1_input` 和 `humidity1_input` 与直接读取且 CRC 通过的 I2C frame 对比。 |
 | LoRa 与 nRF9151 串口路径 | TDVP `0047` 与 `0048`；UART2、SPI0、K230 pinctrl 与 GPIO descriptor | LR2021 reset input 与 UART2 TX 都使用 IO5。`tdvp-radio-mux` 控制互斥的 `lora` 与 `nrf9151` profile，通过 sysfs 暴露当前 profile 和 LR2021 电源状态，并统一管理共享 GPIO。SPI0 使用 IO14 至 IO17 作为 LR2021 传输路径。 | 以 `lora` 启动，运行 `vpl-lora-probe` 并要求 LR2021 firmware version 既非全 `0x00` 也非全 `0xff`；切换 `nrf9151` 后确认 `/dev/ttyS2` 可与已供电 modem 交换 AT command；再切回 `lora` 并重复 LR2021 probe。 |
+| CPU1 RT-Smart 协处理器 | TDVP `0063`、`0064`；CPU0 U-Boot override；raw 10--30 MiB payload | U-Boot 和标量 Linux 运行在物理 CPU0，本地 hart `cpu@0` 本身不选择物理核心。`0063` 保留 `0x10000000..0x13ffffff` 给 CPU1，末尾 `0x13ff0000` 的非缓存 mailbox 不参与 RT 分配。U-Boot 将 CPU1 reset 到原始 OpenSBI `fw_payload.bin`，随后启动 Linux。RT-Smart 使用 UART3，不初始化 Linux 管理的 SD/USB/显示设备。 | 检查 boot-contract 回归和实际核心选择头文件；冷启动后验证 raw payload、标量 DT/ISA、`/dev/tdvp-cpu1`、`status`、`ping`、`crc32`，并重跑 VGLite 实机 Gate。 |
 
 ## 明确范围
 
@@ -56,6 +62,14 @@ Lewis `0036-add-gc2093-camera.patch` 不在活动队列中。其来源说明 MCL
 initialization 尚未完成；它还需要 `i2c4`，而 TDVP `0037` 在已验收 shell profile 中将 `i2c4`
 设为 disabled。启用 camera 时需要补齐 electrical configuration，并提供独立的 DTB/CSI capture
 acceptance test。
+
+2026-09-07 实机复核：原配 GC2093 已连接，但当前镜像只有 `mvx` 编解码节点，
+没有 camera capture 节点。较新的 LilyGO BSP 已包含 GC2093 DTS 和 vvcam MCLK
+实现，不能把上述历史排除说明当作对新 BSP 的结论。移植仍需保留 TDVP 的 I2C alias、
+键盘和 CPU1 ownership，并审查 CPU0 兼容性：固定 SDK 的 `isp_media_server` 与
+`isp_media_server_debian` 都含实际 RVV 指令，不能直接假定可以在 scalar CPU0 上运行。
+目前未启用 camera，也未将 ISP 服务移动到 CPU1；详情见
+[实机验证记录](../../../docs/device-validation-2026-09-07.md)。
 
 ### Colour Conversion
 

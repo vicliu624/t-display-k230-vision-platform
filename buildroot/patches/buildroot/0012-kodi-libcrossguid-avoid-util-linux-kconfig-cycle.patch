@@ -1,0 +1,60 @@
+From 7ea80b89130aa4c5b0306b7ee808cdb0bdc98eaf Mon Sep 17 00:00:00 2001
+From: TDVP Platform <platform@tdvp.local>
+Date: Wed, 3 Sep 2026 15:00:00 +0800
+Subject: [PATCH] package/kodi: avoid a util-linux Kconfig select cycle
+
+Kodi selects libcrossguid, which selected util-linux.  A desktop that enables
+Wayland, swaylock, Linux-PAM and util-linux then forms this Kconfig cycle:
+
+  kodi -> libcrossguid -> util-linux -> linux-pam -> swaylock -> wayland
+  -> kodi platform support.
+
+libcrossguid needs util-linux's libuuid, but it must not force a broad
+util-linux selection through a reverse dependency.  Make util-linux an
+explicit availability condition for libcrossguid and Kodi instead.  Kodi's
+existing selection of libcrossguid is then valid without a recursive select,
+and configurations that do not enable util-linux simply do not offer Kodi.
+
+Signed-off-by: TDVP Platform <platform@tdvp.local>
+---
+ package/kodi/Config.in         | 2 ++
+ package/libcrossguid/Config.in | 2 +-
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/package/kodi/Config.in b/package/kodi/Config.in
+index e75e3d4fc0..2f2f50c2c4 100644
+--- a/package/kodi/Config.in
++++ b/package/kodi/Config.in
+@@ -16,7 +16,8 @@ comment "kodi needs python3 w/ .py modules, a uClibc or glibc toolchain w/ C++,
+ 		|| !BR2_TOOLCHAIN_GCC_AT_LEAST_9 \
+ 		|| !BR2_HOST_GCC_AT_LEAST_9 \
+ 		|| BR2_TOOLCHAIN_USES_MUSL \
+-		|| !BR2_PACKAGE_PYTHON3 \
++		|| !BR2_PACKAGE_PYTHON3 \
++		|| !BR2_PACKAGE_UTIL_LINUX \
+ 		|| BR2_PACKAGE_PYTHON3_PYC_ONLY
+ 
+ config BR2_PACKAGE_KODI_PLATFORM_SUPPORTS
+@@ -61,6 +62,7 @@ menuconfig BR2_PACKAGE_KODI
+ 	depends on BR2_PACKAGE_HAS_LIBEGL
+ 	depends on BR2_PACKAGE_KODI_ARCH_SUPPORTS
+ 	depends on BR2_PACKAGE_KODI_PLATFORM_SUPPORTS
++	depends on BR2_PACKAGE_UTIL_LINUX # libcrossguid
+ 	depends on BR2_PACKAGE_PYTHON3
+ 	depends on !BR2_PACKAGE_PYTHON3_PYC_ONLY
+ 	select BR2_HOST_CMAKE_AT_LEAST_3_24
+diff --git a/package/libcrossguid/Config.in b/package/libcrossguid/Config.in
+index 36c0db55fb..f52ee9cc78 100644
+--- a/package/libcrossguid/Config.in
++++ b/package/libcrossguid/Config.in
+@@ -2,7 +2,7 @@ config BR2_PACKAGE_LIBCROSSGUID
+ 	bool "libcrossguid"
+ 	depends on BR2_INSTALL_LIBSTDCPP
+ 	depends on BR2_TOOLCHAIN_GCC_AT_LEAST_4_7 # C++11
+-	select BR2_PACKAGE_UTIL_LINUX
++	depends on BR2_PACKAGE_UTIL_LINUX
+ 	select BR2_PACKAGE_UTIL_LINUX_LIBUUID
+ 	help
+ 	  Lightweight cross platform C++ GUID/UUID library
+-- 
+2.43.0

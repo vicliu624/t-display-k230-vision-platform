@@ -1,0 +1,71 @@
+#!/bin/sh
+#
+# Read-only attestation for the 0059 VGLite infinite-wait watchdog.  This is
+# deliberately not a fault injector: it proves that the running kernel
+# exposes the expected bounded wait policy before Gate 1 workload results are
+# attributed to a 0059 candidate.
+
+set -eu
+
+MODULE_ROOT="${TDVP_VGLITE_SYS_MODULE_ROOT:-/sys/module/vglite}"
+expected_ms=5000
+
+usage() {
+	cat <<EOF
+Usage: $0 [--expect-default-ms N]
+
+Verify the read-only VGLite kernel watchdog parameter:
+  ${TDVP_VGLITE_SYS_MODULE_ROOT:-/sys/module/vglite}/parameters/infinite_wait_watchdog_ms
+
+The accepted range is 1000..60000 milliseconds.  The default candidate
+policy is 5000 milliseconds.  This command never opens DRM or /dev/vg_lite,
+does not write sysfs, and does not inject a GPU timeout.
+EOF
+}
+
+fail() {
+	printf '%s\n' "tdvp-vglite-watchdog-observer: ERROR: $*" >&2
+	exit 1
+}
+
+require_positive_integer() {
+	case "$2" in
+	''|*[!0-9]*) fail "$1 must be a positive integer" ;;
+	esac
+	[ "$2" -gt 0 ] || fail "$1 must be a positive integer"
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	--expect-default-ms)
+		[ "$#" -ge 2 ] || fail "--expect-default-ms requires a value"
+		expected_ms="$2"
+		shift
+		;;
+	-h|--help)
+		usage
+		exit 0
+		;;
+	*)
+		fail "unknown option: $1"
+		;;
+	esac
+	shift
+done
+
+require_positive_integer "expected watchdog milliseconds" "$expected_ms"
+[ "$expected_ms" -ge 1000 ] && [ "$expected_ms" -le 60000 ] ||
+	fail "expected watchdog milliseconds must be within 1000..60000"
+
+parameter="${MODULE_ROOT}/parameters/infinite_wait_watchdog_ms"
+[ -r "$parameter" ] ||
+	fail "0059 watchdog parameter is unavailable: $parameter"
+actual_ms="$(cat "$parameter" 2>/dev/null || true)"
+require_positive_integer "watchdog parameter" "$actual_ms"
+[ "$actual_ms" -ge 1000 ] && [ "$actual_ms" -le 60000 ] ||
+	fail "watchdog parameter is outside 1000..60000: $actual_ms"
+[ "$actual_ms" -eq "$expected_ms" ] ||
+	fail "watchdog parameter mismatch: expected=${expected_ms} actual=${actual_ms}"
+
+printf '%s\n' \
+	"tdvp-vglite-watchdog-observer: PASS module_root=$MODULE_ROOT watchdog_ms=$actual_ms"

@@ -1,0 +1,80 @@
+From: TDVP maintainers
+Subject: [PATCH] dfs: only notify MTP when its USB device class is enabled
+
+The compute-only CPU1 configuration leaves USB to Linux. Keep FatFs change
+tracking intact, but do not include or call the optional MTP responder.
+
+diff --git a/canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/components/dfs/src/dfs_file.c b/canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/components/dfs/src/dfs_file.c
+--- a/canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/components/dfs/src/dfs_file.c
++++ b/canmv_k230/src/rtsmart/rtsmart/kernel/rt-thread/components/dfs/src/dfs_file.c
+@@ -25,8 +25,13 @@
+ };
+ 
+ static struct dfs_fnode_mgr dfs_fm;
++#if defined(ENABLE_CHERRY_USB) && defined(ENABLE_CHERRY_USB_DEVICE) && \
++    defined(CHERRY_USB_DEVICE_ENABLE_CLASS_MTP)
++#define DFS_USING_MTP_NOTIFY
+ #define mtp_ctx void
+ #include "inotify.h"
++#endif
++
+ unsigned char dfs_fs_change;
+ extern const struct dfs_filesystem_ops dfs_elm;
+ 
+@@ -262,8 +267,10 @@
+         fd->fnode->type = FT_DIRECTORY;
+         fd->flags |= DFS_F_DIRECTORY;
+     }
++#ifdef DFS_USING_MTP_NOTIFY
+     if (dfs_fs_change)
+         inotify_handler_filechange(NTY_FILE_ADD, fullpath);
++#endif
+     dfs_fm_unlock();
+ 
+     LOG_D("open successful");
+@@ -311,8 +318,10 @@
+             return result;
+         }
+ 
++#ifdef DFS_USING_MTP_NOTIFY
+         if (dfs_fs_change)
+             inotify_handler_filechange(NTY_FILE_CHG, fd->fnode->fullpath);
++#endif
+         if (fnode->ref_count == 1)
+         {
+             /* remove from hash */
+@@ -487,8 +496,10 @@
+     else result = -ENOSYS;
+ 
+ __exit:
++#ifdef DFS_USING_MTP_NOTIFY
+     if (result == 0 && fs->ops == &dfs_elm)
+         inotify_handler_filechange(NTY_FILE_RM, fullpath);
++#endif
+     rt_free(fullpath);
+     return result;
+ }
+@@ -536,8 +547,10 @@
+         dfs_fm_lock();
+         dfs_fs_change = 0;
+         int ret = fd->fnode->fops->flush(fd);
++#ifdef DFS_USING_MTP_NOTIFY
+         if (dfs_fs_change)
+             inotify_handler_filechange(NTY_FILE_CHG, fd->fnode->fullpath);
++#endif
+         dfs_fm_unlock();
+         return ret;
+     }
+@@ -703,10 +716,12 @@
+     }
+ 
+ __exit:
++#ifdef DFS_USING_MTP_NOTIFY
+     if (result == 0 && newfs->ops == &dfs_elm) {
+         inotify_handler_filechange(NTY_FILE_RM, oldfullpath);
+         inotify_handler_filechange(NTY_FILE_ADD, newfullpath);
+     }
++#endif
+     if (oldfullpath)
+     {
+         rt_free(oldfullpath);

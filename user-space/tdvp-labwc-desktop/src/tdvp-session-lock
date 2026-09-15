@@ -1,14 +1,14 @@
 #!/bin/sh
 # Lock an existing TDVP Wayland session. This deliberately remains a user
 # session operation: PAM authentication and ext-session-lock are coordinated by
-# swaylock and Labwc, not by the root-owned hardware service.
+# gtklock and Labwc, not by the root-owned hardware service.
 set -eu
 
-readonly SWAYLOCK=/usr/bin/swaylock
-readonly LOCK_COLOR=1f1e1b
+readonly GTKLOCK=/usr/bin/gtklock
+readonly LOCK_CONFIG=/etc/gtklock/config.ini
 
-if [ ! -x "${SWAYLOCK}" ]; then
-	echo 'tdvp-session-lock: swaylock is not installed' >&2
+if [ ! -x "${GTKLOCK}" ]; then
+	echo 'tdvp-session-lock: gtklock is not installed' >&2
 	exit 127
 fi
 
@@ -27,4 +27,6 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-"${SWAYLOCK}" -f -c "${LOCK_COLOR}"
+# TDVP's gtklock reports daemon readiness only after ext-session-lock.locked.
+# Returning at that point lets swayidle continue to its later screen-off timer.
+"${GTKLOCK}" --daemonize --config "${LOCK_CONFIG}"

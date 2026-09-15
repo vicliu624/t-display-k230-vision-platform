@@ -1,0 +1,5 @@
+bffce9a084192dae81f5b834baee4a6079fd1c651c320f8201124c29efa2b008  0001-gc2093-use-verified-tdvp-i2c4.patch
+95ceade78891e96fbc03d920fe155d9e9e71a5a4c75ec607cf62c05b362f0f37  0002-mipi-use-managed-sensor-clock.patch
+0e93d2e2874f6c92d29b5a2bbe7cd34d742ac3faf328ed65e42fd1f4ae8a5a42  0003-gc2093-keep-sensor-clock-kernel-owned.patch
+62d2d8f2b83f7f16ece679eac1f6c22c2d47f7203201d6cec24e59d64662f2f0  0004-vvcam-stamp-completed-capture-buffers.patch
+23c256c77484e28919aadcca52b5519a181276ff475c9aeab2a878e242d767fe  0005-vvcam-subdev-do-not-claim-hardware-resources.patch

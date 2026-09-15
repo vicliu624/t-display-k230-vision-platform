@@ -16,15 +16,17 @@ define VICLIU_POCKET_LINUX_DESKTOP_INSTALL_TARGET_CMDS
 	# broken Cog/NetSurf entry from a previous product configuration.
 	rm -f $(TARGET_DIR)/usr/local/bin/vpl-browser \
 		$(TARGET_DIR)/usr/share/applications/vpl-browser.desktop
+	# Retire the Linux-direct-capture demo. A future preview must consume
+	# CPU1 results; no replacement demo is selected yet. Clean reused targets
+	# explicitly because SDK overlay and local-source sync can be additive.
+	rm -f $(TARGET_DIR)/usr/local/bin/vpl-camera \
+		$(TARGET_DIR)/usr/share/applications/vpl-camera.desktop
 	$(INSTALL) -D -m 0755 $(@D)/libexec/vpl-desktopctl \
 		$(TARGET_DIR)/usr/local/libexec/vpl-desktopctl
 	$(INSTALL) -D -m 0440 $(@D)/sudoers/vpl-desktop \
 		$(TARGET_DIR)/etc/sudoers.d/vpl-desktop
 	$(INSTALL) -D -m 0644 $(@D)/wofi/config \
 		$(TARGET_DIR)/etc/xdg/wofi/config
-	$(INSTALL) -D -m 0755 $(@D)/bin/vpl-camera \
-		$(TARGET_DIR)/usr/local/bin/vpl-camera
-
 	$(INSTALL) -D -m 0755 $(@D)/bin/vpl-display-menu \
 		$(TARGET_DIR)/usr/local/bin/vpl-display-menu
 	$(INSTALL) -D -m 0755 $(@D)/bin/vpl-logs \
@@ -37,8 +39,6 @@ define VICLIU_POCKET_LINUX_DESKTOP_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/local/bin/vpl-opkg-console
 	$(INSTALL) -D -m 0755 $(@D)/bin/vpl-power-menu \
 		$(TARGET_DIR)/usr/local/bin/vpl-power-menu
-	$(INSTALL) -D -m 0644 $(@D)/applications/vpl-camera.desktop \
-		$(TARGET_DIR)/usr/share/applications/vpl-camera.desktop
 	$(INSTALL) -D -m 0644 $(@D)/applications/vpl-display.desktop \
 		$(TARGET_DIR)/usr/share/applications/vpl-display.desktop
 	$(INSTALL) -D -m 0644 $(@D)/applications/vpl-logs.desktop \

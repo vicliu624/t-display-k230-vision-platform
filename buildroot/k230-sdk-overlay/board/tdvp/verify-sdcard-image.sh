@@ -29,6 +29,8 @@ BOOTFS="${BINARIES_DIR}/boot.ext4"
 # named rootfs.ext2, and the packaging flow uses an ext4 filesystem image.
 ROOTFS="${BINARIES_DIR}/rootfs.ext2"
 SELECTED_DTB="${BINARIES_DIR}/k230-canmv-rm69a10.dtb"
+CPU1_FIRMWARE="${BINARIES_DIR}/tdvp-cpu1-rtsmart.bin"
+CPU1_MANIFEST="${BINARIES_DIR}/tdvp-cpu1-rtsmart.manifest"
 BUILDROOT_HOST_DIR="${HOST_DIR:-$(dirname "${BINARIES_DIR}")/host}"
 if [ -x "${BUILDROOT_HOST_DIR}/sbin/e2fsck" ]; then
 	E2FSCK="${BUILDROOT_HOST_DIR}/sbin/e2fsck"
@@ -51,12 +53,21 @@ GPT_DISK_UUID="FBB0B6A4-C36F-5F5C-8C42-077FFBA1377E"
 GPT_BOOT_UUID="900E1751-E943-5DAA-A4EF-68831D3ED855"
 GPT_ROOTFS_UUID="C9CC7F55-7FD2-5D64-AE97-0715ADF47FDE"
 ROOTFS_BOOTARG="root=PARTUUID=${GPT_ROOTFS_UUID} loglevel=8 rw rootdelay=4 rootfstype=ext4 console=ttyS0,115200 earlycon=sbi"
-for file in "${SYSIMAGE}" "${SPL}" "${UBOOT_ENV}" "${UBOOT}" "${BOOTFS}" "${ROOTFS}" "${SELECTED_DTB}"; do
+for file in "${SYSIMAGE}" "${SPL}" "${UBOOT_ENV}" "${UBOOT}" "${BOOTFS}" "${ROOTFS}" "${SELECTED_DTB}" "${CPU1_FIRMWARE}" "${CPU1_MANIFEST}"; do
 	if [ ! -s "${file}" ]; then
 		printf 'TDVP image guard: missing required artifact: %s\n' "${file}" >&2
 		exit 1
 	fi
 done
+
+# Verify firmware ownership against the exact DTB later compared byte-for-byte
+# with boot.ext4. Raw offset checks alone cannot detect a mixed CPU0/CPU1 image.
+bash "$(dirname "$0")/cpu1/vision/verify-pair.sh" \
+	"${SELECTED_DTB}" "${BUILDROOT_HOST_DIR}/bin/fdtget" "${CPU1_MANIFEST}"
+
+# Check real ext4 metadata, not permissions in the unprivileged staging tree.
+bash "$(dirname "$0")/verify-auth-rootfs.sh" "${ROOTFS}"
+bash "$(dirname "$0")/verify-opkg-rootfs.sh" "${ROOTFS}"
 
 # U-Boot must identify the root partition by its deterministic GPT UUID.  The
 # Linux mmcblk index is not a stable board ABI: it changes when optional SDIO
@@ -65,6 +76,18 @@ if ! grep -aFq "${ROOTFS_BOOTARG}" "${UBOOT_ENV}"; then
 	printf '%s\n' 'TDVP image guard: U-Boot environment does not use the rootfs PARTUUID boot argument' >&2
 	exit 1
 fi
+for required_env in \
+	'bootcmd=run bootcmd_cpu1; run blinux;' \
+	'cpu1_firmware_load=10000000' \
+	'cpu1_firmware_block=5000' \
+	'cpu1_firmware_blocks=a000' \
+	'bootcmd_cpu1=mmc dev ${mmc_boot_dev_num} && mmc read ${cpu1_firmware_load} ${cpu1_firmware_block} ${cpu1_firmware_blocks} && boot_baremetal 1 ${cpu1_firmware_load} 1400000;'; do
+	if ! grep -aFq "${required_env}" "${UBOOT_ENV}"; then
+		printf 'TDVP image guard: U-Boot environment is missing CPU1 launch contract: %s\n' \
+			"${required_env}" >&2
+		exit 1
+	fi
+done
 
 compare_at() {
 	local label="$1"
@@ -294,6 +317,30 @@ require_rootfs_content() {
 	rm -rf "${temporary_dir}"
 }
 
+reject_rootfs_content() {
+	local path="$1"
+	local text="$2"
+	local temporary_dir
+	local temporary_file
+
+	# Dump first: piping a large binary to grep -q can hide a read failure.
+	temporary_dir="$(mktemp -d)"
+	temporary_file="${temporary_dir}/rootfs-content"
+	if ! debugfs -R "dump ${path} ${temporary_file}" "${ROOTFS}" >/dev/null 2>&1 ||
+		[ ! -f "${temporary_file}" ]; then
+		rm -rf "${temporary_dir}"
+		printf 'TDVP image guard: cannot extract rootfs content: %s\n' "${path}" >&2
+		exit 1
+	fi
+	if grep -aFq -- "${text}" "${temporary_file}"; then
+		rm -rf "${temporary_dir}"
+		printf 'TDVP image guard: rootfs %s unexpectedly contains forbidden content: %s\n' \
+			"${path}" "${text}" >&2
+		exit 1
+	fi
+	rm -rf "${temporary_dir}"
+}
+
 compare_bootfs_payload() {
 	local path="$1"
 	local expected="$2"
@@ -376,6 +423,7 @@ compare_at 'SPL copy 2' 0x180000 "${SPL}"
 compare_at 'U-Boot environment copy 1' 0x1e0000 "${UBOOT_ENV}"
 compare_at 'U-Boot image' 0x200000 "${UBOOT}"
 compare_at 'U-Boot environment copy 2' 0x380000 "${UBOOT_ENV}"
+compare_at 'CPU1 RT-Smart raw payload' $((10 * 1024 * 1024)) "${CPU1_FIRMWARE}"
 compare_at 'boot ext4 partition' $((30 * 1024 * 1024)) "${BOOTFS}"
 compare_large_partition_at 'rootfs filesystem partition' $((128 * 1024 * 1024)) "${ROOTFS}"
 
@@ -385,11 +433,30 @@ require_fs_path "${BOOTFS}" '/k.dtb'
 require_fs_path "${BOOTFS}" '/k230-canmv-rm69a10.dtb'
 compare_bootfs_payload '/Image' "${BINARIES_DIR}/Image" 'Linux Image'
 compare_bootfs_payload '/k230-canmv-rm69a10.dtb' "${SELECTED_DTB}" 'RM69A10 DTB'
+bash "$(dirname "$0")/verify-uart1-dtb.sh" "${SELECTED_DTB}" "${BUILDROOT_HOST_DIR}/bin/fdtget"
+# The pair gate above checks the actual ownership DT. Inspect the real rootfs
+# for the bridge and absence of all retired Linux AI/ISP owners as well.
+bash "$(dirname "$0")/cpu1/vision/verify-rootfs-image.sh" "${ROOTFS}"
+require_rootfs_content '/usr/local/bin/vpl-hwctl' '/sys/class/misc/tdvp-vision/status'
+# The publisher reads the real AI bridge independently of camera ownership.
+# Runtime availability is not a numerical/hardware acceptance result.
+require_rootfs_content '/usr/local/bin/vpl-hwctl' '/sys/class/misc/tdvp-ai/status'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1_ai_status_valid'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1_ai_available'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1_ai_state'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1-rtsmart-kws-reference'
+require_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1-reference-unverified'
+reject_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1-model-unconfigured'
+reject_rootfs_content '/usr/local/bin/vpl-hwctl' 'cpu1-rtsmart-no-model'
+reject_rootfs_content '/usr/local/bin/vpl-hwctl' '/root/app/ai2d_kpu'
+reject_rootfs_content '/usr/local/bin/vpl-hwctl' 'tdvp-kpu-acceptance.service'
 for required_dtb_string in \
 	'canaan,external-i2s-output-default' \
 	'amp-shutdown-gpios' \
 	'tdvp-amp-i2s-pins' \
-	'tdvp-amp-shutdown-pin'; do
+	'tdvp-amp-shutdown-pin' \
+	'tdvp,k230-cpu1-mailbox' \
+	'cpu1-runtime@10000000'; do
 	if ! grep -aFq "${required_dtb_string}" "${SELECTED_DTB}"; then
 		printf 'TDVP image guard: RM69A10 DTB is missing external speaker contract: %s\n' \
 			"${required_dtb_string}" >&2
@@ -441,13 +508,6 @@ require_fs_path "${ROOTFS}" '/etc/systemd/system/multi-user.target.wants/seatd.s
 require_fs_path "${ROOTFS}" '/etc/systemd/system/multi-user.target.wants/greetd.service'
 require_fs_symlink_target "${ROOTFS}" '/etc/systemd/system/multi-user.target.wants/seatd.service' '../../../../usr/lib/systemd/system/seatd.service'
 require_fs_symlink_target "${ROOTFS}" '/etc/systemd/system/multi-user.target.wants/greetd.service' '../../../../usr/lib/systemd/system/greetd.service'
-require_fs_path "${ROOTFS}" '/usr/lib/systemd/system/tdvp-kpu-acceptance.service'
-require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-kpu-smoke'
-require_fs_path "${ROOTFS}" '/etc/systemd/system/multi-user.target.wants/tdvp-kpu-acceptance.service'
-require_fs_symlink_target "${ROOTFS}" '/etc/systemd/system/multi-user.target.wants/tdvp-kpu-acceptance.service' '../../../../usr/lib/systemd/system/tdvp-kpu-acceptance.service'
-reject_fs_path "${ROOTFS}" '/etc/tdvp/kpu/acceptance.enabled'
-require_rootfs_content '/usr/local/bin/tdvp-kpu-smoke' 'TDVP KPU acceptance: skipped'
-require_rootfs_content '/usr/local/bin/tdvp-kpu-smoke' 'acceptance.enabled'
 # External I2S is the kernel DTS/ASoC default.  A userspace service previously
 # raced card registration and made a non-critical policy retry look like a
 # boot failure, so no audio-route service may sit in the login path.
@@ -526,7 +586,7 @@ require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option check_signature 1'
 require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option signature_type gpg-asc'
 require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option gpg_dir /etc/opkg/gpg'
 require_rootfs_fixed_line '/etc/opkg/opkg.conf' 'option gpg_trust_level TrustAny'
-require_rootfs_fixed_line '/etc/opkg/tdvp-feed.conf' 'src/gz tdvp_apps_r6 https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/r6/riscv64'
+require_rootfs_fixed_line '/etc/opkg/tdvp-feed.conf' 'src/gz tdvp_apps https://vicliu624.github.io/embedded-opkg-feed/feed/tdvp-k230-br2025.02.1-glibc2.33-rv64-lp64d-k6.6.36-r1/stable/riscv64'
 reject_fs_path "${ROOTFS}" '/etc/opkg/tdvp-feed.conf.disabled'
 require_fs_path "${ROOTFS}" '/usr/share/tdvp/opkg/tdvp-repo-public.asc'
 require_rootfs_gpg_fingerprint "${ROOTFS}" '/usr/share/tdvp/opkg/tdvp-repo-public.asc' \
@@ -548,6 +608,13 @@ require_fs_path "${ROOTFS}" '/usr/bin/labwc'
 # client. This debug string is compiled from the successful switch path.
 require_rootfs_content '/usr/bin/labwc' 'tdvp workspace edge swipe:'
 require_fs_path "${ROOTFS}" '/usr/bin/swaylock'
+require_fs_path "${ROOTFS}" '/usr/bin/gtklock'
+require_fs_path "${ROOTFS}" '/usr/lib/libgtk-session-lock.so.0'
+require_fs_path "${ROOTFS}" '/etc/pam.d/gtklock'
+require_fs_path "${ROOTFS}" '/etc/gtklock/config.ini'
+require_fs_path "${ROOTFS}" '/etc/gtklock/style.css'
+require_rootfs_fixed_line '/etc/gtklock/config.ini' 'idle-hide=false'
+require_rootfs_fixed_line '/etc/gtklock/config.ini' 'start-hidden=false'
 require_fs_path "${ROOTFS}" '/usr/bin/swayidle'
 require_fs_path "${ROOTFS}" '/usr/bin/wlopm'
 require_fs_path "${ROOTFS}" '/usr/bin/tdvp-quick-settings'
@@ -564,6 +631,8 @@ require_fs_path "${ROOTFS}" '/usr/bin/yavta'
 require_fs_path "${ROOTFS}" '/usr/bin/sudo'
 require_fs_path "${ROOTFS}" '/usr/bin/tdvp-wayland-acceptance'
 require_fs_path "${ROOTFS}" '/usr/bin/tdvp-vglite-probe'
+require_fs_path "${ROOTFS}" '/usr/bin/tdvp-display-smoke'
+require_rootfs_content '/usr/bin/tdvp-display-smoke' 'guard vblank sequence %u did not advance after detach sequence %u'
 require_fs_path "${ROOTFS}" '/usr/lib/libvg_lite.so'
 require_fs_path "${ROOTFS}" '/usr/lib/udev/rules.d/60-tdvp-vg-lite.rules'
 require_rootfs_fixed_line '/usr/lib/udev/rules.d/60-tdvp-vg-lite.rules' 'SUBSYSTEM=="vg_lite_class", KERNEL=="vg_lite", GROUP="render", MODE="0660"'
@@ -583,11 +652,21 @@ require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-session-lock'
 require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-session-powerctl'
 require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-session-idle'
 require_rootfs_content '/etc/xdg/labwc/autostart' 'tdvp-session-idle'
-require_rootfs_content '/usr/local/bin/tdvp-session-lock' 'swaylock -f'
-require_rootfs_content '/usr/local/bin/tdvp-session-idle' 'wlopm --off'
+require_rootfs_content '/usr/local/bin/tdvp-session-lock' 'readonly GTKLOCK=/usr/bin/gtklock'
+require_rootfs_content '/usr/local/bin/tdvp-session-lock' '"${GTKLOCK}" --daemonize --config "${LOCK_CONFIG}"'
+require_rootfs_content '/usr/local/bin/tdvp-session-powerctl' 'readonly DEFAULT_LOCK_AFTER_SECONDS=300'
+require_rootfs_content '/usr/local/bin/tdvp-session-powerctl' 'readonly DEFAULT_BLANK_AFTER_SECONDS=30'
+require_rootfs_content '/usr/local/bin/tdvp-session-idle' 'timeout "${lock_after_seconds}" "${SESSION_LOCK}"'
+require_rootfs_content '/usr/local/bin/tdvp-session-idle' 'blank_after_total_seconds=$((lock_after_seconds + blank_after_seconds))'
+require_rootfs_content '/usr/local/bin/tdvp-session-idle' 'readonly WLOPM=/usr/bin/wlopm'
+require_rootfs_content '/usr/local/bin/tdvp-session-idle' "\"\${WLOPM} --off '*'\""
+require_rootfs_content '/usr/local/bin/tdvp-session-idle' "\"\${WLOPM} --on '*'\""
 require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-greeter-labwc'
 require_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-labwc-session'
 require_fs_path "${ROOTFS}" '/usr/libexec/vicliu-pocket-linux-hardware/vpl-hardwared'
+require_fs_regular_file "${ROOTFS}" '/usr/local/bin/tdvp-cpu1ctl'
+require_fs_regular_file "${ROOTFS}" '/usr/local/bin/tdvp-cpu1-acceptance'
+require_fs_path "${ROOTFS}" '/usr/lib/libtdvp_cpu1.so.1'
 reject_fs_path "${ROOTFS}" '/usr/local/libexec/vicliu-pocket-linux-hardware/vpl-hardwared'
 require_fs_path "${ROOTFS}" '/etc/tdvp/labwc/environment'
 require_fs_path "${ROOTFS}" '/etc/xdg/labwc/autostart'
@@ -648,7 +727,7 @@ require_fs_path "${ROOTFS}" '/sbin/resize2fs'
 reject_fs_path "${ROOTFS}" '/usr/local/libexec/vicliu-pocket-linux-hardware/tdvp-provision-data'
 reject_fs_path "${ROOTFS}" '/usr/lib/systemd/system/tdvp-data-storage.service'
 reject_fs_path "${ROOTFS}" '/etc/systemd/system/multi-user.target.wants/tdvp-data-storage.service'
-require_fs_path "${ROOTFS}" '/usr/local/bin/vpl-camera'
+reject_fs_path "${ROOTFS}" '/usr/local/bin/vpl-camera'
 require_fs_path "${ROOTFS}" '/usr/local/bin/vpl-display-menu'
 require_fs_path "${ROOTFS}" '/usr/local/bin/vpl-logs'
 require_fs_path "${ROOTFS}" '/usr/local/bin/vpl-osk'
@@ -669,7 +748,7 @@ require_fs_path "${ROOTFS}" '/etc/xdg/wofi/config'
 require_rootfs_content '/etc/xdg/wofi/config' 'location=top_left'
 require_rootfs_content '/etc/xdg/wofi/config' 'width=440'
 require_rootfs_content '/etc/xdg/wofi/config' 'yoffset=0'
-require_fs_path "${ROOTFS}" '/usr/share/applications/vpl-camera.desktop'
+reject_fs_path "${ROOTFS}" '/usr/share/applications/vpl-camera.desktop'
 reject_fs_path "${ROOTFS}" '/usr/share/applications/vpl-browser.desktop'
 reject_fs_path "${ROOTFS}" '/usr/local/bin/vpl-browser'
 require_fs_path "${ROOTFS}" '/usr/share/applications/vpl-display.desktop'
@@ -705,6 +784,10 @@ reject_rootfs_line '/etc/opkg/opkg.conf' '^src/gz '
 require_rootfs_content '/var/lib/opkg/status' 'Package: tdvp-platform-abi'
 require_rootfs_content '/var/lib/opkg/status' 'Version: 2025.02.1-k230.6.6.36-glibc2.33-rv64-lp64d-r1'
 require_fs_path "${ROOTFS}" '/var/lib/opkg/info/tdvp-platform-abi.list'
+require_rootfs_content '/var/lib/opkg/status' 'Package: tdvp-image-base'
+require_fs_path "${ROOTFS}" '/var/lib/opkg/info/tdvp-image-base.list'
+require_fs_path "${ROOTFS}" '/usr/share/tdvp/opkg/image-base.json'
+require_rootfs_content '/usr/share/tdvp/opkg/image-base.json' '"/usr/lib/libmount.so.1.1.0"'
 require_rootfs_content '/usr/local/bin/vpl-package-manager' 'exec /usr/local/bin/tdvp-terminal'
 require_rootfs_content '/usr/local/bin/vpl-opkg-console' 'TDVP Software Manager (opkg)'
 require_rootfs_content '/usr/local/bin/vpl-opkg-console' 'sudo tdvp-opkg update'
@@ -712,9 +795,14 @@ require_rootfs_content '/etc/sudoers.d/vpl-desktop' '/usr/local/sbin/tdvp-opkg'
 require_rootfs_content '/etc/sudoers.d/vpl-desktop' 'secure_path=/usr/local/sbin:/usr/local/bin:'
 require_rootfs_line '/etc/tdvp/labwc/environment' '^WLR_BACKENDS=drm,libinput$'
 require_rootfs_line '/etc/tdvp/labwc/environment' '^WLR_DRM_DEVICES=/dev/dri/card0$'
-require_rootfs_line '/etc/tdvp/labwc/environment' '^WLR_RENDERER=pixman$'
+require_rootfs_line '/etc/tdvp/labwc/environment' '^WLR_RENDERER=vglite$'
+require_fs_path "${ROOTFS}" '/etc/tdvp/labwc/renderer-profile'
+require_rootfs_line '/etc/tdvp/labwc/renderer-profile' '^TDVP_RENDERER_PROFILE=vglite$'
+reject_rootfs_line '/etc/tdvp/labwc/renderer-profile' '^TDVP_RENDERER_PROFILE=pixman$'
+require_fs_path "${ROOTFS}" '/etc/tdvp/labwc/vglite-enabled'
+require_rootfs_line '/etc/tdvp/labwc/vglite-enabled' '^tdvp_vglite_policy_version=1$'
 require_rootfs_line '/etc/tdvp/labwc/environment' '^WLR_DRM_NO_MODIFIERS=1$'
-require_rootfs_line '/etc/tdvp/labwc/environment' '^WLR_RENDERER_ALLOW_SOFTWARE=1$'
+reject_rootfs_line '/etc/tdvp/labwc/environment' '^WLR_RENDERER_ALLOW_SOFTWARE=1$'
 require_rootfs_line '/etc/tdvp/labwc/environment' '^LIBSEAT_BACKEND=seatd$'
 require_rootfs_line '/etc/tdvp/labwc/environment' '^TDVP_K230_OUTPUT=DSI-1$'
 require_rootfs_line '/etc/tdvp/labwc/environment' '^TDVP_K230_OUTPUT_TRANSFORM=90$'
@@ -723,15 +811,30 @@ reject_fs_path "${ROOTFS}" '/usr/local/bin/tdvp-labwc-desktop-session'
 reject_fs_path "${ROOTFS}" '/usr/bin/sfwbar'
 reject_fs_path "${ROOTFS}" '/usr/bin/swaybg'
 reject_fs_path "${ROOTFS}" '/etc/sfwbar/sfwbar.config'
+# Login authentication is distinct from the in-session gtklock surface.
 require_rootfs_line '/etc/greetd/config.toml' '^command = "/usr/local/bin/tdvp-greeter-session"$'
 require_rootfs_line '/etc/greetd/config.toml' '^user = "greeter"$'
 require_rootfs_content '/etc/pam.d/greetd' 'session    required   pam_unix.so'
 require_rootfs_content '/etc/pam.d/greetd-greeter' 'session    required   pam_unix.so'
 require_rootfs_content '/etc/pam.d/swaylock' 'auth       required   pam_unix.so'
 require_rootfs_content '/usr/local/bin/tdvp-greeter-session' 'set -a'
+require_rootfs_line '/usr/local/bin/tdvp-greeter-session' '^export WLR_RENDERER=vglite$'
+require_rootfs_line '/usr/local/bin/tdvp-greeter-session' '^export WLR_SCENE_DISABLE_DIRECT_SCANOUT=1$'
+require_rootfs_content '/usr/local/bin/tdvp-greeter-session' 'unset LD_LIBRARY_PATH LD_PRELOAD WLR_RENDERER_ALLOW_SOFTWARE TDVP_LABWC_FORCE_PIXMAN'
+reject_rootfs_content '/usr/local/bin/tdvp-greeter-session' 'WLR_RENDERER=pixman'
 require_rootfs_content '/usr/local/bin/tdvp-greeter-session' 'XDG_RUNTIME_DIR="${HOME}/.cache/wayland-runtime"'
 require_rootfs_content '/usr/local/bin/tdvp-greeter-labwc' '--transform "${TDVP_K230_OUTPUT_TRANSFORM}"'
-  require_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'exec /usr/bin/dbus-run-session -- /usr/bin/labwc'
+# The VGLite delivery supervises the session instead of replacing the shell
+# with Labwc, so compositor failure still runs child cleanup before exit.
+require_rootfs_content '/usr/local/bin/tdvp-labwc-session' '/usr/bin/setsid /usr/bin/dbus-run-session -- /usr/bin/labwc'
+require_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'wait "${session_group_leader}"'
+require_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'kill -TERM "-${session_group_leader}"'
+require_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'kill -TERM "-${autostart_group}"'
+require_rootfs_line '/usr/local/bin/tdvp-labwc-session' '^export WLR_RENDERER=vglite$'
+require_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'refusing desktop without VGLite; no renderer fallback'
+reject_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'TDVP_LABWC_FORCE_PIXMAN'
+reject_rootfs_content '/usr/local/bin/tdvp-labwc-session' 'WLR_RENDERER=pixman'
+reject_rootfs_content '/usr/local/bin/tdvp-renderer-profile' 'write_profile pixman'
   require_rootfs_content '/etc/xdg/labwc/autostart' '/usr/local/bin/tdvp-pcmanfm-desktop-session &'
   require_rootfs_content '/etc/xdg/labwc/autostart' '/usr/local/bin/tdvp-wf-panel-session &'
 	require_rootfs_content '/usr/local/bin/tdvp-wf-panel-session' 'export GDK_BACKEND=wayland'
@@ -753,7 +856,7 @@ require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Filename>tdvp-p
 require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Filename>foot.desktop</Filename>'
 require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Filename>vpl-package-manager.desktop</Filename>'
 require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Menuname>Accessories</Menuname>'
-require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Menuname>Sound &amp; Video</Menuname>'
+reject_rootfs_content '/etc/xdg/menus/lxde-applications.menu' 'vpl-camera.desktop'
 require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Name>Games</Name>'
 require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Category>Game</Category>'
 require_rootfs_content '/etc/xdg/menus/lxde-applications.menu' '<Menuname>Games</Menuname>'
@@ -791,6 +894,7 @@ require_rootfs_content '/usr/local/libexec/vicliu-pocket-linux-hardware/tdvp-exp
 require_rootfs_content '/usr/local/libexec/vicliu-pocket-linux-hardware/tdvp-expand-rootfs' 'blockdev'
 require_rootfs_content '/usr/lib/systemd/system/tdvp-rootfs-expand.service' 'Before=greetd.service'
 require_rootfs_content '/usr/lib/wf-panel-pi/libvolumepulse.so' 'audio-volume-change'
+reject_rootfs_content '/usr/lib/wf-panel-pi/libvolumepulse.so' 'systemctl --user -q is-active pipewire-pulse.service'
 require_rootfs_content '/usr/lib/wf-panel-pi/libvolumepulse.so' 'libcanberra'
 reject_rootfs_line '/etc/fstab' '^[^#].*[[:space:]]/data[[:space:]]'
 require_rootfs_content '/usr/share/X11/xkb/symbols/tdvp' 'key <I472>'

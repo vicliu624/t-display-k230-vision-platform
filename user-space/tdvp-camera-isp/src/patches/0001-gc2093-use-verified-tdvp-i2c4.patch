@@ -1,0 +1,121 @@
+From: TDVP <tdvp@localhost>
+Subject: [PATCH] GC2093: bind to the verified TDVP I2C4 transport
+
+For the TDVP GC2093 package; requires the matching managed-clock board DTS.
+Based on pinned SDK 5e1f7cfc794e111a447e4db57815f2cc9dc8c0c7.
+
+diff --git a/src/gc2093.c b/src/gc2093.c
+index 12c6b34..9ec7802 100644
+--- a/src/gc2093.c
++++ b/src/gc2093.c
+@@ -10,10 +10,9 @@
+ #include <sys/ioctl.h>
+ #include <linux/i2c-dev.h>
+ #include <linux/i2c.h>
+-static uint8_t get_gc2093_iic_dev_addr();
++#include "tdvp-gc2093-i2c.h"
+ #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+ 
+-#define GC2093_I2C_SLAVE_ADDRESS get_gc2093_iic_dev_addr()
+ #define CHECK_ERROR(x) if(x){printf("error f=%s l=%d \n",__func__, __LINE__); return -1;}
+ 
+ #define GC2093_REG_CHIP_ID_H                                0x03f0
+@@ -143,69 +142,8 @@ static int gc2093_apply_orient(struct gc2093_ctx *sensor)
+     return 0;
+ }
+ 
+-uint8_t get_gc2093_iic_dev_addr()
+-{
+-    static uint8_t g_gc2093_iic_add = 0;
+-
+-    uint8_t gc2093_adds[]={0x37,0x7e};
+-    int fd,ret;
+-
+-
+-    if(g_gc2093_iic_add)
+-        return g_gc2093_iic_add;
+-
+-    //探测iic设备地址；
+-    fd = open("/dev/i2c-0", O_RDWR);
+-    if (fd < 0) {
+-        perror("open /dev/i2c-0");
+-        return 0x37;
+-    }
+-
+-    for(uint8_t i = 0 ; i < ARRAY_SIZE(gc2093_adds);  i++){
+-        if(ioctl(fd, I2C_SLAVE_FORCE, gc2093_adds[i]) == 0){
+-            struct i2c_smbus_ioctl_data args;
+-            union i2c_smbus_data data;
+-
+-            args.read_write = I2C_SMBUS_READ;
+-            args.command = 0;
+-            args.size = I2C_SMBUS_BYTE;
+-            args.data = &data;
+-            if(ioctl(fd, I2C_SMBUS, &args) == 0){
+-                g_gc2093_iic_add = gc2093_adds[i];
+-                //printf("gc2093 iic dev addr is 0x%02x \n",g_gc2093_iic_add);
+-                break;
+-            }
+-        }
+-    }
+-    close(fd);
+-    return g_gc2093_iic_add;
+-}
+-
+ static int read_reg(struct gc2093_ctx* ctx, uint16_t addr, uint8_t* value) {
+-    struct i2c_msg msg[2];
+-    struct i2c_rdwr_ioctl_data data;
+-
+-    addr = htobe16(addr);
+-    msg[0].addr = GC2093_I2C_SLAVE_ADDRESS;
+-    msg[0].buf = (uint8_t*)&addr;
+-    msg[0].len = 2;
+-    msg[0].flags = 0;
+-
+-    msg[1].addr = GC2093_I2C_SLAVE_ADDRESS;
+-    msg[1].buf = value;
+-    msg[1].len = 1;
+-    msg[1].flags = I2C_M_RD;
+-
+-    data.msgs = msg;
+-    data.nmsgs = 2;
+-
+-    int ret = ioctl(ctx->i2c, I2C_RDWR, &data);
+-    if (ret != 2) {
+-        fprintf(stderr, "gc2093: i2c read reg %04x error %d(%s)\n", be16toh(addr), errno, strerror(errno));
+-        return -1;
+-    }
+-
+-    return 0;
++    return tdvp_gc2093_read_reg(ctx->i2c, addr, value);
+ }
+ 
+ static int write_reg(struct gc2093_ctx* ctx, uint16_t addr, uint8_t value) {
+@@ -224,16 +162,10 @@ static int write_reg(struct gc2093_ctx* ctx, uint16_t addr, uint8_t value) {
+ 
+ 
+ static int open_i2c(struct gc2093_ctx* sensor) {
+-    uint8_t gc2093_dev_add = GC2093_I2C_SLAVE_ADDRESS;
+-    // i2c
+     if (sensor->i2c < 0) {
+-        sensor->i2c = open("/dev/i2c-0", O_RDWR);
++        sensor->i2c = tdvp_gc2093_open();
+         if (sensor->i2c < 0) {
+-            perror("open /dev/i2c-0");
+-            return -1;
+-        }
+-        if (ioctl(sensor->i2c, I2C_SLAVE_FORCE, gc2093_dev_add) < 0) {
+-            perror("i2c ctrl 0x36");
++            perror("gc2093: verified I2C4 chip ID");
+             return -1;
+         }
+     }
+@@ -242,6 +174,8 @@ static int open_i2c(struct gc2093_ctx* sensor) {
+ 
+ static int init(void** ctx) {
+     struct gc2093_ctx* sensor = calloc(1, sizeof(struct gc2093_ctx));
++    if (!sensor)
++        return -1;
+     sensor->i2c = -1;
+     *ctx = sensor;
+     return 0;

@@ -2,7 +2,9 @@
 
 #include "battery.hpp"
 #include "bluetooth.hpp"
+#include "cpu1_vision_status.hpp"
 #include "dock.hpp"
+#include "lora_status.hpp"
 #include "network.hpp"
 #include "paths.hpp"
 
@@ -99,16 +101,6 @@ std::optional<bool> pcm_muted(const std::string &playback)
     if (playback.find("[on]") != std::string::npos)
         return false;
     return std::nullopt;
-}
-
-bool any_camera()
-{
-    for (const std::string &entry : paths::children("/sys/class/video4linux")) {
-        const std::string name = paths::read("/sys/class/video4linux/" + entry + "/name");
-        if (!name.empty() && name.find("mvx") == std::string::npos)
-            return true;
-    }
-    return false;
 }
 
 std::string backlight_percent(std::initializer_list<const char *> needles)
@@ -242,16 +234,18 @@ State collect_state()
         cellular && cellular_signal && *cellular_signal >= 0 && *cellular_signal <= 100
         ? std::to_string(*cellular_signal) : "-1";
 
-    transport(&state, "lora", false, false, false);
-    put(&state, "lora_requested", false);
-    put(&state, "lora_control_available", false);
+    append_lora_state(&state);
 
     const bool keyboard = dock.keyboard_input;
-    const bool keyboard_backlight = any_backlight("keyboard");
+    std::string keyboard_backlight_percent;
+    const bool keyboard_backlight =
+        get_control("keyboard-brightness", &keyboard_backlight_percent) == 0;
     transport(&state, "keyboard", keyboard, keyboard, true);
     transport(&state, "keyboard_backlight", keyboard_backlight, keyboard_backlight,
               keyboard_backlight);
-    state["keyboard_backlight_brightness_percent"] = backlight_percent({"keyboard"});
+    if (!keyboard_backlight)
+        keyboard_backlight_percent = backlight_percent({"keyboard"});
+    state["keyboard_backlight_brightness_percent"] = keyboard_backlight_percent;
 
     const bool touch = directory_has("/sys/class/input", "input") &&
         (paths::exists("/sys/bus/i2c/devices/0-005d") || paths::exists("/sys/bus/i2c/devices/1-005d"));
@@ -284,8 +278,7 @@ State collect_state()
     put(&state, "muted", muted.value_or(false));
     put(&state, "audio_volume_control_available", volume_percent.has_value() && muted.has_value());
 
-    const bool camera = any_camera();
-    transport(&state, "camera", camera, camera, camera);
+    append_cpu1_vision_state(&state);
 
     const bool rtc = directory_has("/sys/class/rtc", "rtc");
     transport(&state, "rtc", rtc, rtc, rtc);
@@ -307,50 +300,6 @@ State collect_state()
         state["battery_temperature_deci_celsius"] = std::to_string(battery.temperature_deci_celsius);
     }
 
-    const bool gnne_driver = paths::exists("/sys/class/k230_gnne_class/k230-gnne");
-    const bool ai2d_driver = paths::exists("/sys/class/k230_ai2d_class/k230-ai2d");
-    const bool gnne_device = paths::exists("/dev/k230-gnne");
-    const bool ai2d_device = paths::exists("/dev/k230-ai2d");
-    const bool kpu_reference_runtime =
-        paths::executable("/root/app/ai2d_kpu/ai2d_kpu.elf") &&
-        paths::exists("/root/app/ai2d_kpu/test.kmodel") &&
-        paths::exists("/root/app/ai2d_kpu/ai2d_input.bin") &&
-        paths::exists("/root/app/ai2d_kpu/input.bin") &&
-        paths::exists("/root/app/ai2d_kpu/result.bin");
-    transport(&state, "kpu", gnne_device && ai2d_device, gnne_driver && ai2d_driver,
-              kpu_reference_runtime);
-    put(&state, "kpu_gnne_device", gnne_device);
-    put(&state, "kpu_ai2d_device", ai2d_device);
-    put(&state, "kpu_kernel_ready", gnne_driver && ai2d_driver && gnne_device && ai2d_device);
-    put(&state, "kpu_reference_runtime_available", kpu_reference_runtime);
-    state["kpu_runtime"] = kpu_reference_runtime ? "nncase-k230" : "";
-    const bool kpu_acceptance_service_active =
-        paths::service_active("tdvp-kpu-acceptance.service");
-    const bool kpu_acceptance_passed =
-        paths::exists("/run/vicliu-pocket-linux-hardware/kpu-acceptance.pass");
-    const bool kpu_acceptance_skipped =
-        paths::exists("/run/vicliu-pocket-linux-hardware/kpu-acceptance.skipped");
-    put(&state, "kpu_acceptance_service_active", kpu_acceptance_service_active);
-    put(&state, "kpu_acceptance_passed", kpu_acceptance_passed);
-    put(&state, "kpu_acceptance_skipped", kpu_acceptance_skipped);
-    if (!gnne_driver || !ai2d_driver || !gnne_device || !ai2d_device) {
-        state["kpu_acceptance_state"] = "kernel-unavailable";
-    } else if (!kpu_reference_runtime) {
-        state["kpu_acceptance_state"] = "runtime-unavailable";
-    } else if (kpu_acceptance_passed) {
-        state["kpu_acceptance_state"] = "passed";
-    } else if (kpu_acceptance_skipped) {
-        state["kpu_acceptance_state"] = "skipped";
-    } else if (kpu_acceptance_service_active) {
-        state["kpu_acceptance_state"] = "running";
-    } else {
-        state["kpu_acceptance_state"] = "pending-or-failed";
-    }
-    if (kpu_acceptance_passed) {
-        state["kpu_acceptance"] = "passed";
-        put(&state, "kpu_functional", true);
-        put(&state, "kpu_active", true);
-    }
 
     const std::string online = paths::read("/sys/devices/system/cpu/online");
     state["cpu_physical_core_count"] = "2";
@@ -361,11 +310,21 @@ State collect_state()
     state["cpu_count"] = state["linux_schedulable_cpu_count"];
     put(&state, "cpu0_linux_online", !online.empty() && cpu_is_online(online, 0));
     put(&state, "cpu1_physical_present", true);
-    state["cpu1_execution_model"] = "unprovisioned";
+    const bool cpu1_mailbox = paths::exists("/dev/tdvp-cpu1");
+    int cpu1_status_exit = 127;
+    const std::string cpu1_status = cpu1_mailbox && paths::executable("/usr/local/bin/tdvp-cpu1ctl")
+        ? paths::run_capture({"/usr/local/bin/tdvp-cpu1ctl", "status"}, &cpu1_status_exit)
+        : std::string {};
+    const bool cpu1_ready = cpu1_status_exit == 0 &&
+        cpu1_status.find("state=ready") != std::string::npos;
+    state["cpu1_execution_model"] = cpu1_ready ? "rtsmart-coprocessor" :
+        (cpu1_mailbox ? "rtsmart-startup-pending" : "unprovisioned");
     state["secondary_cpu_linux_managed"] = "0";
-    put(&state, "cpu1_firmware_lifecycle_available", false);
-    put(&state, "cpu1_coprocessor_available", false);
-    put(&state, "cpu1_coprocessor_active", false);
+    put(&state, "cpu1_firmware_lifecycle_available", cpu1_mailbox);
+    put(&state, "cpu1_coprocessor_available", cpu1_ready);
+    put(&state, "cpu1_coprocessor_active", cpu1_ready);
+    state["cpu1_coprocessor_state"] = cpu1_ready ? "ready" :
+        (cpu1_mailbox ? "not-ready" : "unavailable");
     put(&state, "cpu1_asr_offload_available", false);
     return state;
 }

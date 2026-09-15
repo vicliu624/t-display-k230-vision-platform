@@ -1,27 +1,34 @@
 # T-Display K230 V1.3 Hardware Contract
 
-The Labwc desktop profile uses the T-Display K230 V1.3 board configuration in
-the pinned K230 Linux SDK. Hardware integration is exposed through normal
-Linux kernel subsystems and user-space interfaces.
+The current profile uses CPU0 Linux + CPU1 RT-Smart AMP.
+Record interface presence, driver binding and functional acceptance separately.
 
-| Board function | Linux interface | Image component |
+| Function | Owner and interface | Acceptance scope |
 | --- | --- | --- |
-| RM69A10 internal panel | DRM/KMS connector `DSI-1`, `/dev/dri/card0` | Canaan DRM, Labwc session |
-| GT9895 touch | Linux input event device, libinput | kernel touch fragment and `70-tdvp-touch.rules` |
-| Keyboard extension | Linux input event device | `tdvp-keyboard-layout.service` |
-| Keyboard expansion I2C bus | `/dev/i2c-*` | K230 keyboard/hardware fragments |
-| RTL8189FS Wi-Fi | `wlan0`, NetworkManager / `nmcli` | RTL8189FS package and NetworkManager |
-| RTL8152 USB Ethernet | `enu1`, NetworkManager / `nmcli` | kernel r8152 driver and NetworkManager |
-| Camera and ISP | V4L2/media nodes and vendor ISP service | `vvcam` package and vendor service |
-| Audio capture/playback | ALSA devices | ALSA utilities |
-| GPIO and I2C diagnostics | gpio character devices and `/dev/i2c-*` | libgpiod tools and i2c-tools |
-| KPU and AI2D | K230 runtime devices and nncase assets | `libnncase`, `ai2d-kpu`, acceptance utility |
+| RM69A10 display, VGLite | CPU0, DRM/KMS, VGLite, Labwc | VGLite in both greeter and desktop |
+| GT9895 touch, keyboard | CPU0, Linux input/libinput | Keys, Fn, Menu, touch and wake |
+| Keyboard backlight | CPU0, IO52 / PWM4, board service and Quick Settings | Physical off/low/high changes |
+| RTL8189FS Wi-Fi | CPU0, NetworkManager | Scan, connect and reconnect |
+| RTL8152 USB Ethernet | CPU0, r8152, NetworkManager | Inspect the actual interface after attachment |
+| GC2093, VICAP/ISP, vision buffers | CPU1; Linux `/dev/tdvp-vision` | Real frames, sequence, dimensions, timeouts and lifecycle |
+| KPU, AI2D, FFT, AI memory | CPU1; Linux `/dev/tdvp-ai` | Numerical results and error recovery for supported jobs |
+| Audio capture/playback | CPU0, ALSA/ASoC | Devices, input/output and speaker |
+| Power, charging, battery and sensors | Bound Linux drivers, sysfs, board status service | Check against the fitted hardware |
+| nRF52840 | Independent firmware, K230 UART AT host utility | Physical UART identity and BLE integration still pending |
+| LoRa | Linux transport and board control | Separate enumeration/power checks from RF transmit/receive |
 
-The removable keyboard extension shares one physical module for keyboard,
-backlight, BQ25896 charge controller, BQ27220 fuel gauge, and optional nRF9151
-LTE-M/GNSS hardware. Its I2C bus is connected through IO32 SCL and IO33 SDA.
-The V1.3 profile retains the board wiring required by both K256-04 and
-K256-04-A variants. A K256-04-A unit simply has no nRF9151 device to expose.
+The Linux profile disables the old direct camera/ISP, GNNE/KPU and AI2D paths.
+`tdvp-vision` and `tdvp-ai` are cross-core interfaces. Linux is expected to report one CPU.
 
-The image sets the keyboard backlight from the board integration service and
-publishes hardware state through standard device files and service status.
+Speaker I2S uses IO32 BCLK, IO33 LRCK and IO35 DATA, with GPIO34 managed by ASoC.
+Keyboard backlight uses IO52 PWM with default levels of 0%, 33% and 100%.
+Check the current DTS, patches and hardware revision together; the old keyboard
+expansion-bus pin description conflicts with the current audio routing.
+
+Expansion sensors and the optional nRF9151 depend on the fitted module.
+nRF9151 and nRF52840 are managed separately. The official nRF52840 AT application
+has not been mapped into a BlueZ HCI controller; the missing panel Bluetooth
+entry remains an integration gap.
+
+See [baseline validation](hardware-baseline-validation.md) and the
+[V1.3 checklist](hardware-v1.3-acceptance.md) for procedures and evidence requirements.
