@@ -78,7 +78,7 @@ def verify_package_contract(root, manifest):
     path = root / "host-environment.json"
     if not isinstance(contract, dict) or not path.is_file() or sha256(path) != manifest.get("host_environment_sha256"):
         raise ValueError("SDK host environment contract differs")
-    if json.loads(path.read_text()) != contract or contract.get("schema") != 1 or contract.get("architecture") != "x86_64" or not re.fullmatch(r"3\\.[0-9]+", str(contract.get("minimum_python", ""))):
+    if json.loads(path.read_text()) != contract or contract.get("schema") != 1 or contract.get("architecture") != "x86_64" or not re.fullmatch(r"3\.[0-9]+", str(contract.get("minimum_python", ""))):
         raise ValueError("invalid SDK host environment contract")
     tools = contract.get("required_commands")
     if not isinstance(tools, list) or not tools or any(not isinstance(tool, str) or not tool for tool in tools):

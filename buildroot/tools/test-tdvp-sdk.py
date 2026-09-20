@@ -76,6 +76,18 @@ class SdkTests(unittest.TestCase):
         manifest["capabilities"]["package_build"] = False
         with self.assertRaisesRegex(ValueError, "capabilities"):
             VERIFY.verify_tree(self.root, manifest)
+        manifest = self.package_manifest()
+        invalid_contract = dict(manifest["host_environment"])
+        invalid_contract["minimum_python"] = "3x9"
+        contract_path = self.root / "host-environment.json"
+        contract_path.write_text(json.dumps(invalid_contract, sort_keys=True) + "\n")
+        manifest["host_environment"] = invalid_contract
+        manifest["host_environment_sha256"] = EXPORT.sha256(contract_path)
+        records = EXPORT.tree_inventory(self.root)
+        manifest["files"] = records
+        manifest["files_sha256"] = hashlib.sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "invalid SDK host environment contract"):
+            VERIFY.verify_tree(self.root, manifest)
 
     def test_schema_two_rejects_development_or_host_contract_drift(self):
         manifest = self.package_manifest()
