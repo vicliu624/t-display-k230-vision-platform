@@ -87,6 +87,13 @@ class SdkTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "host environment contract"):
             VERIFY.verify_tree(self.root, manifest)
 
+    def test_development_inventory_includes_target_config_tools(self):
+        tool = self.root / "sysroot/usr/bin/curl-config"
+        tool.parent.mkdir(parents=True)
+        tool.write_text("#!/bin/sh\n")
+        self.assertIn("usr/bin/curl-config", EXPORT.development_inventory(self.root / "sysroot")["target_tools"])
+        self.assertIn("usr/bin/curl-config", VERIFY.development_inventory(self.root / "sysroot")["target_tools"])
+
     def test_payload_changes_are_rejected(self):
         for mutation in ("bytes", "mode", "missing", "extra"):
             with self.subTest(mutation=mutation):

@@ -36,7 +36,7 @@ def run(arguments, **kwargs):
 
 
 def development_inventory(sysroot):
-    inventory = {"headers": [], "pkgconfig": [], "cmake": [], "linker_libraries": []}
+    inventory = {"headers": [], "pkgconfig": [], "cmake": [], "linker_libraries": [], "target_tools": []}
 
     def add(category, path):
         if path.is_file() or path.is_symlink():
@@ -57,6 +57,10 @@ def development_inventory(sysroot):
             add("linker_libraries", path)
     for path in sysroot.rglob("*.cmake"):
         add("cmake", path)
+    binary = sysroot / "usr/bin"
+    if binary.exists():
+        for path in binary.glob("*-config"):
+            add("target_tools", path)
     for paths in inventory.values():
         paths.sort()
     return inventory
