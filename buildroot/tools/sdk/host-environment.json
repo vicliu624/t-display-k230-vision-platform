@@ -10,6 +10,7 @@
     "automake",
     "bison",
     "cmake",
+    "debugfs",
     "flex",
     "gcc",
     "glib-compile-resources",
