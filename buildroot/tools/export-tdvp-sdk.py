@@ -231,7 +231,7 @@ def development_inventory(sysroot):
 def host_environment_contract():
     path = HERE / "sdk/host-environment.json"
     contract = json.loads(path.read_text())
-    if contract.get("schema") != 1 or contract.get("architecture") != "x86_64" or not re.fullmatch(r"3\\.[0-9]+", str(contract.get("minimum_python", ""))):
+    if contract.get("schema") != 1 or contract.get("architecture") != "x86_64" or not re.fullmatch(r"3\.[0-9]+", str(contract.get("minimum_python", ""))):
         raise ValueError("invalid package-builder host environment contract")
     tools = contract.get("required_commands")
     if not isinstance(tools, list) or not tools or any(not isinstance(tool, str) or not tool for tool in tools):

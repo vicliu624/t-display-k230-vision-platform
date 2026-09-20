@@ -89,6 +89,20 @@ class SdkTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid SDK host environment contract"):
             VERIFY.verify_tree(self.root, manifest)
 
+    def test_exporter_validates_host_environment_contract(self):
+        contract_path = self.root / "sdk/host-environment.json"
+        contract_path.parent.mkdir()
+        contract = {"schema": 1, "architecture": "x86_64", "minimum_python": "3.9", "required_commands": ["make"]}
+        contract_path.write_text(json.dumps(contract, sort_keys=True) + "\n")
+        with patch.object(EXPORT, "HERE", self.root):
+            path, actual = EXPORT.host_environment_contract()
+            self.assertEqual(path, contract_path)
+            self.assertEqual(actual, contract)
+            contract["minimum_python"] = "3x9"
+            contract_path.write_text(json.dumps(contract, sort_keys=True) + "\n")
+            with self.assertRaisesRegex(ValueError, "invalid package-builder host environment contract"):
+                EXPORT.host_environment_contract()
+
     def test_schema_two_rejects_development_or_host_contract_drift(self):
         manifest = self.package_manifest()
         manifest["development"]["headers"].append("usr/include/missing.h")
