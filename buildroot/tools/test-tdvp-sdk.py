@@ -48,11 +48,43 @@ class SdkTests(unittest.TestCase):
                 "image_bindings": {"image-meta": EXPORT.sha256(self.root / "metadata/image-meta")},
                 "image_library_sha256": {"/usr/lib/libfixture.so.1": EXPORT.sha256(library)}}
 
+    def package_manifest(self):
+        manifest = self.manifest()
+        contract = {"schema": 1, "architecture": "x86_64", "minimum_python": "3.9", "required_commands": ["cc", "make"]}
+        contract_path = self.root / "host-environment.json"
+        contract_path.write_text(json.dumps(contract, sort_keys=True) + "\n")
+        manifest.update({"schema": 2, "kind": "tdvp-cpu0-sdk",
+                         "capabilities": {"application_build": True, "package_build": True},
+                         "development": VERIFY.development_inventory(self.root / "sysroot"),
+                         "host_environment": contract,
+                         "host_environment_sha256": EXPORT.sha256(contract_path)})
+        records = EXPORT.tree_inventory(self.root)
+        manifest["files"] = records
+        manifest["files_sha256"] = hashlib.sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return manifest
+
     def test_roundtrip_inventory_and_image_binding(self):
         manifest = self.manifest()
         VERIFY.verify_tree(self.root, manifest)
         manifest["image_bindings"]["image-meta"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "metadata differs"):
+            VERIFY.verify_tree(self.root, manifest)
+
+    def test_schema_two_declares_package_build_contract(self):
+        manifest = self.package_manifest()
+        VERIFY.verify_tree(self.root, manifest)
+        manifest["capabilities"]["package_build"] = False
+        with self.assertRaisesRegex(ValueError, "capabilities"):
+            VERIFY.verify_tree(self.root, manifest)
+
+    def test_schema_two_rejects_development_or_host_contract_drift(self):
+        manifest = self.package_manifest()
+        manifest["development"]["headers"].append("usr/include/missing.h")
+        with self.assertRaisesRegex(ValueError, "development inventory"):
+            VERIFY.verify_tree(self.root, manifest)
+        manifest = self.package_manifest()
+        (self.root / "host-environment.json").write_text("{}\n")
+        with self.assertRaisesRegex(ValueError, "host environment contract"):
             VERIFY.verify_tree(self.root, manifest)
 
     def test_payload_changes_are_rejected(self):

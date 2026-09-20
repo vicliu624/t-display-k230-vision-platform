@@ -25,6 +25,9 @@ TOOLCHAIN = "Xuantie-900-gcc-linux-6.6.0-glibc-x86_64-V3.0.2"
 HERE = Path(__file__).resolve().parent
 BINDINGS = ("tdvp-image-manifest", "tdvp-sdk-baseline-manifest", "tdvp-image-base.json",
             "tdvp-opkg-status", "tdvp-opkg-info.tar.gz", "tdvp-buildroot-packages.json")
+SDK_SCHEMA = 2
+SDK_KIND = "tdvp-cpu0-sdk"
+DEVELOPMENT_DIRECTORIES = ("usr/lib/pkgconfig", "usr/share/pkgconfig")
 
 
 def sha256(path):
@@ -193,6 +196,45 @@ def tree_inventory(root):
     return records
 
 
+def development_inventory(sysroot):
+    """Declare the target-side development closure available to package recipes."""
+    inventory = {"headers": [], "pkgconfig": [], "cmake": [], "linker_libraries": []}
+
+    def add(category, path):
+        if path.is_file() or path.is_symlink():
+            inventory[category].append(path.relative_to(sysroot).as_posix())
+
+    include = sysroot / "usr/include"
+    if include.exists():
+        for path in include.rglob("*"):
+            add("headers", path)
+    for directory in DEVELOPMENT_DIRECTORIES:
+        root = sysroot / directory
+        if root.exists():
+            for path in root.rglob("*.pc"):
+                add("pkgconfig", path)
+    library = sysroot / "usr/lib"
+    if library.exists():
+        for path in library.glob("lib*.so"):
+            add("linker_libraries", path)
+    for path in sysroot.rglob("*.cmake"):
+        add("cmake", path)
+    for paths in inventory.values():
+        paths.sort()
+    return inventory
+
+
+def host_environment_contract():
+    path = HERE / "sdk/host-environment.json"
+    contract = json.loads(path.read_text())
+    if contract.get("schema") != 1 or contract.get("architecture") != "x86_64" or not re.fullmatch(r"3\\.[0-9]+", str(contract.get("minimum_python", ""))):
+        raise ValueError("invalid package-builder host environment contract")
+    tools = contract.get("required_commands")
+    if not isinstance(tools, list) or not tools or any(not isinstance(tool, str) or not tool for tool in tools):
+        raise ValueError("invalid package-builder host tool contract")
+    return path, contract
+
+
 def development_permissions(root):
     # A development archive is readable by its consuming UID. Do not carry
     # target account restrictions or setuid/setgid capabilities onto a host.
@@ -259,12 +301,15 @@ def export(worktree, bundle, release):
         development_permissions(root)
         compiler_version = subprocess.check_output([str(root / "bin" / (TRIPLE + "-gcc")), "-dumpfullversion"], text=True).strip()
         records = tree_inventory(root)
-        manifest = {"schema": 1, "kind": "tdvp-cpu0-application-sdk", "release_name": release,
+        contract_path, contract = host_environment_contract()
+        manifest = {"schema": SDK_SCHEMA, "kind": SDK_KIND, "release_name": release,
                     "archive": archive.name, "host": "x86_64-linux-gnu", "validated_host": "Ubuntu 24.04",
                     "target": TRIPLE, "march": ARCH, "mabi": "lp64d", "compiler_version": compiler_version,
                     "toolchain": TOOLCHAIN, "buildroot_config_sha256": sha256(output / ".config"),
                     "exporter_sha256": sha256(Path(__file__)), "image_bindings": bindings,
-                    "image_library_sha256": libraries, "files": records,
+                    "image_library_sha256": libraries, "capabilities": {"application_build": True, "package_build": True},
+                    "development": development_inventory(root / "sysroot"),
+                    "host_environment": contract, "host_environment_sha256": sha256(contract_path), "files": records,
                     "files_sha256": hashlib.sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
         (root / "tdvp-sdk-manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
         (root / "tdvp-sdk-manifest.json").chmod(0o644)

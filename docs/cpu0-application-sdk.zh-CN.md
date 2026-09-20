@@ -1,4 +1,4 @@
-# CPU0 应用 SDK
+# CPU0 应用与软件包构建 SDK
 
 发布收集器现已将 `<release-name>-cpu0-sdk.tar.gz` 与镜像一同导出。
 输入来自同一次 Buildroot 构建输出及最终 ext4。导出过程不会重新构建镜像，
@@ -15,6 +15,11 @@
   头文件、静态库和链接脚本保留构建来源；SDK 副本统一使用普通主机权限。
 - 镜像/包元数据，以及完整的 SDK 文件哈希清单。外置 `tdvp-sdk-manifest.json`
   与压缩包中的同名文件完全一致。
+
+schema 2 明确声明 SDK 同时承担应用与软件包构建职责，记录 application-build、
+package-build capability，以及头文件、pkg-config 元数据、CMake 元数据和链接库名的
+精确 development inventory。feed 在源码构建前使用这份契约。基础镜像已有的运行库
+通过其 image provider 使用，不能为了取得头文件或链接元数据再次编译。
 
 JSON 清单绑定压缩镜像、镜像 manifest、staged 源码清单、预装包记录和 Buildroot
 所选包版本，并记录实际构建配置哈希、导出脚本哈希、编译器版本、目标 ISA/ABI
@@ -34,7 +39,7 @@ bash buildroot/tools/test-tdvp-sdk-relocation.sh \
 
 校验器先验证发布文件哈希，再把 SDK 挂载到 Ubuntu 24.04 中两个不同长度的路径。
 容器使用普通 UID、只读挂载、断网环境，隐藏 `/opt`，不挂载原构建目录。
-C/C++、GTK/libmount/Wayland 和 CMake 编译都必须通过。应用 ELF 检查拒绝 RVV、
+C/C++、GTK/libmount/Wayland、ncurses、libcurl、GLib、OpenSSL、zlib 和 CMake 编译都必须通过。应用 ELF 检查拒绝 RVV、
 不支持的 ISA 属性、错误 ABI 和内嵌运行库搜索路径；递归检查示例依赖与最终镜像库哈希。
 CI 在上传产物和按 tag 发布 Release 前执行这些检查。
 
@@ -59,7 +64,7 @@ QEMU 专项测试关闭 V，确认 HWCAP.V=0，再调用镜像库完成 8×8 合
 使用其编译器、pkg-config 或 CMake 工具链文件。移动 SDK 后重新加载环境，并为应用
 创建新的构建目录。需要在主机运行的代码生成器由主机提供，不要运行 sysroot 中的目标程序。
 
-这套 SDK 用于 CPU0 应用。CPU1 固件与 AI 模型开发继续使用各自工具链。
+这套 SDK 用于 CPU0 应用与软件包构建。CPU1 固件与 AI 模型开发继续使用各自工具链。
 应用显式覆盖 ISA、手写汇编、包维护脚本及完整依赖闭包还需要软件源侧检查。
 交付检查不运行板上的应用，也不代替新卡实机验收。
 

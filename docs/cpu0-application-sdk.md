@@ -1,4 +1,4 @@
-# CPU0 application SDK
+# CPU0 application and package-build SDK
 
 The release collector now exports `<release-name>-cpu0-sdk.tar.gz` alongside
 the image. It uses the selected Buildroot output and the same final ext4.
@@ -16,6 +16,13 @@ Exporting does not run another image build or alter the SDK worktree.
   retain their build provenance. SDK copy permissions are ordinary host modes.
 - Image/package metadata and a complete SDK file/hash inventory. The external
   `tdvp-sdk-manifest.json` is identical to the archive's internal copy.
+
+Schema 2 makes the package-build role explicit. It declares both application
+and package-build capabilities, plus an exact development inventory of headers,
+pkg-config metadata, CMake metadata and linker-library names. Feed recipes use
+that contract before source compilation. A base-image runtime library is
+consumed through its declared image provider; it is not rebuilt merely to
+recover development files.
 
 The JSON manifest binds the compressed image, image manifest, staged source
 manifest, preinstalled package records and selected Buildroot package versions.
@@ -38,7 +45,8 @@ bash buildroot/tools/test-tdvp-sdk-relocation.sh \
 The validator verifies release hashes, then mounts the SDK at two different
 paths in Ubuntu 24.04. It uses an ordinary UID and read-only mounts, disables
 network access, hides `/opt`, and does not mount the original build tree.
-C/C++, GTK/libmount/Wayland and CMake builds must pass. Application ELF checks reject RVV,
+C/C++, GTK/libmount/Wayland, ncurses, libcurl, GLib, OpenSSL, zlib and CMake
+builds must pass. Application ELF checks reject RVV,
 unsupported ISA attributes, wrong ABI and embedded runtime search paths;
 sample dependencies are checked recursively against final-image library hashes.
 CI performs this before artifact upload or tagged Release publication.
@@ -73,7 +81,7 @@ toolchain file. Moving the SDK requires re-sourcing the environment and a fresh
 application build directory. Native generators belong to the host; do not run
 target executables from sysroot as build tools.
 
-This is the CPU0 application SDK. CPU1 firmware and AI model development retain
+This is the CPU0 application and package-build SDK. CPU1 firmware and AI model development retain
 their separate toolchain. Explicit compiler ISA overrides, assembly, package
 maintainer scripts and a full application dependency closure require feed-side
 checks. This handoff test does not run the compiled applications on hardware.
