@@ -1,0 +1,30 @@
+{
+  "architecture": "x86_64",
+  "containerfile": "Dockerfile.validation",
+  "distribution": "Ubuntu",
+  "minimum_python": "3.9",
+  "release": "24.04",
+  "required_commands": [
+    "ar",
+    "autoconf",
+    "automake",
+    "bison",
+    "cmake",
+    "debugfs",
+    "flex",
+    "gcc",
+    "glib-compile-resources",
+    "g++",
+    "gzip",
+    "make",
+    "meson",
+    "ninja",
+    "pkg-config",
+    "python3",
+    "qemu-riscv64",
+    "readelf",
+    "tar",
+    "wayland-scanner"
+  ],
+  "schema": 1
+}

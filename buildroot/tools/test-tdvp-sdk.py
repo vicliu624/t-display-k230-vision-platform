@@ -48,12 +48,77 @@ class SdkTests(unittest.TestCase):
                 "image_bindings": {"image-meta": EXPORT.sha256(self.root / "metadata/image-meta")},
                 "image_library_sha256": {"/usr/lib/libfixture.so.1": EXPORT.sha256(library)}}
 
+    def package_manifest(self):
+        manifest = self.manifest()
+        contract = {"schema": 1, "architecture": "x86_64", "minimum_python": "3.9", "required_commands": ["cc", "make"]}
+        contract_path = self.root / "host-environment.json"
+        contract_path.write_text(json.dumps(contract, sort_keys=True) + "\n")
+        manifest.update({"schema": 2, "kind": "tdvp-cpu0-sdk",
+                         "capabilities": {"application_build": True, "package_build": True},
+                         "development": VERIFY.development_inventory(self.root / "sysroot"),
+                         "host_environment": contract,
+                         "host_environment_sha256": EXPORT.sha256(contract_path)})
+        records = EXPORT.tree_inventory(self.root)
+        manifest["files"] = records
+        manifest["files_sha256"] = hashlib.sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return manifest
+
     def test_roundtrip_inventory_and_image_binding(self):
         manifest = self.manifest()
         VERIFY.verify_tree(self.root, manifest)
         manifest["image_bindings"]["image-meta"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "metadata differs"):
             VERIFY.verify_tree(self.root, manifest)
+
+    def test_schema_two_declares_package_build_contract(self):
+        manifest = self.package_manifest()
+        VERIFY.verify_tree(self.root, manifest)
+        manifest["capabilities"]["package_build"] = False
+        with self.assertRaisesRegex(ValueError, "capabilities"):
+            VERIFY.verify_tree(self.root, manifest)
+        manifest = self.package_manifest()
+        invalid_contract = dict(manifest["host_environment"])
+        invalid_contract["minimum_python"] = "3x9"
+        contract_path = self.root / "host-environment.json"
+        contract_path.write_text(json.dumps(invalid_contract, sort_keys=True) + "\n")
+        manifest["host_environment"] = invalid_contract
+        manifest["host_environment_sha256"] = EXPORT.sha256(contract_path)
+        records = EXPORT.tree_inventory(self.root)
+        manifest["files"] = records
+        manifest["files_sha256"] = hashlib.sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "invalid SDK host environment contract"):
+            VERIFY.verify_tree(self.root, manifest)
+
+    def test_exporter_validates_host_environment_contract(self):
+        contract_path = self.root / "sdk/host-environment.json"
+        contract_path.parent.mkdir()
+        contract = {"schema": 1, "architecture": "x86_64", "minimum_python": "3.9", "required_commands": ["make"]}
+        contract_path.write_text(json.dumps(contract, sort_keys=True) + "\n")
+        with patch.object(EXPORT, "HERE", self.root):
+            path, actual = EXPORT.host_environment_contract()
+            self.assertEqual(path, contract_path)
+            self.assertEqual(actual, contract)
+            contract["minimum_python"] = "3x9"
+            contract_path.write_text(json.dumps(contract, sort_keys=True) + "\n")
+            with self.assertRaisesRegex(ValueError, "invalid package-builder host environment contract"):
+                EXPORT.host_environment_contract()
+
+    def test_schema_two_rejects_development_or_host_contract_drift(self):
+        manifest = self.package_manifest()
+        manifest["development"]["headers"].append("usr/include/missing.h")
+        with self.assertRaisesRegex(ValueError, "development inventory"):
+            VERIFY.verify_tree(self.root, manifest)
+        manifest = self.package_manifest()
+        (self.root / "host-environment.json").write_text("{}\n")
+        with self.assertRaisesRegex(ValueError, "host environment contract"):
+            VERIFY.verify_tree(self.root, manifest)
+
+    def test_development_inventory_includes_target_config_tools(self):
+        tool = self.root / "sysroot/usr/bin/curl-config"
+        tool.parent.mkdir(parents=True)
+        tool.write_text("#!/bin/sh\n")
+        self.assertIn("usr/bin/curl-config", EXPORT.development_inventory(self.root / "sysroot")["target_tools"])
+        self.assertIn("usr/bin/curl-config", VERIFY.development_inventory(self.root / "sysroot")["target_tools"])
 
     def test_payload_changes_are_rejected(self):
         for mutation in ("bytes", "mode", "missing", "extra"):

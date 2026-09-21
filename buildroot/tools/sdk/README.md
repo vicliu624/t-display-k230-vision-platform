@@ -1,16 +1,21 @@
-# TDVP CPU0 application SDK
+# TDVP CPU0 application and package-build SDK
 
 This archive pairs a specific image with its cross compiler, development
-sysroot and preinstalled-package inventory. It targets CPU0 Linux, using
+sysroot and preinstalled-package inventory. It is the ABI authority for both
+CPU0 applications and feed package builds. It targets CPU0 Linux, using
 `rv64imafdc_zicsr_zifencei` and `lp64d`. CPU1 firmware/model development uses
 its separate RT-Smart toolchain and is outside this SDK's scope.
 
 ## Host and activation
 
-Validated host: Ubuntu 24.04 x86_64. Install native `build-essential`, `python3`,
-`cmake`, `make`, `binutils`, `zlib1g`, `gzip`, `tar` and `qemu-user` (for the
-Pixman check in `--smoke`). Applications can require
-additional native generators; these are not target executables from sysroot.
+Validated host: Ubuntu 24.04 x86_64. `host-environment.json` is the checked-in
+contract for the package-builder host. It requires Python 3.9 or newer, and
+`Dockerfile.validation` installs its
+required commands. It covers native generators such as Meson, Ninja,
+Autoconf, Automake, Bison, Flex, `glib-compile-resources` and
+`wayland-scanner`, in addition to the compiler, CMake, pkg-config and QEMU
+used by SDK validation. These are x86_64 host tools. Target executables in
+`sysroot/usr/bin` must never be used as host generators.
 The original build tree and `/opt/toolchain` are not needed.
 
 Verify the release's SHA256SUMS before extracting the archive. Extract as an
@@ -40,14 +45,20 @@ file ownership and maintainer scripts before publication.
 
 ## Image identity and limits
 
-`tdvp-sdk-manifest.json` binds the compiler policy and complete SDK file
-inventory to image, rootfs metadata and opkg inventory hashes. `metadata/`
+`tdvp-sdk-manifest.json` schema 2 binds the compiler policy, complete SDK file
+inventory, package-build capability and development inventory to image, rootfs
+metadata and opkg inventory hashes. The development inventory explicitly lists
+headers, pkg-config files, CMake metadata and linker-library names that a feed
+recipe may consume. `metadata/`
 contains the exact release copies. Use `--bundle /path/to/release` to verify
 the binding against all companion release files, including the compressed image.
 Final-image shared libraries replace staging copies where both contain the
 same regular `/usr/lib/*.so*` path; their exact hashes are recorded separately.
 Headers, static libraries and linker scripts come from that build's staging
-tree. Development metadata may have paths normalized for relocation.
+tree. Development metadata may have paths normalized for relocation. A package
+that needs a library already supplied by the image consumes this SDK data and
+declares the image runtime provider; it does not rebuild that base library just
+to recover its headers or linker metadata.
 SDK copies use ordinary readable host permissions and carry no setuid/setgid
 bits. Image permissions and image files are left unchanged.
 

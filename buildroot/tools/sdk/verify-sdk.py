@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -15,6 +16,18 @@ import tempfile
 
 TRIPLE = "riscv64-unknown-linux-gnu"
 ARCH = "rv64imafdc_zicsr_zifencei"
+LEGACY_SCHEMA = 1
+PACKAGE_SCHEMA = 2
+LEGACY_KIND = "tdvp-cpu0-application-sdk"
+PACKAGE_KIND = "tdvp-cpu0-sdk"
+DEVELOPMENT_DIRECTORIES = ("usr/lib/pkgconfig", "usr/share/pkgconfig")
+PACKAGE_SDK_SOURCE = '''#include <curses.h>
+#include <curl/curl.h>
+#include <glib.h>
+#include <openssl/ssl.h>
+#include <zlib.h>
+int main(void) { initscr(); endwin(); curl_global_init(CURL_GLOBAL_DEFAULT); SSL_CTX *ctx = SSL_CTX_new(TLS_method()); SSL_CTX_free(ctx); return glib_major_version + zlibVersion()[0]; }
+'''
 
 
 def sha256(path):
@@ -29,8 +42,64 @@ def run(arguments, **kwargs):
     return subprocess.check_output([str(arg) for arg in arguments], stderr=subprocess.STDOUT, **kwargs).decode()
 
 
+def development_inventory(sysroot):
+    inventory = {"headers": [], "pkgconfig": [], "cmake": [], "linker_libraries": [], "target_tools": []}
+
+    def add(category, path):
+        if path.is_file() or path.is_symlink():
+            inventory[category].append(path.relative_to(sysroot).as_posix())
+
+    include = sysroot / "usr/include"
+    if include.exists():
+        for path in include.rglob("*"):
+            add("headers", path)
+    for directory in DEVELOPMENT_DIRECTORIES:
+        root = sysroot / directory
+        if root.exists():
+            for path in root.rglob("*.pc"):
+                add("pkgconfig", path)
+    library = sysroot / "usr/lib"
+    if library.exists():
+        for path in library.glob("lib*.so"):
+            add("linker_libraries", path)
+    for path in sysroot.rglob("*.cmake"):
+        add("cmake", path)
+    binary = sysroot / "usr/bin"
+    if binary.exists():
+        for path in binary.glob("*-config"):
+            add("target_tools", path)
+    for paths in inventory.values():
+        paths.sort()
+    return inventory
+
+
+def verify_package_contract(root, manifest):
+    if manifest.get("kind") != PACKAGE_KIND:
+        raise ValueError("unsupported package-build SDK manifest")
+    if manifest.get("capabilities") != {"application_build": True, "package_build": True}:
+        raise ValueError("SDK does not declare both application and package build capabilities")
+    expected = manifest.get("development")
+    if not isinstance(expected, dict) or expected != development_inventory(root / "sysroot"):
+        raise ValueError("SDK development inventory differs")
+    contract = manifest.get("host_environment")
+    path = root / "host-environment.json"
+    if not isinstance(contract, dict) or not path.is_file() or sha256(path) != manifest.get("host_environment_sha256"):
+        raise ValueError("SDK host environment contract differs")
+    if json.loads(path.read_text()) != contract or contract.get("schema") != 1 or contract.get("architecture") != "x86_64" or not re.fullmatch(r"3\.[0-9]+", str(contract.get("minimum_python", ""))):
+        raise ValueError("invalid SDK host environment contract")
+    tools = contract.get("required_commands")
+    if not isinstance(tools, list) or not tools or any(not isinstance(tool, str) or not tool for tool in tools):
+        raise ValueError("invalid SDK host tool contract")
+
+
 def verify_tree(root, manifest):
-    if manifest.get("schema") != 1 or manifest.get("kind") != "tdvp-cpu0-application-sdk":
+    schema = manifest.get("schema")
+    if schema == LEGACY_SCHEMA:
+        if manifest.get("kind") != LEGACY_KIND:
+            raise ValueError("unsupported SDK manifest")
+    elif schema == PACKAGE_SCHEMA:
+        verify_package_contract(root, manifest)
+    else:
         raise ValueError("unsupported SDK manifest")
     if manifest.get("march") != ARCH or manifest.get("mabi") != "lp64d" or manifest.get("target") != TRIPLE:
         raise ValueError("unexpected CPU0 SDK policy")
@@ -164,12 +233,21 @@ def smoke(root):
         macros = run([cc] + flags + ["-dM", "-E", "-x", "c", "-"], input=b"")
         if "#define __riscv_vector " in macros or "#define __riscv_xlen 64" not in macros:
             raise ValueError("compiler default is not CPU0 scalar")
+    manifest = json.loads((root / "tdvp-sdk-manifest.json").read_text())
+    if manifest.get("schema") == PACKAGE_SCHEMA:
+        missing = [tool for tool in manifest["host_environment"]["required_commands"] if shutil.which(tool) is None]
+        if missing:
+            raise ValueError("package-builder host misses required commands: " + ", ".join(missing))
+        minimum_python = tuple(int(component) for component in manifest["host_environment"]["minimum_python"].split("."))
+        if tuple(os.sys.version_info[:2]) < minimum_python:
+            raise ValueError("package-builder host Python is older than " + manifest["host_environment"]["minimum_python"])
     with tempfile.TemporaryDirectory(prefix="tdvp-sdk-smoke-") as temporary:
         work = Path(temporary)
         sources = {
             "hello.c": '#include <stdio.h>\n#include <pthread.h>\nint main(void) { puts("TDVP CPU0"); return pthread_self() == 0; }\n',
             "hello.cpp": '#include <iostream>\n#include <vector>\nint main() { std::vector<int> v{1,2,3}; std::cout << v.at(1) << std::endl; }\n',
-            "desktop.c": '#include <gtk/gtk.h>\n#include <libmount/libmount.h>\n#include <wayland-client.h>\nint main(void) { struct libmnt_table *t = mnt_new_table(); mnt_free_table(t); return gtk_get_major_version() + (wl_display_connect(0) != 0); }\n'}
+            "desktop.c": '#include <gtk/gtk.h>\n#include <libmount/libmount.h>\n#include <wayland-client.h>\nint main(void) { struct libmnt_table *t = mnt_new_table(); mnt_free_table(t); return gtk_get_major_version() + (wl_display_connect(0) != 0); }\n',
+            "package-sdk.c": PACKAGE_SDK_SOURCE}
         needed = set()
         for name, source in sources.items():
             path = work / name
@@ -179,6 +257,8 @@ def smoke(root):
             libraries = ["-pthread"]
             if name == "desktop.c":
                 libraries += shlex.split(run([root / "bin/pkg-config", "--cflags", "--libs", "gtk+-3.0", "mount", "wayland-client"]))
+            if name == "package-sdk.c":
+                libraries += shlex.split(run([root / "bin/pkg-config", "--cflags", "--libs", "ncursesw", "libcurl", "glib-2.0", "openssl", "zlib"]))
             run([cxx if name.endswith(".cpp") else cc] + flags + [path, "-o", binary] + libraries)
             needed.update(verify_elf(root, binary))
         # An explicitly overridden ISA must still be rejected by the ELF gate.
@@ -191,7 +271,6 @@ def smoke(root):
                 raise
         else:
             raise ValueError("ELF gate accepted RVV")
-        manifest = json.loads((root / "tdvp-sdk-manifest.json").read_text())
         verified = set()
         while needed - verified:
             name = sorted(needed - verified)[0]
@@ -207,7 +286,7 @@ def smoke(root):
         run(["cmake", "--build", work / "build", "-j2"])
         verify_elf(root, work / "build/cmake-c")
         verify_elf(root, work / "build/cmake-cxx")
-    print("TDVP SDK smoke: PASS C, C++, GTK/libmount/Wayland, CMake, scalar defaults, RVV rejection and {} image dependencies".format(len(verified)))
+    print("TDVP SDK smoke: PASS C, C++, GTK/libmount/Wayland, ncurses/curl/GLib/OpenSSL/zlib, CMake, scalar defaults, RVV rejection and {} image dependencies".format(len(verified)))
 
 
 def main():

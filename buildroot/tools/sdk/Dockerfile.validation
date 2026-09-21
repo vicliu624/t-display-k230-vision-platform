@@ -1,5 +1,8 @@
 ARG SDK_VALIDATION_BASE=ubuntu:24.04
 FROM ${SDK_VALIDATION_BASE}
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential cmake python3 binutils zlib1g ca-certificates qemu-user \
+    autoconf automake bison build-essential cmake flex libglib2.0-dev-bin \
+    libwayland-bin meson ninja-build pkg-config python3 binutils e2fsprogs zlib1g \
+    libglib2.0-dev libcurl4-openssl-dev libssl-dev libncurses-dev zlib1g-dev \
+    ca-certificates qemu-user \
     && rm -rf /var/lib/apt/lists/*
