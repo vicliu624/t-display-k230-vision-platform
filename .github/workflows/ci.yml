@@ -99,6 +99,15 @@ jobs:
           docker build -t tdvp-sdk-validation:ubuntu24.04 \
             -f buildroot/tools/sdk/Dockerfile.validation buildroot/tools/sdk
 
+      - name: Verify isolated SDK validation host contract
+        run: |
+          set -euo pipefail
+          docker run --rm --network none \
+            --mount "type=bind,src=${GITHUB_WORKSPACE}/buildroot/tools/sdk/host-environment.json,dst=/host-environment.json,readonly" \
+            tdvp-sdk-validation:ubuntu24.04 \
+            env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/tmp LC_ALL=C \
+            python3 -c 'import json, shutil, sys; commands = json.load(open("/host-environment.json"))["required_commands"]; missing = [command for command in commands if shutil.which(command) is None]; print("TDVP isolated SDK host: PASS " + ", ".join(commands)) if not missing else sys.exit("TDVP isolated SDK host misses required commands: " + ", ".join(missing))'
+
       - name: Build and regress CPU1 firmware before the Linux image
         run: |
           bash buildroot/tools/test-tdvp-cpu1-rtsmart-build.sh "${RUNNER_TEMP}/tdvp-cpu1-preflight"

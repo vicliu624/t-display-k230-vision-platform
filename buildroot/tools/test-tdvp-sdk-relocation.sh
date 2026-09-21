@@ -26,7 +26,7 @@ for location in /sdk /another/location/with-a-longer-name/tdvp-sdk; do
         --mount "type=bind,src=$sdk,dst=$location,readonly" \
         --mount "type=bind,src=$bundle,dst=/release,readonly" \
         --mount "type=bind,src=$script_dir/test-tdvp-sdk-builds.py,dst=/sdk-consumer-checks.py,readonly" \
-        "$test_image" env -i PATH=/usr/bin:/bin HOME=/tmp LC_ALL=C SDK_UNDER_TEST="$location" \
+        "$test_image" env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/tmp LC_ALL=C SDK_UNDER_TEST="$location" \
         bash -c '
             set -euo pipefail
             test ! -e /opt/toolchain
