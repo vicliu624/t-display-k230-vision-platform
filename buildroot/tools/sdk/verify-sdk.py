@@ -21,6 +21,13 @@ PACKAGE_SCHEMA = 2
 LEGACY_KIND = "tdvp-cpu0-application-sdk"
 PACKAGE_KIND = "tdvp-cpu0-sdk"
 DEVELOPMENT_DIRECTORIES = ("usr/lib/pkgconfig", "usr/share/pkgconfig")
+PACKAGE_SDK_SOURCE = '''#include <curses.h>
+#include <curl/curl.h>
+#include <glib.h>
+#include <openssl/ssl.h>
+#include <zlib.h>
+int main(void) { initscr(); endwin(); curl_global_init(CURL_GLOBAL_DEFAULT); SSL_CTX *ctx = SSL_CTX_new(TLS_method()); SSL_CTX_free(ctx); return glib_major_version + zlibVersion()[0]; }
+'''
 
 
 def sha256(path):
@@ -240,7 +247,7 @@ def smoke(root):
             "hello.c": '#include <stdio.h>\n#include <pthread.h>\nint main(void) { puts("TDVP CPU0"); return pthread_self() == 0; }\n',
             "hello.cpp": '#include <iostream>\n#include <vector>\nint main() { std::vector<int> v{1,2,3}; std::cout << v.at(1) << std::endl; }\n',
             "desktop.c": '#include <gtk/gtk.h>\n#include <libmount/libmount.h>\n#include <wayland-client.h>\nint main(void) { struct libmnt_table *t = mnt_new_table(); mnt_free_table(t); return gtk_get_major_version() + (wl_display_connect(0) != 0); }\n',
-            "package-sdk.c": '#include <curses.h>\n#include <curl/curl.h>\n#include <glib.h>\n#include <openssl/ssl.h>\n#include <zlib.h>\nint main(void) { initscr(); endwin(); curl_global_init(CURL_GLOBAL_DEFAULT); SSL_CTX *ctx = SSL_CTX_new(TLS_method()); SSL_CTX_free(ctx); return g_get_major_version() + zlibVersion()[0]; }\n'}
+            "package-sdk.c": PACKAGE_SDK_SOURCE}
         needed = set()
         for name, source in sources.items():
             path = work / name

@@ -108,6 +108,15 @@ jobs:
             env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/tmp LC_ALL=C \
             python3 -c 'import json, shutil, sys; commands = json.load(open("/host-environment.json"))["required_commands"]; missing = [command for command in commands if shutil.which(command) is None]; print("TDVP isolated SDK host: PASS " + ", ".join(commands)) if not missing else sys.exit("TDVP isolated SDK host misses required commands: " + ", ".join(missing))'
 
+      - name: Compile SDK package smoke source in the isolated host
+        run: |
+          set -euo pipefail
+          docker run --rm --network none \
+            --mount "type=bind,src=${GITHUB_WORKSPACE}/buildroot/tools/sdk/verify-sdk.py,dst=/verify-sdk.py,readonly" \
+            tdvp-sdk-validation:ubuntu24.04 \
+            env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/tmp LC_ALL=C \
+            bash -c 'python3 -c "import importlib.util; spec = importlib.util.spec_from_file_location(\"sdk_verify\", \"/verify-sdk.py\"); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); print(module.PACKAGE_SDK_SOURCE, end=\"\")" | gcc -Werror -fsyntax-only -x c - $(pkg-config --cflags --libs ncursesw libcurl glib-2.0 openssl zlib)'
+
       - name: Build and regress CPU1 firmware before the Linux image
         run: |
           bash buildroot/tools/test-tdvp-cpu1-rtsmart-build.sh "${RUNNER_TEMP}/tdvp-cpu1-preflight"
