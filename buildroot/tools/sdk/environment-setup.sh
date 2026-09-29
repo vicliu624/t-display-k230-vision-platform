@@ -17,6 +17,9 @@ export CXXFLAGS="$CFLAGS"
 export CPPFLAGS=''
 export LDFLAGS="-Wl,-rpath-link,$SDKTARGETSYSROOT/usr/lib"
 export CONFIGURE_FLAGS="--host=riscv64-unknown-linux-gnu --prefix=/usr --with-sysroot=$SDKTARGETSYSROOT"
+# Libtool must use the target's default library directories, including their
+# SDK spelling, rather than probing the build host's ld.so configuration.
+export lt_cv_sys_lib_dlsearch_path_spec="/lib /usr/lib $SDKTARGETSYSROOT/lib $SDKTARGETSYSROOT/usr/lib"
 export CMAKE_TOOLCHAIN_FILE="$TDVP_SDK_ROOT/toolchain.cmake"
 unset GCC_EXEC_PREFIX COMPILER_PATH LIBRARY_PATH CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH
 unset PKG_CONFIG_PATH LD_RUN_PATH LD_LIBRARY_PATH

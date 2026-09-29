@@ -41,6 +41,10 @@ This includes `--with-sysroot` so libtool resolves `=/usr/lib/...` development
 dependencies inside the target SDK. Omitting it can resolve archives against
 the build host. Packages using another build system should use their native
 cross-toolchain configuration instead of forwarding these Autoconf options.
+The environment also fixes libtool's default library search directories to
+the target layout, preventing host `ld.so` probing and accidental SDK RPATHs.
+Validate the resulting executable with `verify-sdk.py SDK --elf EXECUTABLE`;
+a successful link alone does not establish target ABI or runtime-path safety.
 
 The compiler/sysroot paths are relative to the SDK. After moving the directory,
 source environment-setup.sh again and use a fresh application build directory.

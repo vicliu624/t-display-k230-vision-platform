@@ -201,6 +201,11 @@ class SdkTests(unittest.TestCase):
         environment = (Path(__file__).parent / "sdk/environment-setup.sh").read_text()
         self.assertIn('--with-sysroot=$SDKTARGETSYSROOT', environment)
 
+    def test_libtool_default_search_paths_are_target_owned(self):
+        environment = (Path(__file__).parent / "sdk/environment-setup.sh").read_text()
+        self.assertIn('export lt_cv_sys_lib_dlsearch_path_spec="/lib /usr/lib '
+                      '$SDKTARGETSYSROOT/lib $SDKTARGETSYSROOT/usr/lib"', environment)
+
     def test_elf_policy_rejects_vector_other_isa_abi_and_rpath(self):
         header = "ELF64 RISC-V double-float ABI"
         attributes = 'Tag_RISCV_arch: "rv64i2p1_m2p0_a2p1_f2p2_d2p2_c2p0_zicsr2p0_zifencei2p0"'
