@@ -19,7 +19,8 @@ if not OPKG:
 
 
 class Alternatives(unittest.TestCase):
-    def check_plan(self, dependency, expected, installed=True, flag="hold", version="1", transitive=False):
+    def check_plan(self, dependency, expected, installed=True, flag="hold", version="1", transitive=False,
+                   rejected=False, newer_image_available=False):
         with tempfile.TemporaryDirectory(prefix="tdvp-opkg-or-") as directory:
             root = Path(directory)
             for subdir in ("var/lib/opkg/info", "var/lib/opkg/lists", "tmp"):
@@ -39,13 +40,20 @@ class Alternatives(unittest.TestCase):
                 index += ("Package: " + name + "\nVersion: 1\nArchitecture: riscv64\n" +
                           ("Depends: " + depends + "\n" if depends else "") +
                           "Filename: " + name + ".ipk\n\n")
+            if newer_image_available:
+                index += ("Package: image-runtime\nVersion: 2\nArchitecture: riscv64\n"
+                          "Filename: image-runtime-2.ipk\n\n")
             (root / "var/lib/opkg/lists/test").write_text(index)
             before = hashlib.sha256(status.read_bytes()).hexdigest()
             result = subprocess.run([OPKG, "-f", str(config), "-o", str(root),
                                      "--noaction", "install", "application" if transitive else "consumer"],
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            self.assertEqual(result.returncode, 0, result.stdout)
-            self.assertNotIn("error:", result.stdout.lower(), result.stdout)
+            if rejected:
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("Cannot satisfy", result.stdout)
+            else:
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertNotIn("error:", result.stdout.lower(), result.stdout)
             plan = set(re.findall(r"^Installing (\S+) ", result.stdout, flags=re.M))
             self.assertEqual(plan, set(expected), result.stdout)
             self.assertEqual(hashlib.sha256(status.read_bytes()).hexdigest(), before)
@@ -68,7 +76,20 @@ class Alternatives(unittest.TestCase):
         self.check_plan("runtime (= 1) | other-runtime (= 1)", ["runtime", "consumer"], installed=False)
 
     def test_unsuitable_installed_version_uses_valid_fallback(self):
-        self.check_plan("image-runtime (= 2) | runtime (= 1)", ["runtime", "consumer"], flag="ok")
+        for flag in ("ok", "hold"):
+            with self.subTest(flag=flag):
+                self.check_plan("image-runtime (= 2) | runtime (= 1)", ["runtime", "consumer"], flag=flag)
+
+    def test_exact_image_version_required_even_when_held(self):
+        for flag in ("ok", "hold"):
+            for transitive in (False, True):
+                with self.subTest(flag=flag, transitive=transitive):
+                    self.check_plan("image-runtime (= 2)", [], flag=flag,
+                                    transitive=transitive, rejected=True)
+
+    def test_held_version_is_not_replaced_by_available_newer_candidate(self):
+        self.check_plan("image-runtime (= 2)", [], rejected=True, newer_image_available=True)
+        self.check_plan("image-runtime (= 1)", ["consumer"], newer_image_available=True)
 
     def test_and_dependencies_remain_required(self):
         self.check_plan("image-runtime, runtime (= 1)", ["runtime", "consumer"])

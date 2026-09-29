@@ -14,9 +14,9 @@ cd "$test_dir/opkg"
 if [[ -f Makefile ]]; then
     make distclean > "$test_dir/clean.log" 2>&1
 fi
-solver_patch="$project/buildroot/k230-sdk-overlay/package/opkg/0001-internal-solver-reuse-installed-alternative.patch"
 # CI starts at opkg-extract; developers may provide already-patched sources.
 # Require either a clean application or proof this exact patch is present.
+for solver_patch in "$project"/buildroot/k230-sdk-overlay/package/opkg/*.patch; do
 if patch --batch --forward --fuzz=0 --dry-run -p1 < "$solver_patch" > "$test_dir/patch.log" 2>&1; then
     patch --batch --forward --fuzz=0 -p1 < "$solver_patch"
 else
@@ -24,6 +24,7 @@ else
         cat "$test_dir/patch.log" >&2; exit 1;
     }
 fi
+done
 # This native binary tests opkg's installed-file ownership and resolver using
 # inert local fixtures. Production signature checks stay enabled in the image.
 ./configure CC=/usr/bin/cc CXX=/usr/bin/c++ AR=/usr/bin/ar RANLIB=/usr/bin/ranlib \
