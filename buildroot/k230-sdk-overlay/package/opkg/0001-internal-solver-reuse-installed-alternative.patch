@@ -1,0 +1,61 @@
+From: TDVP Device Team <devices@example.invalid>
+Subject: [PATCH] internal solver: select one satisfier per alternative group
+
+pkg_hash_fetch_unsatisfied_dependencies correctly detects an installed
+alternative, but calculate_dependencies_for subsequently calls
+pkg_hash_fetch_satisfied_dependencies, which queues every available OR
+alternative including uninstalled packages. This installs redundant runtime
+libraries even when the firmware already owns a valid satisfier.
+
+Prefer an installed satisfier across the whole group, then choose one
+available candidate. Keep greedy dependencies on their existing path.
+
+Upstream-Status: Pending
+Signed-off-by: TDVP Device Team <devices@example.invalid>
+---
+ libopkg/solvers/internal/pkg_depends_internal.c | 25 ++++++++++++++++++++++++-
+ 1 file changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/libopkg/solvers/internal/pkg_depends_internal.c b/libopkg/solvers/internal/pkg_depends_internal.c
+--- a/libopkg/solvers/internal/pkg_depends_internal.c
++++ b/libopkg/solvers/internal/pkg_depends_internal.c
+@@ -362,6 +362,26 @@ pkg_vec_t *pkg_hash_fetch_satisfied_dependencies(pkg_t *pkg)
+         }
+ 
+         /* foreach possible satisfier, look for installed package  */
++        pkg_t *selected = NULL;
++        for (j = 0; j < compound_depend->possibility_count; j++) {
++            depend_t *depend = possible_satisfiers[j];
++            pkg_t *candidate = pkg_hash_fetch_best_installation_candidate(
++                    depend->pkg, pkg_installed_and_constraint_satisfied,
++                    depend, 1, 1);
++            if (candidate &&
++                    pkg_installed_and_constraint_satisfied(candidate, depend) &&
++                    candidate->state_want == SW_INSTALL) {
++                selected = candidate;
++                break;
++            }
++        }
++        if (selected) {
++            if (selected != pkg)
++                pkg_vec_insert(satisfiers, selected);
++            continue;
++        }
++
++        /* No installed alternative: select a single available satisfier. */
+         for (j = 0; j < compound_depend->possibility_count; j++) {
+             /* foreach provided_by, which includes the abstract_pkg itself */
+             depend_t *dependence_to_satisfy = possible_satisfiers[j];
+@@ -377,8 +397,11 @@ pkg_vec_t *pkg_hash_fetch_satisfied_dependencies(pkg_t *pkg)
+                     && satisfying_pkg != pkg
+                     && (satisfying_pkg->state_want == SW_INSTALL
+                         || satisfying_pkg->state_want == SW_UNKNOWN);
+-            if (need_to_insert)
++            if (need_to_insert && version_constraints_satisfied(
++                        dependence_to_satisfy, satisfying_pkg)) {
+                 pkg_vec_insert(satisfiers, satisfying_pkg);
++                break;
++            }
+         }
+     }
+     return satisfiers;
