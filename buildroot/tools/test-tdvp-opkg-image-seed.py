@@ -97,6 +97,72 @@ def add_local_feed(root, ipk):
 
 
 class ImageSeed(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("TDVP_TEST_OPKG"), "native opkg binary not provided")
+    def test_native_application_upgrade_transfers_ownership_and_removes_cleanly(self):
+        SEED.seed(self.root)
+        manifest = json.loads((self.root / SEED.MANIFEST.lstrip("/")).read_text())
+        expected = {name: fields["Version"] for name, fields in manifest["installed_packages"].items()}
+        base = self.root / "usr/lib/libmount.so.1.1.0"
+        original = base.read_bytes()
+        package = "tdvp-upgrade-fixture"
+        prefix = "usr/share/tdvp-upgrade-fixture"
+        old = make_ipk(self.work / "v1", package=package, prefix=prefix, payload=b"version one", version="1-1")
+        new = make_ipk(self.work / "v2", package=package, prefix=prefix, payload=b"version two", version="2-1")
+        payload = self.root / prefix / "libmount.so.1.1.0"
+        alias = self.root / prefix / "libmount.so.1"
+        result = self.run_opkg("install", str(old))
+        self.assertEqual(result.returncode, 0, result.stdout.decode())
+        self.assertEqual(payload.read_bytes(), b"version one")
+        add_local_feed(self.root, new)
+        result = self.run_opkg("upgrade", package)
+        self.assertEqual(result.returncode, 0, result.stdout.decode())
+        self.assertEqual(payload.read_bytes(), b"version two")
+        self.assertTrue(alias.is_symlink())
+        self.assertEqual(alias.read_bytes(), b"version two")
+        result = self.run_opkg("files", package)
+        self.assertEqual(result.returncode, 0, result.stdout.decode())
+        self.assertIn((prefix + "/libmount.so.1.1.0").encode(), result.stdout)
+        self.assertEqual(self.assert_held_packages(expected)[package]["Version"], "2-1")
+        result = self.run_opkg("remove", package)
+        self.assertEqual(result.returncode, 0, result.stdout.decode())
+        self.assertFalse(payload.exists())
+        self.assertFalse(alias.is_symlink())
+        self.assertEqual(base.read_bytes(), original)
+        self.assert_held_packages(expected)
+
+    @unittest.skipUnless(os.environ.get("TDVP_TEST_OPKG"), "native opkg binary not provided")
+    def test_native_online_upgrade_query_preserves_installed_file_records(self):
+        # Keep online mode (no -o), but isolate every writable database path.
+        # An offline prefix can hide the same-owner file-list use-after-free.
+        work = self.work / "online"
+        info, lists = work / "info", work / "lists"
+        info.mkdir(parents=True)
+        lists.mkdir()
+        payload = work / "payload"
+        payload.write_bytes(b"installed payload")
+        status = work / "status"
+        status.write_text("Package: fixture\nVersion: 1\nArchitecture: all\n"
+                          "Status: install ok installed\nDescription: Fixture\n\n")
+        filelist = info / "fixture.list"
+        filelist.write_text(str(payload) + "\n")
+        (lists / "test").write_text("Package: fixture\nVersion: 2\nArchitecture: all\n"
+                                    "Description: New fixture\nFilename: fixture.ipk\n\n")
+        config = work / "opkg.conf"
+        config.write_text(f"dest root /\noption info_dir {info}\n"
+                          f"option status_file {status}\noption lists_dir {lists}\n"
+                          f"option lock_file {work}/lock\narch all 1\n"
+                          f"src test {work.as_uri()}\n")
+        protected = {path: path.read_bytes() for path in (payload, status, filelist)}
+        for command, expected in (("list-installed", "fixture - 1"),
+                                  ("list-upgradable", "fixture - 1 - 2"),
+                                  ("list-upgradable", "fixture - 1 - 2")):
+            result = subprocess.run([os.environ["TDVP_TEST_OPKG"], "-f", str(config), command],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertIn(expected, result.stdout)
+            for path, contents in protected.items():
+                self.assertEqual(path.read_bytes(), contents, str(path))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="tdvp-image-seed-test-")
         self.addCleanup(self.temporary.cleanup)
