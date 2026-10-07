@@ -5,6 +5,8 @@
 *.py text eol=lf
 *.mk text eol=lf
 *.patch text eol=lf
+# Unified-diff blank context lines require their leading space.
+/buildroot/k230-sdk-overlay/package/opkg/*.patch whitespace=-blank-at-eol
 *.config text eol=lf
 *.conf text eol=lf
 *.ini text eol=lf

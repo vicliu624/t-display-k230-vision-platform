@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import posixpath
 from pathlib import Path
 import re
 import shlex
@@ -97,6 +98,7 @@ def relocate_development_files(sysroot, old_staging):
     # pkg-config applies PKG_CONFIG_SYSROOT_DIR to target-root-relative paths.
     # CMake imports resolve relative to their own file; libtool metadata keeps
     # target-root-relative paths. Never leave a build-host path in these files.
+    staging_prefix = posixpath.normpath(str(old_staging))
     for directory, _, files in os.walk(sysroot):
         for name in files:
             path = Path(directory) / name
@@ -106,7 +108,29 @@ def relocate_development_files(sysroot, old_staging):
             replacement = ""
             if path.suffix == ".cmake":
                 replacement = "${CMAKE_CURRENT_LIST_DIR}/" + os.path.relpath(sysroot, path.parent)
-            updated = content.replace(str(old_staging), replacement)
+            def relocate_path(match):
+                original = match.group(0)
+                normalized = posixpath.normpath(original)
+                if normalized == staging_prefix or normalized.startswith(staging_prefix + "/"):
+                    return replacement + normalized[len(staging_prefix):]
+                return original
+
+            # Libtool can record host/bin/../<triple>/sysroot rather than the
+            # canonical staging path. Match complete path tokens so a sibling
+            # such as sysroot-backup is never rewritten as part of this SDK.
+            updated = re.sub(r"/[^\s\x27\x22;,<>]+", relocate_path, content)
+            if path.suffix == ".la":
+                lines = []
+                for line in updated.splitlines(keepends=True):
+                    if line.startswith("dependency_libs="):
+                        value = shlex.split(line.split("=", 1)[1])
+                        dependencies = shlex.split(value[0]) if value else []
+                        dependencies = [("=" + item if item.startswith("/") else
+                                         "-L=" + item[2:] if item.startswith("-L/") else item)
+                                        for item in dependencies]
+                        line = "dependency_libs=" + shlex.quote(" ".join(dependencies)) + "\n"
+                    lines.append(line)
+                updated = "".join(lines)
             if updated != content:
                 path.write_text(updated)
 

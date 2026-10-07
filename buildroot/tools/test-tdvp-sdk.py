@@ -181,6 +181,31 @@ class SdkTests(unittest.TestCase):
         self.assertEqual((directory / "x.cmake").read_text(), "${CMAKE_CURRENT_LIST_DIR}/../../.." + "/usr/lib")
         self.assertEqual((directory / "x.so").read_text(), "/old/staging/usr/lib")
 
+    def test_development_paths_normalize_toolchain_alias_and_preserve_siblings(self):
+        sysroot = self.root / "sysroot"
+        directory = sysroot / "usr/lib"
+        directory.mkdir(parents=True)
+        staging = "/runner/host/triple/sysroot"
+        alias = "/runner/host/bin/../triple/sysroot"
+        source = ("dependency_libs='" + alias + "/usr/lib/libx.la -L" + staging +
+                  "/usr/lib'\nlibdir='" + staging + "/usr/lib'\n" +
+                  "sibling='" + staging + "-backup/usr/lib'\n")
+        metadata = directory / "x.la"
+        metadata.write_text(source)
+        EXPORT.relocate_development_files(sysroot, Path(staging))
+        self.assertEqual(metadata.read_text(),
+                         "dependency_libs='=/usr/lib/libx.la -L=/usr/lib'\n"
+                         "libdir='/usr/lib'\nsibling='" + staging + "-backup/usr/lib'\n")
+
+    def test_libtool_sdk_environment_declares_sysroot(self):
+        environment = (Path(__file__).parent / "sdk/environment-setup.sh").read_text()
+        self.assertIn('--with-sysroot=$SDKTARGETSYSROOT', environment)
+
+    def test_libtool_default_search_paths_are_target_owned(self):
+        environment = (Path(__file__).parent / "sdk/environment-setup.sh").read_text()
+        self.assertIn('export lt_cv_sys_lib_dlsearch_path_spec="/lib /usr/lib '
+                      '$SDKTARGETSYSROOT/lib $SDKTARGETSYSROOT/usr/lib"', environment)
+
     def test_elf_policy_rejects_vector_other_isa_abi_and_rpath(self):
         header = "ELF64 RISC-V double-float ABI"
         attributes = 'Tag_RISCV_arch: "rv64i2p1_m2p0_a2p1_f2p2_d2p2_c2p0_zicsr2p0_zifencei2p0"'

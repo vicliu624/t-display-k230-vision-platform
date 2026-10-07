@@ -1,6 +1,42 @@
 # Package-feed status and acceptance
 
-## Current conclusion — 2026-09-09
+## Current conclusion — 2026-09-30
+
+Maintenance-image and feed acceptance is still in progress. The signed
+216-package candidate is under isolated validation; it has not been promoted
+to the public stable channel.
+
+- The flashed maintenance image matches the inventory from
+  [CI run 36606578568](https://github.com/vicliu624/t-display-k230-vision-platform/actions/runs/36606578568).
+  Signed candidate-index verification and Audacious installation passed on the
+  device. The user confirmed that the player window is visible.
+- The image's opkg crashes during an online `list-upgradable` query. A minimal
+  fixture and AddressSanitizer identified a use-after-free during repeated
+  file-ownership scans. Commit `f146b97` preserves an existing record when its
+  owner is unchanged and adds online-query and application-upgrade regressions.
+- The patched native build passes 22 image-ownership tests and eight dependency
+  resolver tests. The online-query regression fails with the old binary.
+- A diagnostic executable built with the maintenance SDK passes the same online
+  query against the device's 162 installed packages. It runs from `/tmp`; the
+  system opkg library and package status database remain unchanged. This result
+  does not establish that the flashed image contains the fix.
+- The isolated audit of all 216 packages passed all 864 phases with the patched
+  binary: install, upgrade query, same-version upgrade and removal. Base-file
+  bytes, modes, symlinks, owner lists and protected package status stayed intact.
+  A separate fixture covers an actual version 1 to version 2 upgrade. Offline
+  transactions do not exercise target maintainer scripts or application runtime.
+
+Before promotion, build and verify the corrected image and SDK,
+then regenerate and validate the feed against their final inventory. Publish the
+paired platform baseline before switching production feed locks and signing the
+final candidate. Repeat signed device installation, upgrade/removal and base
+integrity checks against the delivered artifacts. Audio playback and reboot
+acceptance remain separate checks; a visible player window does not prove them.
+
+The sections below retain the earlier incident and repair history. Their dated
+results do not describe completion of the current candidate.
+
+## Historical conclusion — 2026-09-09
 
 End-to-end feed acceptance failed. Pause package installation and upgrades on
 delivery cards, including NetSurf. Complete image-side package safety, CI and
