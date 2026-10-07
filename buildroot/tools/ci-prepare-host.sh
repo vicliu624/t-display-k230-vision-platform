@@ -15,8 +15,15 @@ TOOLCHAIN_ARCHIVE_PATH="${CACHE_ROOT}/toolchain/${TOOLCHAIN_ARCHIVE}"
 PRIMARY_URI="https://ai.b-bug.org/k230/downloads/dl/gcc/${TOOLCHAIN_ARCHIVE}"
 FALLBACK_URI="https://download.kendryte.com/k230/downloads/dl/gcc/${TOOLCHAIN_ARCHIVE}"
 
-sudo apt-get update
-sudo apt-get install -y \
+# GitHub's mirror list can select an unreachable Azure HTTP endpoint. Keep
+# the other runner mirrors, but use the official HTTPS archive for that entry.
+if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+    sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt
+fi
+apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30
+    -o Acquire::https::Timeout=30 -o APT::Update::Error-Mode=any)
+sudo timeout --kill-after=30s 5m apt-get "${apt_options[@]}" update
+sudo timeout --kill-after=30s 10m apt-get "${apt_options[@]}" install -y \
     bc binutils bison build-essential bzip2 cpio curl diffutils e2fsprogs file flex gawk git \
 	libncurses-dev libssl-dev make parted patch perl python3-pcpp python3-pycryptodome rsync scons u-boot-tools \
     unzip wget xz-utils libarchive-dev pkg-config libmenu-cache-bin
@@ -28,8 +35,10 @@ mkdir -p "${CACHE_ROOT}/toolchain"
 if [ ! -x "${TOOLCHAIN_DIR}/bin/riscv64-unknown-linux-gnu-gcc" ]; then
     rm -rf "${TOOLCHAIN_DIR}"
     rm -f "${TOOLCHAIN_ARCHIVE_PATH}"
-    if ! curl --fail --location --retry 3 --output "${TOOLCHAIN_ARCHIVE_PATH}" "${PRIMARY_URI}"; then
-        curl --fail --location --retry 3 --output "${TOOLCHAIN_ARCHIVE_PATH}" "${FALLBACK_URI}"
+    download_options=(--fail --location --connect-timeout 30 --max-time 600
+        --speed-limit 1024 --speed-time 60 --retry 2 --retry-max-time 600)
+    if ! curl "${download_options[@]}" --output "${TOOLCHAIN_ARCHIVE_PATH}" "${PRIMARY_URI}"; then
+        curl "${download_options[@]}" --output "${TOOLCHAIN_ARCHIVE_PATH}" "${FALLBACK_URI}"
     fi
     actual_md5="$(md5sum "${TOOLCHAIN_ARCHIVE_PATH}" | awk '{print $1}')"
     if [ "${actual_md5}" != "${TOOLCHAIN_MD5}" ]; then

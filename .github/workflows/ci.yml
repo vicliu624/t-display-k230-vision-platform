@@ -48,6 +48,7 @@ jobs:
             tdvp-k230-sdk-${{ runner.os }}-
 
       - name: Install reproducible build host
+        timeout-minutes: 40
         run: |
           chmod +x buildroot/tools/*.sh
           bash buildroot/tools/ci-prepare-host.sh
