@@ -257,6 +257,9 @@ jobs:
 
           Final-image device boot acceptance, permanent system opkg entry-point acceptance, and paired feed signing/promotion remain pending. This release does not promote the stable package feed. Keep the r11 image and SDK for rollback.
           EOF
-          gh release create "$RELEASE_TAG" --target "$source_commit" --title "r12-rc1: opkg maintenance and paired package SDK" --notes-file notes.md --prerelease --latest=false --draft
+          # Create the draft with a maintainer identity before dispatch. The
+          # integration token cannot create tags at commits changing workflows.
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease --jq 'select(.isDraft and .isPrerelease)' | grep -q .
+          [[ "$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')" == "$source_commit" ]]
           gh release upload "$RELEASE_TAG" bundle/*
           gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
