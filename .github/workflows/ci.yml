@@ -6,6 +6,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      promote_run_id:
+        description: Successful CI run to publish as r12-rc1 (leave empty to build)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -16,6 +21,7 @@ concurrency:
 
 jobs:
   image:
+    if: ${{ inputs.promote_run_id == '' }}
     name: Build K230 SD image
     runs-on: ubuntu-24.04
     timeout-minutes: 240
@@ -48,6 +54,7 @@ jobs:
             tdvp-k230-sdk-${{ runner.os }}-
 
       - name: Install reproducible build host
+        timeout-minutes: 40
         run: |
           chmod +x buildroot/tools/*.sh
           bash buildroot/tools/ci-prepare-host.sh
@@ -88,6 +95,8 @@ jobs:
           bash buildroot/tools/test-tdvp-image-source-contract.sh
           python3 buildroot/tools/test-tdvp-opkg-image-seed.py
           python3 buildroot/tools/test-tdvp-sdk.py
+          python3 buildroot/tools/test-tdvp-sdk-libtool.py
+          python3 buildroot/tools/test-tdvp-audio-codec-profile.py
           sudo python3 buildroot/tools/test-tdvp-release-permissions.py
           bash buildroot/tools/test-verify-sdcard-image-volumepulse-guard.sh
           bash buildroot/tools/test-tdvp-display-smoke-cleanup.sh
@@ -185,3 +194,74 @@ jobs:
         with:
           generate_release_notes: true
           files: output/${{ env.TDVP_K230_RELEASE_NAME }}/*
+
+  promote:
+    name: Publish verified r12 candidate without rebuilding
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.promote_run_id != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_RUN: ${{ inputs.promote_run_id }}
+      RELEASE_TAG: v2026.10.08-r12-rc1
+    steps:
+      - name: Download and verify the accepted candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" == 37614242646 ]]
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" > run.json
+          jq -e '.conclusion == "success" and .status == "completed" and .head_sha == "eae0464ed431cefe57a29e88717e837d2a1ff611"' run.json
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/artifacts" > artifacts.json
+          artifact=tdvp-k230-labwc-desktop-d6710d2955e15e050c162383cabb240494542464
+          jq -e --arg name "$artifact" '[.artifacts[] | select(.name == $name and .expired == false)] | length == 1' artifacts.json
+          gh run download "$SOURCE_RUN" --name "$artifact" --dir bundle
+          cd bundle
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          root = Path.cwd()
+          entries = Path('SHA256SUMS').read_text().splitlines()
+          assert len(entries) == 13, 'unexpected bundle inventory'
+          names = set()
+          for entry in entries:
+              digest, name = entry.split('  ', 1)
+              path = Path(name)
+              assert path.name == name and not path.is_symlink() and path.is_file(), name
+              assert name not in names, name
+              names.add(name)
+              with path.open('rb') as stream:
+                  actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+              assert actual == digest, f'checksum mismatch: {name}'
+          assert {p.name for p in root.iterdir()} == names | {'SHA256SUMS'}, 'untracked bundle files'
+          assert len([n for n in names if n.endswith('.img.gz')]) == 1
+          assert len([n for n in names if n.endswith('-cpu0-sdk.tar.gz')]) == 1
+          print('Verified all 13 original bundle files')
+          PY
+      - name: Publish separate release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_commit=d6710d2955e15e050c162383cabb240494542464
+          gh api "repos/$GH_REPO/commits/$source_commit" --jq '.parents[].sha' | grep -Fx eae0464ed431cefe57a29e88717e837d2a1ff611
+          cat > notes.md <<'EOF'
+          K230 maintenance candidate for device acceptance. This pre-release keeps r11 as the stable Latest release.
+
+          Includes opkg ownership lifetime fixes, installed OR-dependency reuse, held version constraints, Essential+hold base file ownership protection, and the paired relocatable CPU0 package SDK.
+
+          Download the `.img.gz` asset to flash an SD card. Download the `-cpu0-sdk.tar.gz` asset only for development. Assets retain their original CI names and bytes; verify them using SHA256SUMS. The SDK and image must be used as a pair.
+
+          Provenance: successful CI run https://github.com/vicliu624/t-display-k230-vision-platform/actions/runs/37614242646, PR head eae0464ed431cefe57a29e88717e837d2a1ff611, built PR merge commit d6710d2955e15e050c162383cabb240494542464. This tag points to the actual built merge commit. All 13 original bundle checksums are verified before publication. The original CI passed the full image build and isolated SDK relocation checks; local validation passed 35 native opkg and 25 SDK regressions.
+
+          Final-image device boot acceptance, permanent system opkg entry-point acceptance, and paired feed signing/promotion remain pending. This release does not promote the stable package feed. Keep the r11 image and SDK for rollback.
+          EOF
+          # Create the draft with a maintainer identity before dispatch. The
+          # integration token cannot create tags at commits changing workflows.
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease --jq 'select(.isDraft and .isPrerelease)' | grep -q .
+          [[ "$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')" == "$source_commit" ]]
+          gh release upload "$RELEASE_TAG" bundle/*
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false

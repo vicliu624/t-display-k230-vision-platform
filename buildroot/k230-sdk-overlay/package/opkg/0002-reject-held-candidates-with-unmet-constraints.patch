@@ -1,0 +1,24 @@
+From: TDVP Device Team <devices@example.invalid>
+Subject: [PATCH] pkg_hash: reject held candidates with unmet constraints
+
+Keep held packages protected from replacement, but do not report an
+incompatible held version as satisfying a dependency. The caller can try
+another OR alternative or report an unsatisfied requirement. Selecting a
+different version of this held package would bypass the hold protection.
+
+--- a/libopkg/pkg_hash.c
++++ b/libopkg/pkg_hash.c
+@@ -567,6 +567,13 @@
+     abstract_pkg_vec_free(providers);
+ 
+     if (held_pkg) {
++        if (constraint_fcn && !constraint_fcn(held_pkg, cdata)) {
++            opkg_msg(INFO,
++                     "Held package %s %s does not satisfy the requested constraint.\n",
++                     held_pkg->name, held_pkg->version);
++            return NULL;
++        }
++
+         if (prefer_pkg) {
+             opkg_msg(NOTICE,
+                      "Ignoring preferred package %s %s due to held package %s %s.\n",

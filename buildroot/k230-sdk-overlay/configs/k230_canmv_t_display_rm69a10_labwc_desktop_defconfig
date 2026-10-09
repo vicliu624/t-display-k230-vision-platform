@@ -208,6 +208,12 @@ BR2_PACKAGE_LIBSECRET=y
 BR2_PACKAGE_LIBNMA=y
 BR2_PACKAGE_PULSEAUDIO=y
 BR2_PACKAGE_PULSEAUDIO_DAEMON=y
+# Buildroot enables libsndfile external codecs when this complete trio is
+# selected. Export their development files in the paired package SDK so
+# SoundFile and future audio applications share the platform providers.
+BR2_PACKAGE_FLAC=y
+BR2_PACKAGE_LIBVORBIS=y
+BR2_PACKAGE_OPUS=y
 # Standard desktop event sounds: wfplug-volumepulse uses libcanberra's
 # PulseAudio backend and the Freedesktop sound theme, not a bespoke player.
 BR2_PACKAGE_LIBCANBERRA=y

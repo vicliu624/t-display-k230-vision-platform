@@ -1,0 +1,32 @@
+From: TDVP maintainers
+Subject: [PATCH] pkg_hash: preserve Essential held base file ownership
+
+Historical runtime packages may retain file lists overlapping the held image
+base. Initializing the ownership hash must not transfer those base files to
+an unprotected package: later upgrade or removal would unlink the base files
+and rewrite their Essential owner's list.
+
+Give existing Essential+hold ownership priority for regular files and
+symlinks to files. An Essential+hold owner loaded later can still reclaim a
+file from an unprotected package. Shared directory behavior and ordinary
+ownership transfer are unchanged. Normal install conflict checks continue
+to reject new payloads attempting to overwrite protected files.
+
+Upstream-Status: Pending
+--- a/libopkg/pkg_hash.c
++++ b/libopkg/pkg_hash.c
+@@ -921,6 +921,14 @@
+     if (old_owning_pkg == owning_pkg)
+         return;
+ 
++    /* Historical package lists must not displace protected base files. */
++    if (old_owning_pkg && old_owning_pkg->essential
++        && (old_owning_pkg->state_flag & SF_HOLD)
++        && !(owning_pkg->essential && (owning_pkg->state_flag & SF_HOLD))
++        && !file_is_dir(long_file_name)
++        && !file_is_symlink_to_dir(long_file_name))
++        return;
++
+     hash_table_insert(&opkg_config->file_hash, file_name, owning_pkg);
+ 
+     /*

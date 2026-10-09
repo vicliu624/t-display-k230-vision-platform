@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import posixpath
 from pathlib import Path
 import re
 import shlex
@@ -93,10 +94,16 @@ def relocate_links(tree, old_root, sdk_root):
                 raise ValueError("SDK symlink escapes archive: " + str(link))
 
 
-def relocate_development_files(sysroot, old_staging):
+def relocate_development_files(sysroot, old_staging, old_build=None, old_toolchain=None):
     # pkg-config applies PKG_CONFIG_SYSROOT_DIR to target-root-relative paths.
     # CMake imports resolve relative to their own file; libtool metadata keeps
     # target-root-relative paths. Never leave a build-host path in these files.
+    staging_prefix = posixpath.normpath(str(old_staging))
+    archive_paths = {}
+    for archive in sysroot.rglob("*.la"):
+        if archive.is_file() and not archive.is_symlink():
+            archive_paths.setdefault(archive.name, []).append(archive)
+    source_prefixes = [posixpath.normpath(str(root)) for root in (old_build, old_toolchain) if root is not None]
     for directory, _, files in os.walk(sysroot):
         for name in files:
             path = Path(directory) / name
@@ -106,7 +113,47 @@ def relocate_development_files(sysroot, old_staging):
             replacement = ""
             if path.suffix == ".cmake":
                 replacement = "${CMAKE_CURRENT_LIST_DIR}/" + os.path.relpath(sysroot, path.parent)
-            updated = content.replace(str(old_staging), replacement)
+            def relocate_path(match):
+                original = match.group(0)
+                normalized = posixpath.normpath(original)
+                if normalized == staging_prefix or normalized.startswith(staging_prefix + "/"):
+                    return replacement + normalized[len(staging_prefix):]
+                return original
+
+            # Libtool can record host/bin/../<triple>/sysroot rather than the
+            # canonical staging path. Match complete path tokens so a sibling
+            # such as sysroot-backup is never rewritten as part of this SDK.
+            updated = re.sub(r"/[^\s\x27\x22;,<>]+", relocate_path, content)
+            if path.suffix == ".la":
+                lines = []
+                for line in updated.splitlines(keepends=True):
+                    if line.startswith("dependency_libs="):
+                        value = shlex.split(line.split("=", 1)[1])
+                        dependencies = shlex.split(value[0]) if value else []
+                        relocated = []
+                        for dependency in dependencies:
+                            raw = dependency[1:] if dependency.startswith("=/") else dependency
+                            normalized = posixpath.normpath(raw)
+                            from_source = any(normalized.startswith(prefix + "/") for prefix in source_prefixes)
+                            abi_alias = normalized.startswith(("/lib64/lp64d/", "/usr/lib64/lp64d/"))
+                            # GCC runtime metadata also records the vendor's
+                            # own build directory. Only its selected lp64d
+                            # C++ ABI archive may be rebound this way.
+                            abi_alias = abi_alias or ("/lib64/lp64d/" in normalized
+                                                      and posixpath.basename(normalized) == "libstdc++.la")
+                            if raw.startswith("/") and raw.endswith(".la") and (from_source or abi_alias):
+                                candidates = archive_paths.get(posixpath.basename(normalized), [])
+                                if len(candidates) != 1:
+                                    raise ValueError("SDK libtool dependency lacks one installed archive: " + raw)
+                                dependency = "=" + "/" + candidates[0].relative_to(sysroot).as_posix()
+                            relocated.append(dependency)
+                        dependencies = relocated
+                        dependencies = [("=" + item if item.startswith("/") else
+                                         "-L=" + item[2:] if item.startswith("-L/") else item)
+                                        for item in dependencies]
+                        line = "dependency_libs=" + shlex.quote(" ".join(dependencies)) + "\n"
+                    lines.append(line)
+                updated = "".join(lines)
             if updated != content:
                 path.write_text(updated)
 
@@ -283,7 +330,7 @@ def export(worktree, bundle, release):
         copy_toolchain(toolchain, root / "toolchain")
         relocate_links(root / "sysroot", staging, root)
         relocate_links(root / "toolchain", toolchain, root)
-        relocate_development_files(root / "sysroot", staging)
+        relocate_development_files(root / "sysroot", staging, output / "build", toolchain)
         libraries = image_libraries(root / "sysroot", image, inventory)
         build_entry_points(root, worktree / "output/buildroot-2025.02.1", config)
         shutil.copy2(output / "host/bin/pkgconf", root / "bin/pkgconf")

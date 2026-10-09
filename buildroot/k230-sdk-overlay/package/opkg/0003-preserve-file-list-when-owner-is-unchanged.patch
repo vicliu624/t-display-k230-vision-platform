@@ -1,0 +1,25 @@
+From: TDVP maintainers
+Subject: [PATCH] pkg_hash: preserve file records when owner is unchanged
+
+list-upgradable initializes the file ownership hash twice. Reassigning a
+file to the same package must not remove its installed file record: the
+caller still uses that record while walking the installed file list.
+Otherwise pkg_info_preinstall_check accesses freed memory on the second
+pass. Offline-root tests can mask this because the stripped lookup path
+does not match the absolute path stored in the file list.
+
+Keep the existing ownership-transfer behavior for different packages.
+
+Upstream-Status: Pending
+--- a/libopkg/pkg_hash.c
++++ b/libopkg/pkg_hash.c
+@@ -918,6 +918,9 @@ void file_hash_set_file_owner(const char *file_name, pkg_t * owning_pkg)
+     file_name = strip_offline_root(file_name);
+ 
+     old_owning_pkg = hash_table_get(&opkg_config->file_hash, file_name);
++    if (old_owning_pkg == owning_pkg)
++        return;
++
+     hash_table_insert(&opkg_config->file_hash, file_name, owning_pkg);
+ 
+     /*
