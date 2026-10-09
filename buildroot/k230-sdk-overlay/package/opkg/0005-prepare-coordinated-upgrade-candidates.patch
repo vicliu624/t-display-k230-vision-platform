@@ -1,0 +1,125 @@
+Subject: [PATCH] opkg: prepare the complete upgrade batch before candidate selection
+
+Keep retained consumers and held packages as constraints, while allowing
+explicitly requested consumers and providers to move together. Route normal
+whole-system and multi-package upgrades through the same preparation path.
+Save states before marking participants and deduplicate repeated requests.
+
+This does not disable signature checks or force dependency resolution.
+
+--- a/libopkg/solvers/internal/opkg_action.c
++++ b/libopkg/solvers/internal/opkg_action.c
+@@ -188,9 +188,10 @@
+     int err = 0;
+     pkg_vec_t *pkgs_to_upgrade = NULL;
+     int r;
++    int combine = opkg_config->combine || num_pkgs != 1;
+ 
+     if (num_pkgs) {
+-        if (opkg_config->combine)
++        if (combine)
+             pkgs_to_upgrade = pkg_vec_alloc();
+ 
+         for (i = 0; i < num_pkgs; i++) {
+@@ -209,7 +210,7 @@
+                     continue;
+                 }
+             }
+-            if (opkg_config->combine) {
++            if (combine) {
+                 pkg_vec_insert(pkgs_to_upgrade, pkg);
+             } else {
+                 r = opkg_upgrade_pkg(pkg);
+@@ -218,7 +219,7 @@
+             }
+         }
+ 
+-        if (opkg_config->combine) {
++        if (combine) {
+             r = opkg_upgrade_multiple_pkgs(pkgs_to_upgrade);
+             if (r != 0)
+                 err = -1;
+@@ -230,7 +231,7 @@
+ 
+         pkg_hash_fetch_all_installed(installed, INSTALLED);
+ 
+-        if (opkg_config->combine) {
++        if (combine) {
+             err = opkg_upgrade_multiple_pkgs(installed);
+         } else {
+             for (j = 0; j < installed->len; j++) {
+--- a/libopkg/solvers/internal/opkg_upgrade_internal.c
++++ b/libopkg/solvers/internal/opkg_upgrade_internal.c
+@@ -26,6 +26,7 @@
+ #include "opkg_install_internal.h"
+ #include "opkg_solver_internal.h"
+ #include "opkg_message.h"
++#include "pkg_depends.h"
+ #include "xfuncs.h"
+ 
+ static int opkg_prepare_upgrade_pkg(pkg_t * old, pkg_t ** pkg)
+@@ -130,8 +131,25 @@
+     pkg_t *pkg, *new;
+     pkg_vec_t  *upgrade_pkgs, *pkgs_to_install, *replacees, *orphans;
+     int errors = 0;
++    int *old_wants;
+ 
+     upgrade_pkgs = pkg_vec_alloc();
++    old_wants = xcalloc(pkgs_to_upgrade->len ? pkgs_to_upgrade->len : 1,
++                        sizeof(*old_wants));
++
++    /* Candidate selection must see the whole explicitly requested batch.
++     * Otherwise an old consumer encountered later rejects its new provider.
++     * Held/replaced packages remain installed constraints throughout.
++     */
++    for (i = 0; i < pkgs_to_upgrade->len; i++) {
++        pkg = pkgs_to_upgrade->pkgs[i];
++        old_wants[i] = pkg->state_want;
++    }
++    for (i = 0; i < pkgs_to_upgrade->len; i++) {
++        pkg = pkgs_to_upgrade->pkgs[i];
++        if (!(pkg->state_flag & (SF_HOLD | SF_REPLACE)))
++            pkg->state_want = SW_DEINSTALL;
++    }
+ 
+     /* Prepare all packages. */
+     for (i = 0; i < pkgs_to_upgrade->len; i++) {
+@@ -140,11 +158,36 @@
+         r = opkg_prepare_upgrade_pkg(pkg, &new);
+         if (r < 0)
+             errors++;
+-        if (r <= 0)
++        if (r <= 0) {
++            pkg->state_want = old_wants[i];
+             continue;
++        }
++
++        if (!pkg_vec_contains(upgrade_pkgs, new))
++            pkg_vec_insert(upgrade_pkgs, new);
++    }
+ 
+-        pkg_vec_insert(upgrade_pkgs, new);
++    /* Restore unchanged old consumers before checking the final selection.
++     * A batch must never bypass their reverse dependency constraints.
++     */
++    for (i = 0; i < upgrade_pkgs->len; i++) {
++        new = upgrade_pkgs->pkgs[i];
++        if (pkg_breaks_reverse_dep(new) && !opkg_config->force_depends) {
++            opkg_msg(ERROR, "Combined upgrade would break a retained dependency for %s.\n",
++                     new->name);
++            errors++;
++        }
++    }
++    if (errors) {
++        for (i = 0; i < pkgs_to_upgrade->len; i++)
++            pkgs_to_upgrade->pkgs[i]->state_want = old_wants[i];
++        for (i = 0; i < upgrade_pkgs->len; i++)
++            upgrade_pkgs->pkgs[i]->state_want = SW_UNKNOWN;
++        free(old_wants);
++        pkg_vec_free(upgrade_pkgs);
++        return -1;
+     }
++    free(old_wants);
+ 
+     for (i = 0; i < upgrade_pkgs->len; i++) {
+         pkgs_to_install = pkg_vec_alloc();

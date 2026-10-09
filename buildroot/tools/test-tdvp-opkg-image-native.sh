@@ -42,3 +42,4 @@ make -j4 > "$test_dir/make.log" 2>&1 || { cat "$test_dir/make.log" >&2; exit 1; 
 TDVP_TEST_OPKG="$test_dir/opkg/src/opkg" python3 "$project/buildroot/tools/test-tdvp-opkg-image-seed.py"
 python3 "$project/buildroot/tools/test-opkg-alternative-solver.py" "$test_dir/opkg/src/opkg"
 python3 "$project/buildroot/tools/test-opkg-held-file-owner.py" "$test_dir/opkg/src/opkg"
+python3 "$project/buildroot/tools/test-opkg-coordinated-upgrade.py" "$test_dir/opkg/src/opkg"

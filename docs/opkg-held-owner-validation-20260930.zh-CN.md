@@ -59,3 +59,38 @@ python3 buildroot/tools/test-opkg-held-file-owner.py /path/to/native/opkg
 
 本地检查通过后，仍需完成新的目标 opkg 构建、最终镜像与 SDK 身份绑定、
 候选源签名和设备正常入口验收，才能发布配对产物。
+
+## 协调升级补充验证（2026-10-10）
+
+以已发布 `v2026.10.09-r12-rc2`（0701ec6）为基线，增加
+`0005-prepare-coordinated-upgrade-candidates.patch`。四个已有保护
+补丁保持不变；安装和卸载入口不改动。普通全系统升级和显式
+多包升级进入批量准备，单包请求保留原来的约束路径。
+
+批量准备先保存所有旧状态，再标记非 held/replaced 参与者。
+恢复不升级的消费者约束后，对新候选重新检查反向依赖；出现
+准备错误时恢复旧状态。新候选去重，避免重复参数污染快照。
+这项修复不提供所有失败场景下的原子回滚承诺。
+
+新增 `test-opkg-coordinated-upgrade.py`，通过当前 native 入口运行：
+普通升级、提供者优先的多包、重复参数、未请求消费者、held
+消费者、缺依赖拒绝，以及实际升级/配置。所有 IPK 都是本地
+惰性 fixture，不包含程序或维护脚本。宿主构建关闭 SHA256/GPG，
+fixture 使用 MD5；正式目标验证仍开启 SHA256 与签名。
+
+完整原生入口通过 42 项测试（seed 22、替代依赖 8、所有权 5、
+协调升级 7）。同一新增测试对旧原生工具失败三项，证明能捕获
+原始回归。日志位于构建机 `opkg-formal-regression.ljN0yZ`。
+首次本地环境缺 `/usr/sbin` 且 umask 为 0002，按 CI 的路径及
+umask 022 重跑；随后补 fixture 校验和，明确离线 configure，
+并以“不选新包、状态未变”判断 held 保护，完整入口最终通过。
+
+独立 RISC-V 实验工具也已在发布 SDK 上构建并通过 CPU0 校验。
+在隔离根、签名开启的 346 包连续候选历史中，普通 `opkg upgrade`
+实际升级与配置通过，507 个 installed 版本一致；单提供者及
+held 负例保留约束，libc、旧 opkg、Labwc 和镜像身份文件未变。
+这组目标日志位于 `opkg-combined-upgrade-experiment.PPZJeo`。
+
+新增补丁位于 overlay 全树输入摘要覆盖范围，已有增量清理
+列表含 opkg。本地验证未触发完整镜像构建、未替换远端工具、
+未修改 stable，也未合并 GitHub main 或 PR。
