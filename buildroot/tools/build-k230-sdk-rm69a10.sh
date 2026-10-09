@@ -680,6 +680,9 @@ if [ "$product_inputs_changed" = "1" ] && [ "$image_rebuild_mode" != "1" ]; then
 		libmenu-cache
 	libfm
 	pcmanfm
+		# libsndfile configure records external-codec availability. Defconfig
+		# changes must invalidate it even when an old package stamp exists.
+		libsndfile
 		libcanberra
 		sound-theme-freedesktop
 		alsa-utils

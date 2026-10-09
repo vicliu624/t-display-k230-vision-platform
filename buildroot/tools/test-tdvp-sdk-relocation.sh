@@ -26,6 +26,7 @@ for location in /sdk /another/location/with-a-longer-name/tdvp-sdk; do
         --mount "type=bind,src=$sdk,dst=$location,readonly" \
         --mount "type=bind,src=$bundle,dst=/release,readonly" \
         --mount "type=bind,src=$script_dir/test-tdvp-sdk-builds.py,dst=/sdk-consumer-checks.py,readonly" \
+        --mount "type=bind,src=$script_dir/sdk,dst=/sdk-audio-checks,readonly" \
         "$test_image" env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/tmp LC_ALL=C SDK_UNDER_TEST="$location" \
         bash -c '
             set -euo pipefail
@@ -35,6 +36,7 @@ for location in /sdk /another/location/with-a-longer-name/tdvp-sdk; do
             test "$($CC -print-sysroot)" = "$SDK_UNDER_TEST/sysroot"
             python3 "$SDK_UNDER_TEST/verify-sdk.py" "$SDK_UNDER_TEST" --bundle /release --smoke
             python3 /sdk-consumer-checks.py "$SDK_UNDER_TEST"
+            python3 /sdk-audio-checks/verify-sdk-audio.py "$SDK_UNDER_TEST" --run
         '
 done
 printf '%s\n' 'TDVP SDK relocation: PASS two paths, ordinary UID, read-only SDK, no network or original toolchain/build tree'
